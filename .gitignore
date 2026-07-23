@@ -31,3 +31,11 @@ Thumbs.db
 # Temporary fix scripts
 _fix_bug.py
 _tmp_*.py
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Sync test artifact
+_sync_test.txt
