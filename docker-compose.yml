@@ -1,0 +1,44 @@
+# CyberOrion arena targets.
+# Self-contained: 3 vulnerable targets on an isolated bridge network.
+# Start:  docker compose up -d
+# Stop:   docker compose down
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    container_name: cyberorion_dvwa
+    ports:
+      - "28080:80"
+    environment:
+      - SECURITY_LEVEL=low
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.10
+    restart: unless-stopped
+
+  log4j:
+    image: vulhub/solr:8.11.0
+    container_name: cyberorion_log4j
+    ports:
+      - "8983:8983"
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.20
+    restart: unless-stopped
+
+  weak_ssh:
+    build: ./weak_ssh
+    container_name: cyberorion_weak_ssh
+    ports:
+      - "22222:22"
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.12
+    restart: unless-stopped
+
+networks:
+  cyberorion_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
