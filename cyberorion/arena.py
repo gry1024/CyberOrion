@@ -60,7 +60,6 @@ class Arena:
         viz.info(f"running {self.total_rounds} round(s) ...\n")
 
         prev_red_summary = ""
-        prev_blue_summary = ""
         final_ledger: dict = {}
 
         for r in range(1, self.total_rounds + 1):
@@ -69,7 +68,7 @@ class Arena:
 
             red_out, red_tools, red_trace = self._run_agent(
                 red,
-                build_red_turn_prompt(r, prev_red_summary, prev_blue_summary),
+                build_red_turn_prompt(r, prev_red_summary),
                 side="RED",
                 max_turns=10,
                 timeout=240,
@@ -96,7 +95,6 @@ class Arena:
             blue_short = (blue_out or "").strip()[:600] if blue_out else ""
             self.logger.log_round_end(r, red_short, blue_short)
             prev_red_summary = red_short
-            prev_blue_summary = blue_short
             final_ledger = ledger_after
 
         viz.info("saving transcript ...")

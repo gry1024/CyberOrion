@@ -15,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.rule import Rule
 from rich.markdown import Markdown
+from rich.markup import escape as _rich_escape
 
 console = Console(record=True, highlight=False)
 
@@ -107,15 +108,15 @@ def _print_trace(trace_items, colour, side):
             if len(cmd) > 200:
                 cmd = cmd[:200] + "..."
             console.print(
-                f"  [{colour}]├─ TOOL:[/{colour}] [bold]{tool}[/bold]"
-                f"\n  [{colour}]│  CMD:[/{colour}] [dim]{cmd}[/dim]"
+                f"  [{colour}]├─ TOOL:[/{colour}] [bold]{_rich_escape(tool)}[/bold]"
+                f"\n  [{colour}]│  CMD:[/{colour}] [dim]{_rich_escape(cmd)}[/dim]"
             )
         elif itype == "tool_output":
             out = item.get("output", "")
             if len(out) > 500:
                 out = out[:500] + f"... (+{len(out)} more chars)"
             console.print(
-                f"  [{colour}]│  OUT:[/{colour}] [dim]{out}[/dim]"
+                f"  [{colour}]│  OUT:[/{colour}] [dim]{_rich_escape(out)}[/dim]"
             )
     console.print()
 

@@ -3,7 +3,7 @@
 Produces clear, step-by-step logs that show the full event flow:
   thinking -> tool call -> tool output -> next thinking -> ...
 
-Summary includes per-round Chinese analysis.
+Summary uses Chinese narrative analysis with evidence.
 """
 
 from __future__ import annotations
@@ -69,16 +69,6 @@ def _truncate(text: str, limit: int = 800) -> str:
     return text[:limit] + f"... <truncated, {len(text)} total>"
 
 
-def _md_cell(text, limit: int = 150) -> str:
-    """Escape text for safe use in a markdown table cell."""
-    if not text:
-        return ""
-    s = str(text)
-    s = s.replace("|", "\\|").replace("\n", " ").replace("\r", "")
-    if len(s) > limit:
-        s = s[:limit] + "..."
-    return s
-
 def _detect_attack_type(red_tools):
     """Detect what kind of attack the red team attempted based on tool args/results."""
     attacks = []
@@ -89,26 +79,29 @@ def _detect_attack_type(red_tools):
         else:
             cmd = str(args).lower()
         if "ssh" in cmd and ("cat" in cmd or "flag" in cmd):
-            attacks.append("SSH read flag")
+            attacks.append("SSH 读取 flag")
         elif "hydra" in cmd:
-            attacks.append("SSH brute force")
+            attacks.append("SSH 暴力破解")
         elif "sqli" in cmd or "union" in cmd or "' or " in cmd:
-            attacks.append("DVWA SQLi")
+            attacks.append("DVWA SQL 注入")
         elif "exec" in cmd or ";id" in cmd or "&&" in cmd:
-            attacks.append("DVWA cmd injection")
+            attacks.append("DVWA 命令注入")
         elif "jndi" in cmd or "${jndi:" in cmd:
-            attacks.append("Log4j JNDI injection")
+            attacks.append("Log4j JNDI 注入")
         elif "nmap" in cmd:
-            attacks.append("port scan")
+            attacks.append("端口扫描")
         elif "login" in cmd or "phpsessid" in cmd:
-            attacks.append("DVWA login")
+            attacks.append("DVWA 登录")
+        elif "curl" in cmd and "shell" in cmd:
+            attacks.append("Webshell 上传")
         else:
-            attacks.append("other")
+            attacks.append("其他操作")
     return attacks
 
 
 def _detect_red_success(red_tools):
-    """Determine if red team achieved a verifiable result. Returns (success, type, evidence)."""
+    """Determine if red team achieved a verifiable result.
+    Returns (success, type_zh, evidence)."""
     for tc in red_tools:
         r = str(tc.get("result", "") or "")
         rl = r.lower()
@@ -116,28 +109,56 @@ def _detect_red_success(red_tools):
             for line in r.splitlines():
                 ll = line.lower()
                 if "flag" in ll and ("{" in ll or ":" in ll or "=" in ll):
-                    return True, "flag read", line.strip()[:200]
+                    return True, "成功读取 flag", line.strip()[:200]
         if "uid=" in rl and "permission denied" not in rl:
             for line in r.splitlines():
                 if "uid=" in line.lower():
-                    return True, "RCE", line.strip()[:200]
+                    return True, "RCE 命令执行成功", line.strip()[:200]
         if "first name" in rl and "surname" in rl:
             for line in r.splitlines():
                 if "first name" in line.lower() or "surname" in line.lower():
-                    return True, "SQLi data leak", line.strip()[:200]
+                    return True, "SQL 注入数据泄露", line.strip()[:200]
         if "last login" in rl:
-            return True, "SSH login", "last login field present"
+            return True, "SSH 登录成功", "返回中包含 last login 字段"
         if "${jndi:" in rl and ("ldap" in rl or "rmi" in rl):
-            return True, "Log4j JNDI", "JNDI payload processed by Solr"
+            return True, "Log4j JNDI 注入", "Solr 处理了 JNDI 载荷"
     return False, "", ""
+
+
+def _detect_red_failure_reason(red_tools):
+    """Detect why red team failed. Returns Chinese reason."""
+    reasons = []
+    for tc in red_tools:
+        r = str(tc.get("result", "") or "").lower()
+        args = tc.get("args", {})
+        if isinstance(args, dict):
+            cmd = str(args.get("command", "")).lower()
+        else:
+            cmd = str(args).lower()
+        if "permission denied" in r or "publickey,keyboard-interactive" in r:
+            reasons.append("SSH 密码认证已被禁用（Permission denied）")
+        elif "connection refused" in r:
+            reasons.append("连接被拒绝")
+        elif "timeout" in r or "timed out" in r:
+            reasons.append("连接超时")
+        elif "csrf" in r or "token" in r and "missing" in r:
+            reasons.append("CSRF token 验证失败")
+        elif "http 403" in r or "403 forbidden" in r:
+            reasons.append("HTTP 403 禁止访问")
+        elif "sql syntax" in r or "error in your sql" in r:
+            reasons.append("SQL 注入载荷被拦截/过滤")
+        elif "missing" in r and "parameter" in r:
+            reasons.append("参数缺失")
+        elif cmd and not r.strip():
+            reasons.append("命令无输出（可能被静默拦截）")
+    return list(dict.fromkeys(reasons))  # dedupe preserving order
+
 
 def _normalize_text(s):
     """Normalize text for keyword matching: lowercase + convert separators to spaces."""
     s = s.lower()
-    # Convert underscores, hyphens, dots to spaces so "command_injection" -> "command injection"
     for sep in ("_", "-", "."):
         s = s.replace(sep, " ")
-    # Collapse multiple spaces
     while "  " in s:
         s = s.replace("  ", " ")
     return s
@@ -146,32 +167,22 @@ def _normalize_text(s):
 def _detect_blue_detection(blue_tools):
     """Determine if blue team independently detected attacks.
 
-    Looks for POSITIVE detection indicators in SOC tool outputs.
-    Excludes negative statements like "no brute force detected" to avoid false positives.
-
-    Robust to case and separator variants: SOC tools often emit uppercase underscored
-    tokens like "THREATS DETECTED: COMMAND_INJECTION, SQL_INJECTION". We normalize
-    separators to spaces so the lowercase keyword list still matches.
+    Returns (detected, evidence_list, detected_tool_names).
     """
     detected_tools = []
     evidence = []
     positive_keywords = [
-        # Brute force
         "brute force attack", "brute-force detected", "brute force detected",
         "multiple failed", "multiple failed login",
-        # Injection attacks
         "sql injection", "sqli attempt", "sqli detected",
         "xss attempt", "xss detected",
         "jndi injection", "${jndi:", "jndi attempt", "jndi detected",
         "command injection", "cmd injection", "command_injection",
-        # Webshell / files
         "webshell detected", "webshell found",
         "file tamper", "file tampered",
         "suspicious file", "new suspicious file",
-        # Process / network
         "suspicious process", "reverse shell",
         "suspicious connection", "suspicious network",
-        # Generic threat signals (the SOC tool banner)
         "malicious", "unauthorized access",
         "blocked ip", "blocked source",
         "path traversal", "xxe",
@@ -180,7 +191,6 @@ def _detect_blue_detection(blue_tools):
         "threats detected", "threat detected",
         "critical finding", "critical threat",
     ]
-    # Phrases that invert a keyword match (i.e. the tool said it did NOT find anything)
     negative_markers = ["no ", "not ", "none ", "0 ", "zero ", "without "]
     for tc in blue_tools:
         tool = tc.get("tool", "")
@@ -193,14 +203,12 @@ def _detect_blue_detection(blue_tools):
             if not raw:
                 continue
             ll = _normalize_text(raw)
-            # Skip lines that are clearly negative statements
             if any(ll.startswith(neg) for neg in negative_markers):
                 continue
             for kw in positive_keywords:
                 kw_n = _normalize_text(kw)
                 if kw_n in ll:
                     idx = ll.find(kw_n)
-                    # Check a window of 6 chars BEFORE the keyword for negation
                     prefix = ll[max(0, idx - 6):idx]
                     if any(neg in prefix for neg in negative_markers):
                         continue
@@ -212,20 +220,87 @@ def _detect_blue_detection(blue_tools):
     return bool(detected_tools), evidence, detected_tools
 
 
-def _detect_blue_response(blue_tools):
-    """Determine if blue team took defensive action."""
+def _detect_blue_hardening(blue_tools):
+    """Detect blue team hardening actions with details.
+    Returns (took_action, action_descriptions_zh).
+    """
     actions = []
     for tc in blue_tools:
         tool = tc.get("tool", "")
-        if "harden" in tool:
-            actions.append("harden(" + tool + ")")
+        args = tc.get("args", {}) or {}
+        result = str(tc.get("result", "") or "")
+        if tool == "harden_web_app":
+            level = args.get("level", "impossible") if isinstance(args, dict) else "impossible"
+            if "patch applied" in result.lower() or "cookie-bypass" in result.lower():
+                actions.append(f"加固 DVWA（security_level={level}，同时修补 cookie 绕过漏洞）")
+            elif "already" in result.lower():
+                actions.append(f"DVWA 已是 {level}（无需重复加固）")
+            else:
+                actions.append(f"加固 DVWA（security_level={level}）")
+        elif tool == "harden_ssh":
+            act = args.get("action", "") if isinstance(args, dict) else ""
+            if "disable_password" in str(act):
+                if "already" in result.lower() or "no change" in result.lower():
+                    actions.append("SSH 密码认证已禁用（无需重复加固）")
+                else:
+                    actions.append("加固 SSH（禁用密码认证 PasswordAuthentication=no）")
+            elif "disable_root" in str(act):
+                actions.append("加固 SSH（禁止 root 登录 PermitRootLogin=no）")
+            else:
+                actions.append(f"加固 SSH（action={act}）")
         elif tool == "manage_firewall":
-            args = tc.get("args", {})
-            if isinstance(args, dict):
-                act = args.get("action", "")
-                if "block" in str(act).lower():
-                    actions.append("firewall block IP")
+            act = args.get("action", "") if isinstance(args, dict) else ""
+            ip = args.get("ip", "") if isinstance(args, dict) else ""
+            if "block" in str(act).lower():
+                actions.append(f"防火墙封禁 IP（{ip}）")
+            elif "allow" in str(act).lower():
+                actions.append(f"防火墙放行 IP（{ip}）")
+        elif tool == "exec_command":
+            cmd = args.get("command", "") if isinstance(args, dict) else ""
+            cmd_l = str(cmd).lower()
+            if "rm " in cmd_l and ("shell" in cmd_l or ".php" in cmd_l):
+                actions.append(f"删除恶意文件（{cmd}）")
+            elif "kill" in cmd_l or "pkill" in cmd_l:
+                actions.append(f"终止可疑进程（{cmd}）")
+            elif "chmod" in cmd_l or "chown" in cmd_l:
+                actions.append(f"修复文件权限（{cmd}）")
     return bool(actions), actions
+
+
+def _extract_audit_findings(blue_tools):
+    """Extract audit findings from audit tool outputs.
+    Returns list of Chinese descriptions.
+    """
+    findings = []
+    for tc in blue_tools:
+        tool = tc.get("tool", "")
+        args = tc.get("args", {}) or {}
+        result = str(tc.get("result", "") or "")
+        if tool == "audit_web_app":
+            rl = result.lower()
+            if "security_level=low" in rl:
+                findings.append("DVWA security_level=low（脆弱配置）")
+            elif "security_level=medium" in rl:
+                findings.append("DVWA security_level=medium（中等风险）")
+            elif "security_level=impossible" in rl:
+                findings.append("DVWA security_level=impossible（已加固）")
+            elif "security_level=high" in rl:
+                findings.append("DVWA security_level=high")
+            if "sqli: vulnerable" in rl:
+                findings.append("SQL 注入测试：存在漏洞")
+            elif "sqli: fixed" in rl or "sqli: mitigated" in rl:
+                findings.append("SQL 注入测试：已修复")
+        elif tool == "audit_ssh":
+            rl = result.lower()
+            if "passwordauthentication yes" in rl:
+                findings.append("SSH PasswordAuthentication=yes（脆弱配置）")
+            elif "passwordauthentication no" in rl:
+                findings.append("SSH PasswordAuthentication=no（已加固）")
+            if "permitrootlogin yes" in rl:
+                findings.append("SSH PermitRootLogin=yes（脆弱配置）")
+            elif "permitrootlogin no" in rl:
+                findings.append("SSH PermitRootLogin=no（已加固）")
+    return findings
 
 
 def _score_round(red_success, red_attacks, blue_detected, blue_responded, red_tools_count, blue_tools_count):
@@ -249,30 +324,32 @@ def _score_round(red_success, red_attacks, blue_detected, blue_responded, red_to
         blue_score += 2
     blue_score = max(0, min(blue_score, 10))
     if red_success and not blue_detected:
-        verdict = "red wins (blue missed attack)"
+        verdict = "红方获胜（蓝方漏报）"
     elif red_success and blue_detected and blue_responded:
-        verdict = "effective contest (red scored, blue detected+responded)"
+        verdict = "有效对抗（红方得分，蓝方检测并响应）"
     elif red_success and blue_detected and not blue_responded:
-        verdict = "red advantage (blue detected but no response)"
+        verdict = "红方占优（蓝方检测但未响应）"
     elif not red_success and blue_detected:
-        verdict = "blue advantage (detected threat, red failed)"
+        verdict = "蓝方占优（检测到威胁，红方失败）"
     elif not red_success and not blue_detected and not blue_responded:
-        verdict = "stalemate (no clear outcome)"
+        verdict = "僵持（无明显结果）"
     elif not red_success and blue_responded and not blue_detected:
-        verdict = "blue false positive (hardened without detection)"
+        verdict = "蓝方误报（无检测依据却加固）"
     else:
-        verdict = "probing phase"
+        verdict = "侦察阶段"
     return red_score, blue_score, verdict
 
-def _round_analysis_zh(round_num, red_rec, blue_rec, ledger):
-    """Generate objective Chinese analysis for a round.
 
-    Structure: red performance -> blue performance (independent SOC) -> verdict + scoring
-    Focus on: what they thought, what they did, whether tools succeeded,
-    what evidence proves the result, and an objective score.
+def _round_analysis_zh(round_num, red_rec, blue_rec, ledger):
+    """Generate detailed Chinese narrative analysis for a round.
+
+    Structure:
+      红方表现: 意图 -> 攻击动作 -> 工具执行 -> 攻击成果 -> 关键证据
+      蓝方表现: 巡逻范围 -> 审计发现 -> 检测结果 -> 响应动作 -> 漏洞账本
+      判定与评分
     """
     lines = []
-    lines.append("### Round " + str(round_num) + " \u5ba2\u89c2\u5206\u6790\n")
+    lines.append(f"### 第 {round_num} 轮 客观分析\n")
 
     red_tools = (red_rec or {}).get("tool_calls", [])
     red_out = ((red_rec or {}).get("output") or "").strip()
@@ -281,121 +358,132 @@ def _round_analysis_zh(round_num, red_rec, blue_rec, ledger):
     blue_out = ((blue_rec or {}).get("output") or "").strip()
     blue_steps = _group_trace_into_steps((blue_rec or {}).get("trace_items") or [])
 
-    # ===== RED TEAM =====
-    lines.append("**\u7ea2\u961f\u8868\u73b0**\n")
+    # ===== 红方表现 =====
+    lines.append("**【红方表现】**\n")
     red_attacks = _detect_attack_type(red_tools)
     red_success, red_success_type, red_evidence = _detect_red_success(red_tools)
 
-    if red_steps:
-        first_thinking = red_steps[0].get("thinking", "")[:300]
-        if first_thinking:
-            lines.append("- **\u610f\u56fe**\uff1a" + _truncate(first_thinking, 200))
-    if not red_steps and red_out:
-        lines.append("- **\u610f\u56fe**\uff1a" + _truncate(red_out.splitlines()[0], 200))
-
-    if red_attacks:
-        lines.append("- **\u653b\u51fb\u52a8\u4f5c**\uff1a" + ", ".join(red_attacks) + "\uff08\u5171 " + str(len(red_tools)) + " \u6b21\u5de5\u5177\u8c03\u7528\uff0c" + str(len(red_steps)) + " \u6b65\u63a8\u7406\uff09")
-    elif red_tools:
-        lines.append("- **\u653b\u51fb\u52a8\u4f5c**\uff1a\u8c03\u7528 " + str(len(red_tools)) + " \u6b21\u5de5\u5177\u4f46\u672a\u5f62\u6210\u6709\u6548\u653b\u51fb\u94fe")
+    # 意图
+    if red_steps and red_steps[0].get("thinking"):
+        first_thinking = red_steps[0]["thinking"][:300]
+        lines.append(f"- **意图**：{_truncate(first_thinking, 200)}")
+    elif red_out:
+        lines.append(f"- **意图**：{_truncate(red_out.splitlines()[0], 200)}")
     else:
-        lines.append("- **\u653b\u51fb\u52a8\u4f5c**\uff1a\u672c\u8f6e\u672a\u6267\u884c\u4efb\u4f55\u5de5\u5177\u8c03\u7528")
+        lines.append("- **意图**：无明确输出")
 
+    # 攻击动作
+    if red_attacks:
+        lines.append(f"- **攻击动作**：{', '.join(red_attacks)}（共 {len(red_tools)} 次工具调用，{len(red_steps)} 步推理）")
+    elif red_tools:
+        lines.append(f"- **攻击动作**：调用 {len(red_tools)} 次工具但未形成有效攻击链")
+    else:
+        lines.append("- **攻击动作**：本轮未执行任何工具调用")
+
+    # 工具执行
     if red_tools:
         ok_count = sum(1 for t in red_tools if t.get("status") == "ok")
         err_count = sum(1 for t in red_tools if t.get("status") == "error")
-        lines.append("- **\u5de5\u5177\u6267\u884c**\uff1a\u6210\u529f " + str(ok_count) + " \u6b21\uff0c\u5931\u8d25 " + str(err_count) + " \u6b21")
+        lines.append(f"- **工具执行**：成功 {ok_count} 次，失败 {err_count} 次")
 
+    # 攻击成果 + 证据
     if red_success:
-        lines.append("- **\u653b\u51fb\u6210\u679c**\uff1a[OK] **\u6210\u529f** \u2014 " + red_success_type)
-        lines.append("- **\u5173\u952e\u8bc1\u636e**\uff1a`" + red_evidence + "`")
+        lines.append(f"- **攻击成果**：✅ **成功** — {red_success_type}")
+        lines.append(f"- **关键证据**：`{red_evidence}`")
     else:
-        fail_reasons = []
-        for tc in red_tools:
-            r = str(tc.get("result", "") or "").lower()
-            if "timeout" in r:
-                fail_reasons.append("connection timeout")
-            elif "refused" in r or "connection refused" in r:
-                fail_reasons.append("connection refused")
-            elif "permission denied" in r:
-                fail_reasons.append("permission denied")
-            elif "denied" in r or "failed" in r:
-                fail_reasons.append("auth failed")
+        fail_reasons = _detect_red_failure_reason(red_tools)
         if fail_reasons:
-            lines.append("- **\u653b\u51fb\u6210\u679c**\uff1a[FAIL] **\u5931\u8d25** \u2014 " + ", ".join(set(fail_reasons)))
+            lines.append(f"- **攻击成果**：❌ **失败** — {'; '.join(fail_reasons)}")
         else:
-            lines.append("- **\u653b\u51fb\u6210\u679c**\uff1a[FAIL] **\u672a\u53d6\u5f97\u53ef\u9a8c\u8bc1\u6210\u679c**\uff08\u8f93\u51fa\u4e2d\u65e0 flag/uid=/\u6570\u636e\u6cc4\u9732\u7b49\u6807\u5fd7\u6027\u8bc1\u636e\uff09")
-    # ===== BLUE TEAM (Independent SOC) =====
-    lines.append("\n**\u84dd\u961f\u8868\u73b0\uff08\u72ec\u7acb SOC \u6a21\u5f0f \u2014 \u84dd\u65b9\u4e0d\u77e5\u9053\u7ea2\u65b9\u52a8\u4f5c\uff09**\n")
-    blue_detected, blue_ev, blue_det_tools = _detect_blue_detection(blue_tools)
-    blue_responded, blue_actions = _detect_blue_response(blue_tools)
+            lines.append("- **攻击成果**：❌ **未取得可验证成果**（输出中无 flag/uid=/数据泄露等标志性证据）")
 
+    # ===== 蓝方表现 =====
+    lines.append("\n**【蓝方表现】（独立 SOC 模式 — 蓝方不知道红方动作）**\n")
+    blue_detected, blue_ev, blue_det_tools = _detect_blue_detection(blue_tools)
+    blue_responded, blue_actions = _detect_blue_hardening(blue_tools)
+    audit_findings = _extract_audit_findings(blue_tools)
+
+    # 巡逻范围
     soc_tools_used = [t.get("tool", "") for t in blue_tools if t.get("tool", "").startswith("check_")]
     audit_tools_used = [t.get("tool", "") for t in blue_tools if "audit" in t.get("tool", "") or "inspect" in t.get("tool", "")]
+    all_tools_used = [t.get("tool", "") for t in blue_tools]
     if soc_tools_used or audit_tools_used:
-        lines.append("- **\u5de1\u903b\u8303\u56f4**\uff1aSOC \u68c0\u6d4b\u5de5\u5177 " + str(len(soc_tools_used)) + " \u4e2a\uff08" + ", ".join(soc_tools_used) + "\uff09\uff0c\u5ba1\u8ba1\u5de5\u5177 " + str(len(audit_tools_used)) + " \u4e2a")
+        lines.append(f"- **巡逻范围**：审计工具 {len(audit_tools_used)} 个（{', '.join(audit_tools_used) if audit_tools_used else '无'}），SOC 检测工具 {len(soc_tools_used)} 个（{', '.join(soc_tools_used) if soc_tools_used else '无'}）")
     elif blue_tools:
-        lines.append("- **\u5de1\u903b\u8303\u56f4**\uff1a\u8c03\u7528 " + str(len(blue_tools)) + " \u6b21\u5de5\u5177\u4f46\u672a\u4f7f\u7528 SOC \u68c0\u6d4b\u5de5\u5177\uff08check_* \u7cfb\u5217\uff09")
+        lines.append(f"- **巡逻范围**：调用 {len(blue_tools)} 次工具（{', '.join(all_tools_used[:5])}）")
     else:
-        lines.append("- **\u5de1\u903b\u8303\u56f4**\uff1a\u672c\u8f6e\u672a\u6267\u884c\u4efb\u4f55\u68c0\u6d4b")
+        lines.append("- **巡逻范围**：本轮未执行任何工具调用")
 
+    # 审计发现（主动加固路径）
+    if audit_findings:
+        lines.append(f"- **审计发现**：{'; '.join(audit_findings)}")
+    else:
+        lines.append("- **审计发现**：无审计输出")
+
+    # 检测结果（反应式检测路径）
     if blue_detected:
-        lines.append("- **\u68c0\u6d4b\u7ed3\u679c**\uff1a[DETECT] **\u68c0\u6d4b\u5230\u653b\u51fb\u4fe1\u53f7** \u2014 \u901a\u8fc7 " + ", ".join(blue_det_tools) + " \u53d1\u73b0\u5f02\u5e38")
+        lines.append(f"- **检测结果**：🔍 **检测到攻击信号** — 通过 {', '.join(blue_det_tools)} 发现异常")
         if blue_ev:
-            lines.append("- **\u68c0\u6d4b\u8bc1\u636e**\uff1a`" + blue_ev[0] + "`")
+            lines.append(f"- **检测证据**：`{blue_ev[0]}`")
     else:
         if red_success:
-            lines.append("- **\u68c0\u6d4b\u7ed3\u679c**\uff1a[MISS] **\u6f0f\u62a5** \u2014 \u7ea2\u961f\u5b9e\u9645\u53d6\u5f97\u653b\u51fb\u6210\u679c\uff0c\u4f46\u84dd\u961f SOC \u5de5\u5177\u672a\u68c0\u6d4b\u5230\u5f02\u5e38")
+            lines.append("- **检测结果**：⚠️ **漏报** — 红方实际取得攻击成果，但蓝方 SOC 工具未检测到异常")
         elif red_tools:
-            lines.append("- **\u68c0\u6d4b\u7ed3\u679c**\uff1a[NONE] \u672a\u68c0\u6d4b\u5230\u653b\u51fb\u4fe1\u53f7\uff08\u7ea2\u961f\u672c\u8f6e\u4e5f\u672a\u6210\u529f\uff09")
+            lines.append("- **检测结果**：未检测到攻击信号（红方本轮也未成功）")
         else:
-            lines.append("- **\u68c0\u6d4b\u7ed3\u679c**\uff1a[NONE] \u672a\u68c0\u6d4b\u5230\u653b\u51fb\u4fe1\u53f7\uff08\u7ea2\u961f\u672c\u8f6e\u65e0\u52a8\u4f5c\uff09")
+            lines.append("- **检测结果**：未检测到攻击信号（红方本轮无动作）")
 
+    # 响应动作
     if blue_responded:
         if blue_detected:
-            lines.append("- **\u54cd\u5e94\u52a8\u4f5c**\uff1a[OK] **\u5408\u7406\u54cd\u5e94** \u2014 " + ", ".join(blue_actions) + "\uff08\u57fa\u4e8e\u68c0\u6d4b\u8bc1\u636e\uff0c\u54cd\u5e94\u6709\u636e\uff09")
+            lines.append(f"- **响应动作**：✅ **合理响应** — {'; '.join(blue_actions)}（基于检测证据，响应有据）")
+        elif audit_findings:
+            lines.append(f"- **响应动作**：✅ **主动加固** — {'; '.join(blue_actions)}（基于审计发现的弱配置，属于主动防御）")
         else:
-            lines.append("- **\u54cd\u5e94\u52a8\u4f5c**\uff1a[WARN] **\u8bef\u62a5\u5f0f\u54cd\u5e94** \u2014 " + ", ".join(blue_actions) + "\uff08\u65e0\u68c0\u6d4b\u4f9d\u636e\u5374\u52a0\u56fa\uff0c\u5c5e\u4e8e\u76f2\u76ee\u9632\u5fa1/\u8bef\u62a5\uff09")
+            lines.append(f"- **响应动作**：⚠️ **误报式响应** — {'; '.join(blue_actions)}（无检测依据却加固，属于盲目防御）")
     else:
         if blue_detected:
-            lines.append("- **\u54cd\u5e94\u52a8\u4f5c**\uff1a[WARN] **\u68c0\u6d4b\u5230\u4f46\u672a\u54cd\u5e94**\uff08\u53d1\u73b0\u4e86\u653b\u51fb\u4f46\u672a\u91c7\u53d6\u52a0\u56fa/\u5c01\u7981\u63aa\u65bd\uff09")
+            lines.append("- **响应动作**：⚠️ **检测到但未响应**（发现了攻击但未采取加固/封禁措施）")
+        elif not audit_findings:
+            lines.append("- **响应动作**：未采取响应动作（符合「无检测则不防御」原则）")
         else:
-            lines.append("- **\u54cd\u5e94\u52a8\u4f5c**\uff1a[NONE] \u672a\u91c7\u53d6\u54cd\u5e94\u52a8\u4f5c\uff08\u7b26\u5408\u300c\u65e0\u68c0\u6d4b\u5219\u4e0d\u9632\u5fa1\u300d\u539f\u5219\uff09")
+            lines.append("- **响应动作**：未采取响应动作（虽有审计但未加固）")
 
-    # ===== LEDGER =====
+    # 漏洞账本
     if ledger:
-        lines.append("\n**\u6f0f\u6d1e\u8d26\u672c\u72b6\u6001**\uff1a")
-        for vid, entry in ledger.items():
-            status = entry.get("status", "?")
-            ev = (entry.get("evidence") or "")[:100]
-            lines.append("- `" + vid + "`: **" + status + "** - " + ev)
+        ledger_summary = ", ".join(f"`{k}`={v['status']}" for k, v in ledger.items())
+        lines.append(f"- **漏洞账本**：{ledger_summary}")
 
-    # ===== VERDICT =====
+    # ===== 判定与评分 =====
     red_score, blue_score, verdict = _score_round(
         red_success, red_attacks, blue_detected, blue_responded,
         len(red_tools), len(blue_tools)
     )
-    lines.append("\n**\u672c\u8f6e\u5bf9\u6297\u8bc4\u4ef7**\n")
-    lines.append("- **\u5224\u5b9a**\uff1a" + verdict)
+    lines.append("\n**【判定与评分】**\n")
+    lines.append(f"- **判定**：{verdict}")
     if red_success:
-        red_desc = "\u53d6\u5f97\u53ef\u9a8c\u8bc1\u653b\u51fb\u6210\u679c"
+        red_desc = "取得可验证攻击成果"
     elif red_tools:
-        red_desc = "\u6267\u884c\u4e86\u653b\u51fb\u4f46\u65e0\u5b9e\u8d28\u6210\u679c"
+        red_desc = "执行了攻击但无实质成果"
     else:
-        red_desc = "\u672a\u91c7\u53d6\u6709\u6548\u884c\u52a8"
-    lines.append("- **\u7ea2\u961f\u8bc4\u5206**\uff1a" + str(red_score) + "/10 \u2014 " + red_desc)
+        red_desc = "未采取有效行动"
+    lines.append(f"- **红方评分**：{red_score}/10 — {red_desc}")
     if blue_detected and blue_responded:
-        blue_desc = "\u72ec\u7acb\u68c0\u6d4b\u5230\u653b\u51fb\u5e76\u5408\u7406\u54cd\u5e94"
+        blue_desc = "独立检测到攻击并合理响应"
+    elif blue_responded and audit_findings and not blue_detected:
+        blue_desc = "基于审计主动加固（未检测到攻击但修复了弱配置）"
     elif blue_detected:
-        blue_desc = "\u68c0\u6d4b\u5230\u653b\u51fb\u4f46\u672a\u54cd\u5e94"
+        blue_desc = "检测到攻击但未响应"
     elif blue_responded and not blue_detected:
-        blue_desc = "\u8bef\u62a5\u5f0f\u54cd\u5e94\uff08\u65e0\u68c0\u6d4b\u4f9d\u636e\u5374\u52a0\u56fa\uff09"
+        blue_desc = "误报式响应（无检测依据却加固）"
     elif blue_tools:
-        blue_desc = "\u5de1\u903b\u6b63\u5e38\u4f46\u672a\u68c0\u6d4b\u5230\u5a01\u80c1"
+        blue_desc = "巡逻正常但未检测到威胁"
     else:
-        blue_desc = "\u672a\u6267\u884c\u5de1\u903b"
-    lines.append("- **\u84dd\u961f\u8bc4\u5206**\uff1a" + str(blue_score) + "/10 \u2014 " + blue_desc)
+        blue_desc = "未执行巡逻"
+    lines.append(f"- **蓝方评分**：{blue_score}/10 — {blue_desc}")
 
     return "\n".join(lines)
+
 
 class SessionLogger:
     def __init__(self, base_dir: str = "logs") -> None:
@@ -442,8 +530,9 @@ class SessionLogger:
         self._emit("session_ended", {"duration_s": round(duration, 1), "final_ledger": final_ledger})
         self._write_summary(final_ledger, duration, transcript_html, transcript_txt)
         return self._summary_path
+
     def _write_action_log(self, path: str, side: str, round_num: int, output: str, trace_items: list) -> None:
-        """Write step-by-step trace with clear structure."""
+        """Write step-by-step trace with clear structure (full detail, for .log files)."""
         steps = _group_trace_into_steps(trace_items)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(f"\n{'=' * 78}\n")
@@ -481,103 +570,150 @@ class SessionLogger:
         line = json.dumps({"ts": time.time(), "event": event, **payload}, ensure_ascii=False, default=str)
         with open(self._timeline_path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
     def _write_summary(self, final_ledger: dict, duration_s: float, transcript_html: str, transcript_txt: str) -> None:
+        """Write a clean, Chinese-narrative summary.
+
+        The summary is for human-readable analysis, NOT a dump of raw logs.
+        Full step-by-step traces are in the .log files and HTML transcript.
+        """
         lines = []
-        lines.append(f"# CyberOrion Arena | Session {self.session_id}\n")
-        lines.append(f"> \u751f\u6210\u65f6\u95f4: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        lines.append(f"# CyberOrion 对抗演练总结 | {self.session_id}\n")
+        lines.append(f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-        lines.append("## \u4f1a\u8bdd\u6982\u89c8\n")
-        lines.append("| \u6307\u6807 | \u503c |")
+        # 会话概览
+        lines.append("## 会话概览\n")
+        lines.append("| 指标 | 值 |")
         lines.append("|------|-----|")
-        lines.append(f"| \u603b\u65f6\u957f | {duration_s:.1f}s |")
-        lines.append(f"| \u8f6e\u6b21\u6570 | {len(self._rounds)} |")
-        lines.append(f"| HTML \u56de\u653e | `{os.path.basename(transcript_html)}` |")
-        lines.append(f"| \u6587\u672c\u8bb0\u5f55 | `{os.path.basename(transcript_txt)}` |\n")
+        lines.append(f"| 总时长 | {duration_s:.1f}s |")
+        lines.append(f"| 轮次数 | {len(self._rounds)} |")
+        lines.append(f"| HTML 回放 | `{os.path.basename(transcript_html)}` |")
+        lines.append(f"| 文本记录 | `{os.path.basename(transcript_txt)}` |")
+        lines.append(f"| 红方日志 | `red_actions.log` |")
+        lines.append(f"| 蓝方日志 | `blue_actions.log` |")
+        lines.append("")
 
-        lines.append("## \u6700\u7ec8\u6f0f\u6d1e\u8d26\u672c\n")
+        # 最终漏洞账本
+        lines.append("## 最终漏洞账本\n")
         if final_ledger:
-            lines.append("| \u6f0f\u6d1e ID | \u72b6\u6001 | \u8bc1\u636e |")
+            lines.append("| 漏洞 ID | 状态 | 证据 |")
             lines.append("|---------|------|------|")
             for vid, entry in final_ledger.items():
                 status = entry.get("status", "?")
-                ev = _md_cell(entry.get("evidence", ""), 100)
+                ev = entry.get("evidence", "")[:100]
                 lines.append(f"| `{vid}` | **{status}** | {ev} |")
             lines.append("")
+            # 状态统计
+            status_counts = {}
+            for entry in final_ledger.values():
+                s = entry.get("status", "?")
+                status_counts[s] = status_counts.get(s, 0) + 1
+            stats_str = "、".join(f"{k} {v} 个" for k, v in status_counts.items())
+            lines.append(f"**状态统计**：共 {len(final_ledger)} 个条目 — {stats_str}\n")
         else:
-            lines.append("_(\u7a7a)_\n")
+            lines.append("_(空)_\n")
 
+        # 每轮分析
         for r in self._rounds:
             n = r["round"]
             red = r.get("red") or {}
             blue = r.get("blue") or {}
             ledger = r.get("ledger") or {}
 
-            lines.append(f"---\n")
-            lines.append(f"## Round {n}\n")
+            lines.append("---\n")
+            lines.append(f"## 第 {n} 轮\n")
 
-            lines.append("### Red Team \u884c\u52a8\n")
-            red_steps = _group_trace_into_steps(red.get("trace_items") or [])
-            if red_steps:
-                lines.append("| \u6b65\u9aa4 | \u601d\u8003\u8fc7\u7a0b | \u5de5\u5177 | \u547d\u4ee4/\u53c2\u6570 | \u8f93\u51fa |")
-                lines.append("|------|----------|------|-----------|------|")
-                for s in red_steps:
-                    thinking = _md_cell(s["thinking"], 150)
-                    for i, tc in enumerate(s["tool_calls"]):
-                        tool = _md_cell(tc["tool"], 30)
-                        args = tc.get("arguments", "{}")
-                        try:
-                            parsed = json.loads(args)
-                            cmd = parsed.get("command", parsed.get("cmd", json.dumps(parsed, ensure_ascii=False)))
-                        except Exception:
-                            cmd = args
-                        cmd_short = _md_cell(cmd, 120)
-                        out = _md_cell(tc.get("output", ""), 120)
-                        step_num = str(s["step"]) if i == 0 else ""
-                        lines.append(f"| {step_num} | {thinking} | `{tool}` | `{cmd_short}` | `{out}` |")
+            # 简要工具调用清单（不堆原文，只列工具名和关键命令）
+            red_tools = red.get("tool_calls", [])
+            blue_tools = blue.get("tool_calls", [])
+
+            lines.append("### 红方工具调用\n")
+            if red_tools:
+                lines.append("| # | 工具 | 关键命令 | 状态 |")
+                lines.append("|---|------|---------|------|")
+                for i, tc in enumerate(red_tools, 1):
+                    tool = tc.get("tool", "?")
+                    args = tc.get("args", {}) or {}
+                    status = tc.get("status", "?")
+                    if isinstance(args, dict):
+                        cmd = str(args.get("command", args.get("cmd", json.dumps(args, ensure_ascii=False))))[:100]
+                    else:
+                        cmd = str(args)[:100]
+                    lines.append(f"| {i} | `{tool}` | `{cmd}` | {status} |")
                 lines.append("")
             else:
-                lines.append("_(\u65e0\u601d\u8003/\u5de5\u5177\u8bb0\u5f55)_\n")
+                lines.append("_(无工具调用)_\n")
 
-            if red.get("output"):
-                lines.append(f"**\u7ea2\u961f\u6700\u7ec8\u8f93\u51fa**\uff1a\n```\n{_truncate(red['output'], 1000)}\n```\n")
-
-            lines.append("### Blue Team (CyberOrion) \u9632\u5fa1\n")
-            blue_steps = _group_trace_into_steps(blue.get("trace_items") or [])
-            if blue_steps:
-                lines.append("| \u6b65\u9aa4 | \u601d\u8003\u8fc7\u7a0b | \u5de5\u5177 | \u547d\u4ee4/\u53c2\u6570 | \u8f93\u51fa |")
-                lines.append("|------|----------|------|-----------|------|")
-                for s in blue_steps:
-                    thinking = _md_cell(s["thinking"], 150)
-                    for i, tc in enumerate(s["tool_calls"]):
-                        tool = _md_cell(tc["tool"], 30)
-                        args = tc.get("arguments", "{}")
-                        try:
-                            parsed = json.loads(args)
-                            if "command" in parsed:
-                                cmd = parsed["command"]
-                            elif "action" in parsed:
-                                cmd = f"action={parsed['action']}" + (f", ip={parsed['ip']}" if "ip" in parsed else "")
-                            else:
-                                cmd = json.dumps(parsed, ensure_ascii=False)
-                        except Exception:
-                            cmd = args
-                        cmd_short = _md_cell(cmd, 120)
-                        out = _md_cell(tc.get("output", ""), 120)
-                        step_num = str(s["step"]) if i == 0 else ""
-                        lines.append(f"| {step_num} | {thinking} | `{tool}` | `{cmd_short}` | `{out}` |")
+            lines.append("### 蓝方工具调用\n")
+            if blue_tools:
+                lines.append("| # | 工具 | 关键参数 | 状态 |")
+                lines.append("|---|------|---------|------|")
+                for i, tc in enumerate(blue_tools, 1):
+                    tool = tc.get("tool", "?")
+                    args = tc.get("args", {}) or {}
+                    status = tc.get("status", "?")
+                    if isinstance(args, dict):
+                        if "command" in args:
+                            param = str(args["command"])[:80]
+                        elif "action" in args:
+                            param = f"action={args['action']}"
+                        elif "level" in args:
+                            param = f"level={args['level']}"
+                        elif "check" in args:
+                            param = f"check={args['check']}"
+                        elif "container" in args:
+                            param = f"container={args['container']}"
+                        else:
+                            param = json.dumps(args, ensure_ascii=False)[:80]
+                    else:
+                        param = str(args)[:80]
+                    lines.append(f"| {i} | `{tool}` | `{param}` | {status} |")
                 lines.append("")
             else:
-                lines.append("_(\u65e0\u601d\u8003/\u5de5\u5177\u8bb0\u5f55)_\n")
+                lines.append("_(无工具调用)_\n")
 
-            if blue.get("output"):
-                lines.append(f"**\u84dd\u961f\u6700\u7ec8\u8f93\u51fa**\uff1a\n```\n{_truncate(blue['output'], 1000)}\n```\n")
-
-            if ledger:
-                ls = ", ".join(f"`{k}`={v['status']}" for k, v in ledger.items())
-                lines.append(f"**\u672c\u8f6e\u8d26\u672c**\uff1a{ls}\n")
-
+            # 客观分析（中文叙述）
             lines.append(_round_analysis_zh(n, red, blue, ledger))
             lines.append("")
+
+        # 总结
+        lines.append("---\n")
+        lines.append("## 总体评价\n")
+        total_red = 0
+        total_blue = 0
+        red_success_rounds = 0
+        blue_detected_rounds = 0
+        blue_responded_rounds = 0
+        for r in self._rounds:
+            red = r.get("red") or {}
+            blue = r.get("blue") or {}
+            red_tools = red.get("tool_calls", [])
+            blue_tools = blue.get("tool_calls", [])
+            rs, _, _ = _detect_red_success(red_tools)
+            bd, _, _ = _detect_blue_detection(blue_tools)
+            br, _ = _detect_blue_hardening(blue_tools)
+            red_attacks = _detect_attack_type(red_tools)
+            r_score, b_score, _ = _score_round(rs, red_attacks, bd, br, len(red_tools), len(blue_tools))
+            total_red += r_score
+            total_blue += b_score
+            if rs:
+                red_success_rounds += 1
+            if bd:
+                blue_detected_rounds += 1
+            if br:
+                blue_responded_rounds += 1
+
+        lines.append(f"- **红方总得分**：{total_red}/{len(self._rounds) * 10}（成功轮次 {red_success_rounds}/{len(self._rounds)}）")
+        lines.append(f"- **蓝方总得分**：{total_blue}/{len(self._rounds) * 10}（检测命中 {blue_detected_rounds} 轮，加固响应 {blue_responded_rounds} 轮）")
+        lines.append("")
+        if total_blue > total_red:
+            lines.append("**结论**：蓝方防御总体有效，红方攻击受抑制。")
+        elif total_red > total_blue:
+            lines.append("**结论**：红方攻击总体成功，蓝方防御存在不足。")
+        else:
+            lines.append("**结论**：攻防双方势均力敌。")
+        lines.append("")
+        lines.append("> 完整的逐步推理日志请查看 `red_actions.log`、`blue_actions.log` 和 HTML 回放文件。")
 
         with open(self._summary_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines))
