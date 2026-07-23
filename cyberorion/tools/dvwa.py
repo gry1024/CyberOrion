@@ -92,6 +92,51 @@ def audit_web_app(check: str = "security_level") -> str:
     return "\n".join(parts)
 
 
+def _patch_dvwa_cookie_bypass(level: str) -> str:
+    """Patch dvwaPage.inc.php to enforce server-side security level.
+
+    DVWA's dvwaSecurityLevelGet() returns the client-side cookie value,
+    allowing attackers to bypass server-side hardening by sending
+    security=low in the cookie. This patch forces the function to
+    return the server-side default_security_level instead.
+    """
+    rc, out, err = _docker_exec(
+        DVWA_CONTAINER,
+        "cat /var/www/html/dvwa/includes/dvwaPage.inc.php 2>/dev/null",
+        timeout=15,
+    )
+    if rc != 0 or not out:
+        return "cookie-bypass patch skipped: could not read dvwaPage.inc.php"
+
+    page = out
+    if "CyberOrion" in page and "default_security_level" in page:
+        return "cookie-bypass patch already applied"
+
+    new_func = (
+        "function dvwaSecurityLevelGet() {\n"
+        "    // CyberOrion hardening: enforce server-side security level\n"
+        "    // Ignore client cookie to prevent security level bypass\n"
+        "    global $_DVWA;\n"
+        "    $sl = isset( $_DVWA[ 'default_security_level' ] ) ? $_DVWA[ 'default_security_level' ] : 'impossible';\n"
+        "    return in_array( $sl, array('low', 'medium', 'high', 'impossible') ) ? $sl : '"
+        + level + "';\n"
+        "}"
+    )
+    pattern = r"function dvwaSecurityLevelGet\(\)\s*\{[^}]*\}"
+    new_page = re.sub(pattern, lambda m: new_func, page, count=1)
+
+    if new_page == page:
+        return "cookie-bypass patch: function not matched (already patched or DVWA changed)"
+
+    rc, _, err = _docker_put(
+        DVWA_CONTAINER, "/var/www/html/dvwa/includes/dvwaPage.inc.php", new_page,
+    )
+    if rc != 0:
+        return f"cookie-bypass patch write failed: {err.strip()}"
+
+    return "cookie-bypass patch applied: dvwaSecurityLevelGet() now enforces server-side config"
+
+
 @function_tool
 @_tracked
 def harden_web_app(level: str = "impossible") -> str:
@@ -128,5 +173,7 @@ def harden_web_app(level: str = "impossible") -> str:
     if rc != 0:
         return f"write failed: {err.strip()}"
 
+    patch_msg = _patch_dvwa_cookie_bypass(level)
+
     _ledger_set("DVWA-SECURITY-LEVEL", "mitigated", evidence=f"level set to {level}", extra={"level": level})
-    return f"security_level set to {level}\nverify with audit_web_app('sqli')"
+    return f"security_level set to {level}\n{patch_msg}\nverify with audit_web_app('sqli')"
