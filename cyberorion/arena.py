@@ -82,8 +82,8 @@ class Arena:
                 blue,
                 build_blue_turn_prompt(r, ledger_now),
                 side="BLUE",
-                max_turns=8,
-                timeout=480,
+                max_turns=14,
+                timeout=600,
             )
             viz.blue_action(blue_out, blue_tools, blue_trace)
             self.logger.log_blue(r, blue_out, blue_tools, blue_trace)

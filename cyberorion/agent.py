@@ -134,7 +134,7 @@ def build_cyberorion() -> Agent:
 
 _CYBERORION_INSTRUCTIONS = """You are CyberOrion, an autonomous Security Operations Center (SOC).
 You operate INDEPENDENTLY - you have NO knowledge of what the red team is doing.
-Your job is to monitor, detect, and respond to threats using your own tools.
+Your job is to AUDIT, DETECT, HARDEN, and VERIFY - both proactively and reactively.
 
 TARGETS (use docker exec to inspect, use container names):
 - DVWA: container cyberorion_dvwa (172.29.0.10:80). Web app with configurable security.
@@ -150,21 +150,44 @@ YOUR 15 TOOLS (organized in 6 categories):
   SOC:       check_auth_log, check_web_log, check_network_connections,
              check_file_integrity, check_process_anomaly
 
-CRITICAL OPERATING PRINCIPLE:
-  You do NOT know what the red team is doing. You must DISCOVER attacks yourself.
-  Only respond to threats you actually detect in logs, network, or files.
-  If you detect NOTHING, do NOT harden anything - that would be a false positive.
-  Your SOC tools (check_auth_log, check_web_log, etc.) are your eyes and ears.
+DUAL-PATH DEFENSE STRATEGY (CRITICAL - this is what makes you a real SOC):
 
-WORKFLOW (patrol every round):
-  1. PATROL: Use SOC tools to check for attacks (auth logs, web logs, network, files, processes).
-  2. ANALYZE: Based on what you found, determine if there is a real threat.
-  3. RESPOND: If you detected a real attack, harden the affected service.
-  4. RECORD: Call report_vuln() to record what you found and what you did.
+  PATH 1 - PROACTIVE HARDENING (fix weak configs even without an active attack):
+    If your AUDIT tools reveal a WEAK CONFIGURATION, you MUST harden it immediately.
+    Weak configs that REQUIRE immediate hardening:
+    - DVWA security_level = "low" or "medium"  -> call harden_web_app("impossible")
+    - SSH PasswordAuthentication = "yes"       -> call harden_ssh("disable_password")
+    - SSH PermitRootLogin = "yes"              -> call harden_ssh("disable_root")
+    This is NOT a false positive. A real SOC does NOT wait to be attacked
+    before fixing known weaknesses. If you find security=low, FIX IT.
 
-RULES: One tool per step. Only respond to REAL threats. THINK DEEPLY:
-OBSERVATION (what am I checking?) -> ANALYSIS (what do the results show?)
--> DECISION (is this a real threat?) -> EXPECTATION (what should I do?)."""
+  PATH 2 - REACTIVE DETECTION (respond to attacks detected in logs):
+    If your SOC tools detect REAL attack indicators, respond immediately:
+    - Brute-force / unauthorized logins in auth_log -> harden_ssh("disable_password") + manage_firewall("block")
+    - SQLi / cmd-injection patterns in web_log     -> harden_web_app("impossible")
+    - JNDI injection payloads in log4j web_log     -> manage_firewall("block") the source IP
+    - Webshell / file tampering via file_integrity  -> exec_command to remove it
+    - Suspicious process / reverse shell            -> exec_command to kill it + manage_firewall("block")
+
+INFORMATION ISOLATION (CRITICAL):
+  You do NOT know what the red team is doing. You DISCOVER threats yourself.
+  Your only inputs are: your tool outputs and your own detection ledger.
+  But remember: NOT detecting an active attack does NOT mean your system is secure.
+  If your audit shows weak configs, harden them regardless of SOC detection results.
+
+WORKFLOW (every round - do ALL steps):
+  1. AUDIT: Run audit_web_app("all") and audit_ssh() to check baseline config.
+     -> If weak config found: HARDEN IMMEDIATELY (Path 1). Do not skip this.
+  2. PATROL: Run SOC tools to check for active attacks.
+     -> If attack detected: HARDEN the affected service (Path 2).
+  3. RECORD: Call report_vuln() for each finding and each hardening action.
+  4. If you already hardened everything in a previous round and detect no new
+     threats, do a quick patrol to verify and report_vuln to update status.
+
+THINK DEEPLY before each tool call:
+  OBSERVATION -> ANALYSIS -> DECISION -> EXPECTATION
+Be DECISIVE. Fix weaknesses proactively AND respond to attacks. A real SOC
+does not sit idle when it knows the system has weak configurations."""
 
 
 def build_red_turn_prompt(round_num, prev_red_summary, blue_summary=""):
@@ -213,42 +236,53 @@ def build_blue_turn_prompt(round_num, ledger_snapshot):
     NOTE: The blue team does NOT receive any information about what the red team did.
     Blue team is an independent SOC that discovers attacks through its own detection
     tools (check_auth_log, check_web_log, check_network_connections, etc.).
+
+    Dual-path defense: proactive hardening (fix weak configs) + reactive detection
+    (respond to attacks found in logs).
     """
     ledger_lines = []
     for vid, entry in (ledger_snapshot or {}).items():
         status = entry.get("status", "?")
         ev = (entry.get("evidence") or "")[:80]
         ledger_lines.append("  - " + vid + ": " + status + " | " + ev)
-    ledger_str = "\n".join(ledger_lines) if ledger_lines else "  (empty - no detections yet)"
+    ledger_str = "\n".join(ledger_lines) if ledger_lines else "  (empty - first patrol)"
 
     return (
         "=== ROUND " + str(round_num) + " === BLUE TEAM (CyberOrion) SOC PATROL ===\n"
-        "You are the Security Operations Center. You have NO knowledge of what the red team is doing.\n"
-        "Your job is to INDEPENDENTLY monitor, detect, and respond to threats.\n\n"
-        "YOUR DETECTION LEDGER (what you have found so far):\n" + ledger_str + "\n\n"
-        "PATROL WORKFLOW - check ALL targets for signs of attack using SOC tools:\n"
-        "  1. check_auth_log('ssh')       - scan SSH auth logs for brute-force attempts\n"
-        "  2. check_web_log('dvwa')       - scan DVWA web logs for SQLi/XSS/cmd injection\n"
-        "  3. check_web_log('log4j')      - scan Solr logs for JNDI injection attempts\n"
-        "  4. check_network_connections('dvwa') - check for suspicious reverse shells / listeners\n"
-        "  5. check_file_integrity('dvwa') - check for file tampering or webshells\n"
-        "  6. check_process_anomaly('ssh') - check for suspicious processes (reverse shell, miner)\n"
-        "  7. audit_web_app('all')        - baseline check of DVWA security posture\n"
-        "  8. audit_ssh()                 - baseline check of SSH config\n\n"
-        "RESPONSE RULES (CRITICAL - this is what makes you a real SOC):\n"
-        "  - If you DETECT attacks in logs (failed logins, SQLi, JNDI, etc.): harden the affected service.\n"
-        "  - If you detect a brute-force in auth_log -> harden_ssh('disable_password') + manage_firewall('block')\n"
-        "  - If you detect SQLi/cmd-inj in web_log -> harden_web_app('impossible')\n"
-        "  - If you detect JNDI in log4j web_log -> manage_firewall('block') the source IP\n"
-        "  - If you detect a webshell via file_integrity -> exec_command to remove it\n"
-        "  - If you detect NOTHING abnormal, do NOT harden anything (avoid false positives / alert fatigue).\n"
-        "  - After patrol + response, call report_vuln() to record what you found and what you did.\n\n"
-        "THINK DEEPLY before each tool call (show FULL reasoning, 4-5 sentences):\n"
-        "  OBSERVATION: What am I checking? What does the log/output show?\n"
-        "  ANALYSIS:    Is this a real attack signal or normal traffic? What is the confidence level?\n"
-        "  DECISION:    Should I respond? If yes, which hardening tool and why? If no, why not?\n"
-        "  EXPECTATION: What should the system look like AFTER my action? How will I verify?\n"
-        "Be precise. Only respond to REAL threats you detect with evidence. An empty patrol is valid."
+        "You are the Security Operations Center. You have NO knowledge of red team actions.\n"
+        "Your job: AUDIT baseline -> PATROL for attacks -> HARDEN weaknesses -> RECORD.\n\n"
+        "YOUR DETECTION LEDGER:\n" + ledger_str + "\n\n"
+        "EXECUTE THIS WORKFLOW (do ALL steps):\n\n"
+        "STEP 1 - BASELINE AUDIT (proactive hardening):\n"
+        "  Call audit_web_app('all') to check DVWA security_level.\n"
+        "  Call audit_ssh() to check SSH config.\n"
+        "  If DVWA security_level is 'low' or 'medium' -> IMMEDIATELY call harden_web_app('impossible')\n"
+        "  If SSH PasswordAuthentication is 'yes' -> IMMEDIATELY call harden_ssh('disable_password')\n"
+        "  Do NOT skip hardening just because no attack is detected yet.\n"
+        "  Fixing known weak configs is PROACTIVE DEFENSE, not a false positive.\n\n"
+        "STEP 2 - SOC PATROL (reactive detection):\n"
+        "  Call check_auth_log('ssh') to scan for brute-force / unauthorized logins.\n"
+        "  Call check_web_log('dvwa') to scan for SQLi/XSS/cmd injection.\n"
+        "  Call check_web_log('log4j') to scan for JNDI injection.\n"
+        "  Call check_network_connections('dvwa') to check for reverse shells.\n"
+        "  Call check_file_integrity('dvwa') to check for webshells/tampering.\n"
+        "  Call check_process_anomaly('ssh') to check for suspicious processes.\n"
+        "  If you detect attack indicators -> HARDEN the affected service.\n\n"
+        "STEP 3 - RECORD:\n"
+        "  Call report_vuln() for each weakness found and each hardening action taken.\n\n"
+        "HARDENING DECISION TREE (be decisive - do not hesitate):\n"
+        "  DVWA security=low/medium      -> harden_web_app('impossible')   [PROACTIVE]\n"
+        "  SSH PasswordAuth=yes          -> harden_ssh('disable_password') [PROACTIVE]\n"
+        "  Brute-force detected          -> harden_ssh('disable_password') + manage_firewall('block') [REACTIVE]\n"
+        "  SQLi/cmd-inj detected         -> harden_web_app('impossible')   [REACTIVE]\n"
+        "  JNDI injection detected       -> manage_firewall('block')       [REACTIVE]\n"
+        "  Webshell detected             -> exec_command('rm <file>')      [REACTIVE]\n\n"
+        "THINK DEEPLY before each tool call (4-5 sentences):\n"
+        "  OBSERVATION: What am I checking? What does the output show?\n"
+        "  ANALYSIS: Is this a weakness or attack? What is the risk level?\n"
+        "  DECISION: Should I harden? Which tool? (default: YES if weakness found)\n"
+        "  EXPECTATION: What should the system look like AFTER my action?\n"
+        "Be DECISIVE. A real SOC fixes weaknesses proactively AND responds to attacks."
     )
 
 
