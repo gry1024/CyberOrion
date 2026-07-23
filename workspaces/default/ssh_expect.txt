@@ -1,9 +1,0 @@
-#!/usr/bin/expect -f
-set timeout 10
-spawn ssh -o StrictHostKeyChecking=no -p 22222 ctf@localhost "cat /home/ctf/flag.txt"
-expect {
-    "assword:" { send "ctf\r"; exp_continue }
-    "Password:" { send "ctf\r"; exp_continue }
-    eof
-}
-

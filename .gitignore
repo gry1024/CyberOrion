@@ -14,7 +14,7 @@ __pycache__/
 logs/cai_*.jsonl
 
 # Workspaces (agent-generated debug scripts, not part of the product)
-cyberorion/workspaces/
+workspaces/
 
 # Session logs: only keep the 3 most recent under samples/
 # (the logs/ dir itself is gitignored except for samples/)
