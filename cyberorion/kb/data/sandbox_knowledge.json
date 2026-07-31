@@ -1,0 +1,107 @@
+[
+  {
+    "id": "SBX001",
+    "name": "How to read a Hybrid Analysis sandbox report",
+    "type": "sandbox_report",
+    "description": "A Hybrid Analysis report is organized into sections: executive summary and verdict, signatures (behavioral indicators with severity), process tree and process activity (API calls per process), file operations (created/written/deleted files, dropped files with hashes), registry operations (keys set/deleted), network activity (DNS requests, HTTP/HTTPS requests, TCP/UDP connections, contacted hosts), extracted strings and imports, and a MITRE ATT&CK mapping. When answering questions about a report whose content is not shown, reason from the malware family's typical behavior and from which section each option would be observed in.",
+    "text": "SBX001 Hybrid Analysis sandbox report structure: executive summary, signatures, process tree, API calls, file operations, registry operations, network activity (DNS, HTTP, contacted hosts), dropped files, MITRE ATT&CK mapping. Reason from family-typical behavior when report content is unavailable."
+  },
+  {
+    "id": "SBX002",
+    "name": "Process injection and in-memory execution indicators",
+    "type": "sandbox_report",
+    "description": "Observable artifacts of process injection: OpenProcess followed by VirtualAllocEx, WriteProcessMemory and CreateRemoteThread (classic DLL/shellcode injection), NtMapViewOfSection, QueueUserAPC / NtQueueApcThread (APC injection), SetThreadContext + ResumeThread on a suspended process (process hollowing, usually created with CREATE_SUSPENDED), Thread Execution Hijacking. Runtime module loading via LoadLibrary/GetProcAddress is common and only mildly suspicious on its own; writing into or creating threads in a REMOTE process is strongly malicious. Reflective DLL injection and module unhooking leave few file artifacts and appear mainly in API call sequences and memory dumps.",
+    "text": "SBX002 Process injection indicators: OpenProcess VirtualAllocEx WriteProcessMemory CreateRemoteThread DLL injection shellcode injection, NtQueueApcThread APC injection, process hollowing CREATE_SUSPENDED SetThreadContext ResumeThread, Thread Execution Hijacking, reflective DLL injection, LoadLibrary GetProcAddress runtime module loading."
+  },
+  {
+    "id": "SBX003",
+    "name": "File operations: drops, self-copies and indicator removal",
+    "type": "sandbox_report",
+    "description": "Typical malicious file operations in a sandbox report: dropping executables or DLLs to %TEMP%, %APPDATA%, %LOCALAPPDATA%, %PROGRAMDATA% or the Windows directory; copying the sample to a new location with a legitimate-looking name (masquerading); writing configuration or stolen-data files; deleting files it created (Indicator Removal on Host, T1070) including self-deletion via batch scripts or cmd /c del; modifying or overwriting existing system files; creating files with double extensions or system-like names. High-volume file creation/writes in user directories suggests staging or ransomware.",
+    "text": "SBX003 Malicious file operations: drop payload to %TEMP% %APPDATA% %PROGRAMDATA%, self-copy with legitimate-looking name masquerading, delete created files indicator removal T1070, self-delete cmd /c del batch script, modify system files, double extensions, mass file creation staging."
+  },
+  {
+    "id": "SBX004",
+    "name": "Registry persistence mechanisms",
+    "type": "sandbox_report",
+    "description": "Persistence observable in registry operations: values written under HKCU or HKLM Software\\Microsoft\\Windows\\CurrentVersion\\Run and RunOnce (T1547.001), RunOnceEx, Policies\\Explorer\\Run, Winlogon Shell/Userinit, Image File Execution Options debugger hijack, AppInit_DLLs, disabling Windows Defender or security tools via policies keys, COM hijacks under Classes\\CLSID. HKCU Run keys need no admin rights and are the most common; HKLM writes indicate elevated privileges.",
+    "text": "SBX004 Registry persistence: HKCU HKLM CurrentVersion Run RunOnce key T1547.001, Winlogon Shell Userinit, Image File Execution Options debugger hijack, AppInit_DLLs, disable Windows Defender policies, COM hijack CLSID."
+  },
+  {
+    "id": "SBX005",
+    "name": "Persistence beyond the registry: tasks, services, startup, WMI",
+    "type": "sandbox_report",
+    "description": "Non-registry persistence artifacts: scheduled tasks created via schtasks.exe or the Task Scheduler COM API (T1053.005), often named like legitimate updates (UpdateSvc, GoogleUpdate); Windows services installed via sc.exe create or CreateService (T1543.003), frequently with random or system-like names; shortcuts dropped into the Startup folder (T1547.001); WMI event subscriptions via mofcomp or root\\subscription (T1546.003); modified boot configuration; DLL search order hijacking next to a signed legitimate executable (T1574.001).",
+    "text": "SBX005 Persistence: scheduled task schtasks T1053.005 UpdateSvc, Windows service sc create CreateService T1543.003, Startup folder shortcut, WMI event subscription T1546.003, DLL search order hijacking T1574.001 side-loading."
+  },
+  {
+    "id": "SBX006",
+    "name": "Anti-debugging and sandbox/VM evasion",
+    "type": "sandbox_report",
+    "description": "Evasion observable in a sandbox: anti-debugging API calls IsDebuggerPresent, CheckRemoteDebuggerPresent, NtQueryInformationProcess (ProcessDebugPort), OutputDebugString tricks, PEB BeingDebugged flag checks, RDTSC/timing checks; virtualization and sandbox detection via CPUID hypervisor bit, known VM MAC address prefixes, registry keys and drivers of VMware/VirtualBox/QEMU, checking screen resolution, mouse movement, recent files count or CPU core count; long Sleep calls or delayed execution to outrun the analysis window; checking for analysis tools (wireshark, procmon, fiddler) by process or window name.",
+    "text": "SBX006 Anti-debugging and sandbox evasion: IsDebuggerPresent CheckRemoteDebuggerPresent NtQueryInformationProcess ProcessDebugPort PEB BeingDebugged RDTSC timing check, CPUID hypervisor, VM MAC prefix, VMware VirtualBox QEMU registry driver detection, screen resolution mouse movement checks, long Sleep delayed execution, analysis tool detection."
+  },
+  {
+    "id": "SBX007",
+    "name": "Packing, obfuscation and dynamic API resolution",
+    "type": "sandbox_report",
+    "description": "Static and behavioral signs of packing/obfuscation: UPX or other packer section names, high-entropy sections, few readable strings, small import table combined with runtime loading; dynamic API resolution where the sample resolves function addresses at runtime via LoadLibrary/GetProcAddress or API hashing to hide imports from static analysis (T1027.007); code obfuscation with junk instructions, opaque predicates, string encryption (often XOR with a single byte key); embedded payloads stored in the resource section, overlay or as encrypted blobs decrypted in memory (T1027.009 / T1140); software packing (T1027.002). Packing plus dynamic API resolution is the standard combination used to evade traditional signature-based antivirus.",
+    "text": "SBX007 Packing obfuscation: UPX packer, high entropy sections, dynamic API resolution LoadLibrary GetProcAddress API hashing T1027.007, string encryption XOR, embedded payload resource section overlay encrypted blob T1027.009 deobfuscate decode T1140, software packing T1027.002, evade signature antivirus."
+  },
+  {
+    "id": "SBX008",
+    "name": "Infostealer typical sandbox behavior",
+    "type": "sandbox_report",
+    "description": "Typical infostealer (Agent Tesla, RedLine, Raccoon, Vidar, Lumma) behavior in a sandbox report: reading browser credential stores (Chrome Login Data / Cookies / Web Data SQLite files under %LOCALAPPDATA%\\Google\\Chrome\\User Data, Firefox logins.json and key4.db), reading crypto-wallet files and browser extensions, reading email client (Outlook, Thunderbird) and FTP/VPN/IM client credentials, keylogging via SetWindowsHookEx or GetAsyncKeyState, taking screenshots, enumerating and copying files with sensitive extensions (.txt .doc .wallet), then exfiltrating over HTTP(S) POST, SMTP, FTP or Telegram API to a C2, often followed by self-deletion. Credential access to browser stores maps to T1555.003, keylogging T1056.001, screen capture T1113, exfil over web T1041/T1567.",
+    "text": "SBX008 Infostealer behavior: steal browser credentials Chrome Login Data Cookies Web Data SQLite Firefox logins.json key4.db T1555.003, crypto wallet theft, Outlook Thunderbird FTP VPN credentials, keylogging SetWindowsHookEx GetAsyncKeyState T1056.001, screenshot T1113, exfiltrate HTTP POST SMTP FTP Telegram C2, self-delete. Agent Tesla RedLine Raccoon Vidar Lumma."
+  },
+  {
+    "id": "SBX009",
+    "name": "Ransomware typical sandbox behavior",
+    "type": "sandbox_report",
+    "description": "Typical ransomware behavior in a sandbox report: rapid enumeration of files across user directories and network shares, high-volume read-modify-write of files producing high-entropy content, appending a distinctive extension to encrypted files, dropping ransom notes (README/RECOVER/HOW TO DECRYPT .txt or .hta) in many folders, changing the desktop wallpaper, deleting volume shadow copies via vssadmin delete shadows /all /quiet or wmic shadowcopy delete (T1490 Inhibit System Recovery), disabling recovery with bcdedit set recoveryenabled no, stopping backup/database services (SQL, Exchange), sometimes clearing event logs (T1070.001) and exfiltrating data before encryption (double extortion).",
+    "text": "SBX009 Ransomware behavior: mass file enumeration encryption high entropy writes, extension rename, ransom note drop README HOW TO DECRYPT hta, vssadmin delete shadows T1490 inhibit system recovery, bcdedit recoveryenabled no, stop database backup services, clear event logs T1070.001, double extortion data theft."
+  },
+  {
+    "id": "SBX010",
+    "name": "AV/EDR killer and defense-impairment behavior",
+    "type": "sandbox_report",
+    "description": "AV-killer / EDR-killer malware behavior: enumerating running processes and services and terminating security products (antivirus, EDR agents, Windows Defender MsMpEng, monitoring tools) via taskkill /f /im, net stop, sc stop/delete or TerminateProcess (T1562.001 Impair Defenses); disabling Windows Defender through registry policies (DisableAntiSpyware, DisableRealtimeMonitoring) or tamper protection bypass; deleting or corrupting security product files; bringing a vulnerable signed driver (BYOVD) to gain kernel access and kill protected processes; unhooking user-mode API hooks placed by EDR in ntdll.dll (remapping a fresh copy of ntdll or restoring syscall stubs, also called user-mode unhooking) to blind sensors; clearing event logs with wevtutil.",
+    "text": "SBX010 AV killer EDR killer behavior: terminate security product processes taskkill net stop sc delete TerminateProcess T1562.001 impair defenses, disable Windows Defender registry DisableAntiSpyware DisableRealtimeMonitoring, BYOVD vulnerable signed driver kernel kill protected process, user-mode unhooking ntdll remap syscall stubs EDR hooks, wevtutil clear event logs."
+  },
+  {
+    "id": "SBX011",
+    "name": "Remcos RAT typical sandbox behavior",
+    "type": "sandbox_report",
+    "description": "Remcos is a commercial Remote Access Tool (RAT) frequently abused by attackers. Typical sandbox behavior: installs itself under %APPDATA% or %PROGRAMDATA% with a system-like name, persists via HKCU/HKLM Run key or scheduled task, creates a named mutex, connects to a hardcoded C2 IP or domain over TCP (often a custom RC4-encrypted or TLS channel), collects system information (computer name, username, OS version), supports keylogging (offline keylog files), screenshots, webcam and microphone capture, clipboard theft, remote shell and file transfer. Distribution often involves packed droppers, VBScript/PowerShell loaders and process injection into legitimate processes.",
+    "text": "SBX011 Remcos RAT behavior: commercial remote access tool, install %APPDATA% %PROGRAMDATA% system-like name, Run key scheduled task persistence, named mutex, C2 connection TCP RC4 TLS, system information collection, keylogging offline keylog, screenshot webcam microphone capture, clipboard theft, remote shell file transfer, packed dropper VBScript PowerShell loader process injection."
+  },
+  {
+    "id": "SBX012",
+    "name": "Network and C2 indicators",
+    "type": "sandbox_report",
+    "description": "Network section artifacts: beaconing to a C2 at fixed intervals, hardcoded IP addresses without DNS lookup, requests to dynamic-DNS or free-hosting domains, DGA-generated domain lookups (many NXDOMAIN responses, T1568.002), data exfiltration or C2 over DNS TXT/NULL queries (T1071.004), HTTP POST with encoded/encrypted bodies to rare user-agents, TLS to self-signed or unusual-issuer certificates, connections to TOR or proxy ports, SMTP/FTP exfiltration, use of legitimate services (Telegram, Discord, GitHub, pastebin) as dead-drop C2 (T1102).",
+    "text": "SBX012 Network C2 indicators: beaconing fixed interval, hardcoded IP, dynamic DNS domain, DGA many NXDOMAIN T1568.002, DNS TXT tunneling T1071.004, HTTP POST encoded body rare user agent, self-signed TLS, TOR proxy, SMTP FTP exfiltration, Telegram Discord GitHub pastebin dead drop T1102 legitimate service C2."
+  },
+  {
+    "id": "SBX013",
+    "name": "Privilege escalation indicators",
+    "type": "sandbox_report",
+    "description": "Privilege escalation observable in a sandbox: enabling dangerous privileges via AdjustTokenPrivileges (SeDebugPrivilege, SeImpersonatePrivilege, SeTakeOwnershipPrivilege, T1134 Access Token Manipulation), UAC bypass abusing auto-elevated COM objects or binaries (fodhelper.exe, computerdefaults.exe, eventvwr.exe with ms-settings or other protocol handler hijacks, T1548.002), token theft/impersonation with DuplicateTokenEx and named pipe impersonation (T1134.001/.003), exploiting unquoted service paths or weak service permissions, credential dumping from LSASS memory (comsvcs.dll MiniDump or direct lsass.exe access, T1003.001), and abusing AlwaysInstallElevated.",
+    "text": "SBX013 Privilege escalation: AdjustTokenPrivileges SeDebugPrivilege SeImpersonatePrivilege T1134 access token manipulation, UAC bypass fodhelper computerdefaults eventvwr auto-elevated COM T1548.002, token impersonation DuplicateTokenEx named pipe T1134.001 T1134.003, unquoted service path weak service permission, LSASS credential dump comsvcs MiniDump T1003.001."
+  },
+  {
+    "id": "SBX014",
+    "name": "Mapping sandbox artifacts to MITRE ATT&CK techniques",
+    "type": "sandbox_report",
+    "description": "Common artifact-to-technique mappings used in analysis questions: Run key or Startup folder write = T1547.001; schtasks/Task Scheduler = T1053.005; new service = T1543.003; vssadmin delete shadows = T1490; clearing logs = T1070.001; terminating security tools = T1562.001; IsDebuggerPresent/NtQueryInformationProcess = T1622 debugger evasion / T1497 virtualization-sandbox evasion; WriteProcessMemory+CreateRemoteThread = T1055 process injection; UPX/packer = T1027.002; dynamic API resolution/hashing = T1027.007; browser credential store access = T1555.003; LSASS access = T1003.001; keylogging APIs = T1056.001; screenshot = T1113; DGA domains = T1568.002; PowerShell execution = T1059.001; rundll32/regsvr32 abuse = T1218.",
+    "text": "SBX014 Artifact to ATT&CK mapping: Run key startup T1547.001, scheduled task T1053.005, service T1543.003, vssadmin shadow delete T1490, clear logs T1070.001, kill security tools T1562.001, debugger evasion T1622, sandbox evasion T1497, WriteProcessMemory CreateRemoteThread process injection T1055, packing T1027.002, dynamic API resolution T1027.007, browser credentials T1555.003, LSASS T1003.001, keylogger T1056.001, screenshot T1113, DGA T1568.002, PowerShell T1059.001, rundll32 regsvr32 T1218."
+  },
+  {
+    "id": "SBX015",
+    "name": "Assessing malware risk from observed capabilities",
+    "type": "sandbox_report",
+    "description": "Risk assessment reasoning for sandbox findings: capability clusters drive severity. Credential or browser-data theft plus outbound exfiltration = high data-loss risk; persistence mechanisms (Run keys, services, tasks) = long-term compromise risk; process injection and unhooking = stealth/evasion capability raising detection difficulty; mass file encryption and shadow-copy deletion = destructive ransomware impact; security-product termination = defense degradation enabling follow-on attacks; C2 connectivity = remote control risk. A sample combining persistence + credential theft + C2 exfiltration is typically rated critical even if each single behavior looks moderate.",
+    "text": "SBX015 Risk assessment: credential theft plus exfiltration high data loss, persistence long-term compromise, process injection unhooking stealth evasion, mass encryption shadow deletion destructive ransomware, security product termination defense degradation, C2 remote control, combined persistence credential theft exfiltration critical severity."
+  }
+]

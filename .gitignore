@@ -39,3 +39,13 @@ web/.vite/
 
 # Sync test artifact
 _sync_test.txt
+
+# KB generated data (rebuild: python -m cyberorion.kb.build_kb --with-malpedia)
+cyberorion/kb/data/enterprise-attack.json
+cyberorion/kb/data/attack_kb.jsonl
+cyberorion/kb/data/attack_kb_vecs.npz
+cyberorion/kb/data/malpedia_families.json
+
+# Session artifacts & samples (large transcripts)
+samples/
+state.txt

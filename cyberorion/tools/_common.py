@@ -15,18 +15,59 @@ import time
 import uuid
 from typing import Any, Callable
 
-TARGET_DVWA_IP = os.environ.get("CO_TARGET_DVWA_IP", "172.29.0.10")
-TARGET_SSH_IP = os.environ.get("CO_TARGET_SSH_IP", "172.29.0.12")
-DVWA_CONTAINER = os.environ.get("CO_DVWA_CONTAINER", "cyberorion_dvwa")
-SSH_CONTAINER = os.environ.get("CO_SSH_CONTAINER", "cyberorion_weak_ssh")
-LOG4J_CONTAINER = os.environ.get("CO_LOG4J_CONTAINER", "cyberorion_log4j")
-TARGET_LOG4J_IP = os.environ.get("CO_TARGET_LOG4J_IP", "172.29.0.20")
-LOG4J_HOST_PORT = int(os.environ.get("CO_LOG4J_HOST_PORT", "8983"))
-DVWA_HOST_PORT = int(os.environ.get("CO_DVWA_HOST_PORT", "28080"))
+from ..scenarios import load_scenario
+
+# Target config comes from the loaded scenario (default: CO_SCENARIO env var,
+# then "web_basic"). The CO_* environment variables below still override
+# individual values. Scenarios without the classic trio (e.g. CVE-Bench
+# single-target scenarios) get empty/localhost defaults — those constants are
+# only meaningful for the web_basic/web_plus arenas.
+_SCENARIO = load_scenario()
+_T_DVWA = _SCENARIO.targets.get("dvwa")
+_T_SSH = _SCENARIO.targets.get("weak_ssh")
+_T_LOG4J = _SCENARIO.targets.get("log4j")
+
+
+def _svc_port(target, service: str, default: int) -> int:
+    if target is not None and service in target.services:
+        return target.services[service].host_port
+    return default
+
+
+TARGET_DVWA_IP = os.environ.get("CO_TARGET_DVWA_IP", _T_DVWA.ip if _T_DVWA else "")
+TARGET_SSH_IP = os.environ.get("CO_TARGET_SSH_IP", _T_SSH.ip if _T_SSH else "")
+DVWA_CONTAINER = os.environ.get(
+    "CO_DVWA_CONTAINER", _T_DVWA.container if _T_DVWA else "")
+SSH_CONTAINER = os.environ.get(
+    "CO_SSH_CONTAINER", _T_SSH.container if _T_SSH else "")
+LOG4J_CONTAINER = os.environ.get(
+    "CO_LOG4J_CONTAINER", _T_LOG4J.container if _T_LOG4J else "")
+TARGET_LOG4J_IP = os.environ.get(
+    "CO_TARGET_LOG4J_IP", _T_LOG4J.ip if _T_LOG4J else "")
+LOG4J_HOST_PORT = int(os.environ.get(
+    "CO_LOG4J_HOST_PORT", str(_svc_port(_T_LOG4J, "http", 8983))))
+DVWA_HOST_PORT = int(os.environ.get(
+    "CO_DVWA_HOST_PORT", str(_svc_port(_T_DVWA, "http", 28080))))
 DVWA_HOST = os.environ.get("CO_DVWA_HOST", "127.0.0.1")
 
 TOOL_CALL_LOG: list = []
 VULN_LEDGER: dict = {}
+
+# Optional reference to a SessionState instance. When set (by the server /
+# controller), _ledger_set also mirrors the entry into the SessionState
+# dual-scope ledger so the frontend can observe it in real time.
+_SESSION_STATE_REF: Any = None
+
+
+def set_session_state_ref(ss) -> None:
+    """Register a SessionState instance so ledger writes are mirrored."""
+    global _SESSION_STATE_REF
+    _SESSION_STATE_REF = ss
+
+
+def get_session_state_ref():
+    return _SESSION_STATE_REF
+
 
 
 def reset_state() -> None:
@@ -145,7 +186,18 @@ def _resolve_container(name: str) -> str:
     return name
 
 
-def _ledger_set(vuln_id: str, status: str, evidence: str = "", extra=None) -> dict:
+def _ledger_set(vuln_id: str, status: str, evidence: str = "", extra=None,
+               scope: str = "session") -> dict:
+    """Record a vulnerability entry in VULN_LEDGER and mirror it to
+    SessionState (if registered) with explicit global/session scope.
+
+    Args:
+        scope: "global" for persistent target-config vulns (e.g.
+            SSH-WEAK-PWD, DVWA-SECURITY-LEVEL) or "session" for
+            observed-this-session vulns (e.g. WEB-SQL_INJECTION).
+    """
+    merged = dict(extra or {})
+    merged["scope"] = scope
     entry = VULN_LEDGER.get(vuln_id, {"vuln_id": vuln_id, "history": []})
     history = entry.get("history", [])
     history.append({"status": status, "evidence": evidence, "at": time.time()})
@@ -154,9 +206,19 @@ def _ledger_set(vuln_id: str, status: str, evidence: str = "", extra=None) -> di
         "status": status,
         "evidence": evidence,
         "history": history,
-        "extra": extra or {},
+        "extra": merged,
+        "scope": scope,
     })
     VULN_LEDGER[vuln_id] = entry
+
+    # Mirror to SessionState for frontend visibility.
+    ss = _SESSION_STATE_REF
+    if ss is not None:
+        try:
+            ss.set_ledger(vuln_id, status, evidence=evidence,
+                          scope=scope, extra=merged)
+        except Exception:
+            pass
     return entry
 
 

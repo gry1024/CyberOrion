@@ -1,0 +1,100 @@
+name: web_plus
+description: >
+  Extended 5-target arena: the web_basic trio (DVWA, weak SSH, Log4Shell
+  Solr) plus WebGoat and VAmPI. The two extra targets are heavier and
+  opt-in — start them with `docker compose --profile web_plus up -d`.
+network:
+  subnet: 172.29.0.0/24
+  compose_profiles: [web_plus]
+
+targets:
+  dvwa:
+    container: cyberorion_dvwa
+    ip: 172.29.0.10
+    services:
+      http:
+        container_port: 80
+        host_port: 28080
+        proto: http
+        base_url: "http://localhost:28080"
+    logs:
+      web_access: /var/log/apache2/access.log
+      web_error: /var/log/apache2/error.log
+    ground_truth:
+      creds:
+        dvwa_admin: "admin:password"
+      users: []
+      flags: []
+      vulns: [sqli, cmdi, upload, brute_force]
+
+  weak_ssh:
+    container: cyberorion_weak_ssh
+    ip: 172.29.0.12
+    services:
+      ssh:
+        container_port: 22
+        host_port: 22222
+        proto: ssh
+    logs:
+      auth: /var/log/sshd.log
+    ground_truth:
+      creds:
+        user: "user:user"
+        admin: "admin:admin123"
+        ctf: "ctf:ctf"
+      users: [root, user, admin, ctf]
+      flags: [/home/ctf/flag.txt]
+      vulns: [weak_password, password_auth, root_login]
+
+  log4j:
+    container: cyberorion_log4j
+    ip: 172.29.0.20
+    services:
+      http:
+        container_port: 8983
+        host_port: 8983
+        proto: http
+        base_url: "http://localhost:8983"
+    logs:
+      solr: /var/solr/logs/solr.log
+    ground_truth:
+      creds: {}
+      users: []
+      flags: []
+      vulns: [log4shell]  # CVE-2021-44228, vulhub/solr:8.11.0
+
+  webgoat:
+    container: cyberorion_webgoat
+    ip: 172.29.0.13
+    services:
+      http:
+        container_port: 8080
+        host_port: 28081
+        proto: http
+        base_url: "http://localhost:28081/WebGoat"
+    logs:
+      # WebGoat (Spring Boot) logs to stdout; follow `docker logs -f`.
+      stdout: docker_logs
+    ground_truth:
+      creds: {}
+      users: []
+      flags: [/opt/flag.txt]
+      vulns: [sqli, xss, auth_bypass, jwt]
+
+  vampi:
+    container: cyberorion_vampi
+    ip: 172.29.0.14
+    services:
+      http:
+        container_port: 5000
+        host_port: 25000
+        proto: http
+        base_url: "http://localhost:25000"
+    logs:
+      # VAmPI (Flask/werkzeug) logs to stdout; follow `docker logs -f`.
+      stdout: docker_logs
+    ground_truth:
+      creds: {}
+      users: []
+      flags: [/opt/flag.txt]
+      vulns: [sqli, jwt_alg_none, bola, excessive_data]

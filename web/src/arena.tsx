@@ -1,0 +1,663 @@
+// Arena data layer: single WebSocket client (exp-backoff reconnect) + REST
+// polling fallback, fanned out into one React context. No redux.
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { ReactNode } from 'react'
+import { api } from './api'
+import { pushToast } from './toasts'
+import type {
+  AlertRow,
+  ArenaEvent,
+  BenchLiveRun,
+  BenchMode,
+  BenchSuite,
+  ControllerStatus,
+  HostState,
+  HostStatus,
+  ScenarioInfo,
+  Side,
+  TeamState,
+  ThoughtStep,
+  TimelineItem,
+} from './types'
+
+const MAX_STEPS_PER_SIDE = 300
+const MAX_TIMELINE = 400
+
+const RESPONSE_TOOLS = new Set(['block_ip', 'unblock_ip', 'harden_service'])
+const FAILURE_PREFIXES = ['非法', '无法', '加固失败', '回滚失败', '未知 service']
+
+interface ArenaState {
+  connected: boolean
+  status: ControllerStatus
+  scenario: ScenarioInfo | null
+  redSteps: ThoughtStep[]
+  blueSteps: ThoughtStep[]
+  team: TeamState
+  timeline: TimelineItem[]
+  alerts: AlertRow[]
+  hosts: Record<string, HostStatus>
+  benchLive: Record<string, BenchLiveRun>
+  /** Bumped whenever a bench run completes/fails — triggers a runs refetch. */
+  benchStamp: number
+  refreshStatus: () => Promise<void>
+  refreshAlerts: () => Promise<void>
+  refreshScenario: () => Promise<void>
+  clearSteps: (side: Side) => void
+}
+
+function emptyStatus(): ControllerStatus {
+  return {
+    red_running: false,
+    blue_running: false,
+    red_paused: false,
+    blue_paused: false,
+    session_active: false,
+    scenario: '',
+    round: 0,
+    ledger: {},
+    red_history_count: 0,
+    blue_history_count: 0,
+  }
+}
+
+let counter = 0
+function nextId(prefix: string): string {
+  counter += 1
+  return `${prefix}${counter}`
+}
+
+function capped<T>(list: T[], item: T, cap: number): T[] {
+  const next = list.concat(item)
+  return next.length > cap ? next.slice(next.length - cap) : next
+}
+
+/** Pull suite/mode/n out of a bench run_id like
+ * `20260727_172628_attack_kb_rag_n100` or
+ * `20260801_015004_cybergym_framework_n1` (pre-suite ids lack the suite part). */
+function parseBenchRunId(runId: string): {
+  mode: BenchMode
+  suite: BenchSuite
+  n: number
+} {
+  const m =
+    /_(malware_analysis|attack_kb|cybergym)_(rag_fs|rag_g|sc_base|base|rag|sc|vanilla|framework)_n(\d+)/.exec(
+      runId,
+    ) ?? /_(rag_fs|rag_g|sc_base|base|rag|sc|vanilla|framework)_n(\d+)/.exec(runId)
+  if (!m) return { mode: 'base', suite: 'malware_analysis', n: 0 }
+  if (m.length === 4) {
+    return { suite: m[1] as BenchSuite, mode: m[2] as BenchMode, n: Number(m[3]) }
+  }
+  return { suite: 'malware_analysis', mode: m[1] as BenchMode, n: Number(m[2]) }
+}
+
+/** Match a telemetry host / attack target string to a scenario target name. */
+function matchTarget(
+  key: string,
+  scenario: ScenarioInfo | null,
+): string | null {
+  if (!key || !scenario) return null
+  const k = key.toLowerCase()
+  for (const t of scenario.targets) {
+    if (
+      k === t.name.toLowerCase() ||
+      k === t.container.toLowerCase() ||
+      k === t.ip ||
+      k.includes(t.name.toLowerCase()) ||
+      t.name.toLowerCase().includes(k)
+    ) {
+      return t.name
+    }
+  }
+  return null
+}
+
+/** Try to pull a host/container value out of a tool-call args JSON string. */
+function hostFromArgs(args: string | undefined): string {
+  if (!args) return ''
+  try {
+    const obj = JSON.parse(args) as Record<string, unknown>
+    for (const k of ['container', 'host', 'target']) {
+      const v = obj[k]
+      if (typeof v === 'string' && v) return v
+    }
+  } catch {
+    /* not JSON */
+  }
+  return ''
+}
+
+const ArenaCtx = createContext<ArenaState | null>(null)
+
+export function ArenaProvider({ children }: { children: ReactNode }) {
+  const [connected, setConnected] = useState(false)
+  const [status, setStatus] = useState<ControllerStatus>(emptyStatus())
+  const [scenario, setScenario] = useState<ScenarioInfo | null>(null)
+  const [redSteps, setRedSteps] = useState<ThoughtStep[]>([])
+  const [blueSteps, setBlueSteps] = useState<ThoughtStep[]>([])
+  const [team, setTeam] = useState<TeamState>({ active: {}, done: [], dispatched: {} })
+  const [timeline, setTimeline] = useState<TimelineItem[]>([])
+  const [alerts, setAlerts] = useState<AlertRow[]>([])
+  const [hosts, setHosts] = useState<Record<string, HostStatus>>({})
+  const [benchLive, setBenchLive] = useState<Record<string, BenchLiveRun>>({})
+  const [benchStamp, setBenchStamp] = useState(0)
+
+  // Latest tool_call per side, so a following tool_output can be attributed.
+  const lastTool = useRef<Record<Side, { tool: string; args: string }>>({
+    red: { tool: '', args: '' },
+    blue: { tool: '', args: '' },
+    system: { tool: '', args: '' },
+  })
+  const scenarioRef = useRef<ScenarioInfo | null>(null)
+  scenarioRef.current = scenario
+
+  const pushTimeline = useCallback((item: Omit<TimelineItem, 'id'>) => {
+    setTimeline((prev) =>
+      [{ ...item, id: nextId('t') }, ...prev].slice(0, MAX_TIMELINE),
+    )
+  }, [])
+
+  const setHost = useCallback(
+    (key: string, state: HostState, ts: number, note?: string) => {
+      const name = matchTarget(key, scenarioRef.current)
+      if (!name) return
+      setHosts((prev) => {
+        const cur = prev[name]
+        // Keep the most recent significant state per host.
+        if (cur && cur.ts > ts) return prev
+        return { ...prev, [name]: { state, ts, note } }
+      })
+    },
+    [],
+  )
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await api.getStatus())
+    } catch {
+      /* keep last known state */
+    }
+  }, [])
+
+  const refreshAlerts = useCallback(async () => {
+    try {
+      setAlerts(await api.getAlerts())
+    } catch {
+      /* keep last */
+    }
+  }, [])
+
+  const refreshScenario = useCallback(async () => {
+    try {
+      setScenario(await api.getScenario())
+    } catch {
+      /* backend not ready */
+    }
+  }, [])
+
+  const clearSteps = useCallback((side: Side) => {
+    if (side === 'red') setRedSteps([])
+    else if (side === 'blue') setBlueSteps([])
+  }, [])
+
+  // ------------------------------------------------------------------ //
+  // WebSocket event fan-out
+  // ------------------------------------------------------------------ //
+  const handleEvent = useCallback(
+    (ev: ArenaEvent) => {
+      const ts = ev.timestamp || Date.now() / 1000
+      const d = ev.data || {}
+      // Blue super-agent attribution; missing = orchestrator (legacy too).
+      const agent = typeof d.agent === 'string' ? d.agent : undefined
+
+      switch (ev.type) {
+        case 'snapshot': {
+          setStatus((prev) => ({ ...prev, ...(d as Partial<ControllerStatus>) }))
+          break
+        }
+        case 'error': {
+          // 后端 agent_run / session_reset / telemetry_init 等失败 — 全局 toast。
+          const message = String(d.message ?? '未知错误')
+          pushToast(message, {
+            side: ev.side,
+            title:
+              ev.side === 'red'
+                ? '红方错误'
+                : ev.side === 'blue'
+                  ? '蓝方错误'
+                  : '系统错误',
+          })
+          pushTimeline({
+            kind: 'system',
+            ts,
+            title: `✗ ${ev.side} 错误`,
+            detail: message.slice(0, 300),
+            severity: 'critical',
+            raw: d,
+          })
+          break
+        }
+        case 'thinking': {
+          const step: ThoughtStep = {
+            id: nextId('s'),
+            kind: 'thinking',
+            text: String(d.text ?? ''),
+            agent,
+            timestamp: ts,
+          }
+          if (ev.side === 'red') setRedSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+          else if (ev.side === 'blue') setBlueSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+          break
+        }
+        case 'tool_call': {
+          const tool = String(d.tool ?? '')
+          const args = String(d.args ?? '')
+          lastTool.current[ev.side] = { tool, args }
+          const step: ThoughtStep = {
+            id: nextId('s'),
+            kind: 'tool_call',
+            tool,
+            args,
+            agent,
+            timestamp: ts,
+          }
+          if (ev.side === 'red') setRedSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+          else if (ev.side === 'blue') {
+            setBlueSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+            // Dispatch linkage: orchestrator dispatch_task(role=X) activates
+            // the orchestrator→X edge in the agent-chain panel.
+            if (tool === 'dispatch_task' && (agent ?? 'orchestrator') === 'orchestrator') {
+              try {
+                const role = String(
+                  (JSON.parse(args) as Record<string, unknown>).role ?? '',
+                )
+                if (role) {
+                  setTeam((prev) => ({
+                    ...prev,
+                    dispatched: { ...prev.dispatched, [role]: ts },
+                  }))
+                }
+              } catch {
+                /* args not JSON */
+              }
+            }
+          }
+          break
+        }
+        case 'tool_output': {
+          const output = String(d.output ?? '')
+          const { tool, args } = lastTool.current[ev.side]
+          const step: ThoughtStep = {
+            id: nextId('s'),
+            kind: 'tool_output',
+            tool,
+            output,
+            agent,
+            timestamp: ts,
+          }
+          if (ev.side === 'red') setRedSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+          else if (ev.side === 'blue') setBlueSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+
+          // Blue-side defensive actions double as timeline 处置 / 告警 items.
+          if (ev.side === 'blue' && RESPONSE_TOOLS.has(tool)) {
+            const failed = FAILURE_PREFIXES.some((p) => output.startsWith(p))
+            if (!failed) {
+              const host = hostFromArgs(args)
+              pushTimeline({
+                kind: 'response',
+                ts,
+                title: `${tool} 处置完成`,
+                detail: output.slice(0, 300),
+                host,
+                raw: d,
+              })
+              if (tool === 'harden_service' || tool === 'block_ip') {
+                setHost(host, 'hardened', ts, tool)
+              }
+            }
+          }
+          if (ev.side === 'blue' && tool === 'report_finding') {
+            pushTimeline({
+              kind: 'alert',
+              ts,
+              title: '蓝方上报发现 (report_finding)',
+              detail: output.slice(0, 300),
+              raw: d,
+            })
+            void refreshAlerts()
+          }
+          break
+        }
+        case 'attack': {
+          // Ground-truth records carry a target; round summaries don't.
+          if (typeof d.target === 'string' && d.target) {
+            const success = Boolean(d.success)
+            pushTimeline({
+              kind: 'attack',
+              ts,
+              title: `${d.target} · ${String(d.technique ?? '') || '未知技术'}`,
+              detail: `${String(d.action ?? '')} ${success ? '✓ 成功' : '✗ 失败'}`,
+              severity: success ? 'critical' : 'medium',
+              success,
+              host: String(d.target),
+              raw: d,
+            })
+            if (success) setHost(String(d.target), 'compromised', ts, String(d.technique ?? ''))
+          } else {
+            pushTimeline({
+              kind: 'system',
+              ts,
+              title: '红方回合结束',
+              detail: String(d.output ?? '').slice(0, 200),
+              raw: d,
+            })
+          }
+          break
+        }
+        case 'telemetry': {
+          const sev = String(d.severity ?? 'info')
+          const host = String(d.host ?? '')
+          pushTimeline({
+            kind: 'telemetry',
+            ts,
+            title: `${host} · ${String(d.source ?? '')}`,
+            detail: String(d.summary ?? '').slice(0, 300),
+            severity: sev,
+            host,
+            raw: d,
+          })
+          setHost(host, 'alert', ts, sev)
+          break
+        }
+        case 'detection': {
+          pushTimeline({
+            kind: 'system',
+            ts,
+            title: '蓝方研判回合结束',
+            detail: String(d.output ?? '').slice(0, 200),
+            raw: d,
+          })
+          break
+        }
+        case 'scenario': {
+          // Scenario was switched server-side; re-pull topology + status.
+          void refreshScenario()
+          void refreshStatus()
+          break
+        }
+        case 'bench': {
+          // CyberSOCEval harness progress/completion (side = system).
+          const runId = String(d.run_id ?? '')
+          if (!runId) break
+          const status = String(d.status ?? 'running')
+          const prog = d.progress as { done?: number; total?: number } | undefined
+          const llmErrors = Number(d.llm_errors ?? 0)
+          setBenchLive((prev) => {
+            const cur = prev[runId]
+            const parsed = parseBenchRunId(runId)
+            const next: BenchLiveRun = {
+              run_id: runId,
+              mode: cur?.mode ?? parsed.mode,
+              suite: cur?.suite ?? parsed.suite,
+              n: cur?.n ?? parsed.n,
+              status,
+              progress: {
+                done: Number(prog?.done ?? cur?.progress.done ?? 0),
+                total: Number(prog?.total ?? cur?.progress.total ?? parsed.n),
+              },
+              error: typeof d.error === 'string' ? d.error : undefined,
+              llm_errors: llmErrors,
+            }
+            if (status === 'running') return { ...prev, [runId]: next }
+            // Finished runs live in /api/bench/runs — drop from the live map.
+            const rest = { ...prev }
+            delete rest[runId]
+            return rest
+          })
+          if (status !== 'running') {
+            // LLM 故障不再静默：全部失败（error）或部分失败都在右上角提示。
+            if (status === 'error') {
+              pushToast(
+                `Benchmark 运行失败：${String(d.error ?? '未知错误').slice(0, 200)}`,
+                { side: 'system', title: 'Benchmark' },
+              )
+            } else if (llmErrors > 0) {
+              pushToast(
+                `Benchmark 完成，但 ${llmErrors} 题模型调用失败` +
+                  (typeof d.error === 'string' ? `：${d.error.slice(0, 160)}` : ''),
+                { side: 'system', title: 'Benchmark' },
+              )
+            }
+            setBenchStamp(Date.now())
+          }
+          break
+        }
+        case 'team': {
+          // Blue super-agent team: orchestrator dispatched a sub-agent
+          // (spawn) or the sub-agent reported back (done).
+          if (ev.side !== 'blue') break
+          const role = String(d.role ?? '')
+          if (!role) break
+          const mission = String(d.mission ?? '')
+          if (d.event === 'spawn') {
+            setTeam((prev) => ({
+              ...prev,
+              active: { ...prev.active, [role]: { mission, since: ts } },
+            }))
+            pushTimeline({
+              kind: 'team',
+              ts,
+              title: `▸ 派遣 ${role}`,
+              detail: mission.slice(0, 300),
+              raw: d,
+            })
+          } else if (d.event === 'done') {
+            const report = String(d.report ?? '')
+            setTeam((prev) => {
+              const active = { ...prev.active }
+              delete active[role]
+              return {
+                active,
+                dispatched: prev.dispatched,
+                done: capped(
+                  prev.done,
+                  { id: nextId('r'), role, mission, report, ts },
+                  50,
+                ),
+              }
+            })
+            // Collapsible report card inside the blue stream.
+            const card: ThoughtStep = {
+              id: nextId('s'),
+              kind: 'report',
+              agent: role,
+              role,
+              mission,
+              report,
+              timestamp: ts,
+            }
+            setBlueSteps((p) => capped(p, card, MAX_STEPS_PER_SIDE))
+            pushTimeline({
+              kind: 'team',
+              ts,
+              title: `✓ ${role} 完成`,
+              detail: report.slice(0, 300),
+              raw: d,
+            })
+          }
+          break
+        }
+        case 'reset': {
+          // Target reset at session start (side = system).
+          pushTimeline({
+            kind: 'system',
+            ts,
+            title: '⟲ 靶标环境已重置',
+            detail: '所有目标容器已恢复到初始快照',
+            raw: d,
+          })
+          break
+        }
+        case 'session_start': {
+          pushTimeline({
+            kind: 'system',
+            ts,
+            title: '会话开始',
+            detail: String(d.session_id ?? ''),
+            raw: d,
+          })
+          setHosts({})
+          setTeam({ active: {}, done: [], dispatched: {} })
+          setTimeline((prev) => prev)
+          void refreshStatus()
+          break
+        }
+        case 'session_end': {
+          pushTimeline({
+            kind: 'system',
+            ts,
+            title: '会话结束',
+            detail: String(d.session_id ?? ''),
+            raw: d,
+          })
+          setTeam({ active: {}, done: [], dispatched: {} })
+          void refreshStatus()
+          void refreshAlerts()
+          break
+        }
+        case 'round_start':
+        case 'round_end': {
+          if (ev.side === 'system' && d.action) {
+            pushTimeline({
+              kind: 'system',
+              ts,
+              title: `${String(d.target ?? '')} ${String(d.action)}`,
+              raw: d,
+            })
+          }
+          void refreshStatus()
+          break
+        }
+        default:
+          break
+      }
+    },
+    [pushTimeline, setHost, refreshStatus, refreshAlerts, refreshScenario],
+  )
+
+  // ------------------------------------------------------------------ //
+  // WebSocket lifecycle with exponential-backoff reconnect
+  // ------------------------------------------------------------------ //
+  useEffect(() => {
+    let closed = false
+    let ws: WebSocket | null = null
+    let attempts = 0
+    let timer: number | null = null
+
+    const connect = () => {
+      if (closed) return
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      try {
+        ws = new WebSocket(`${proto}://${window.location.host}/ws`)
+      } catch {
+        schedule()
+        return
+      }
+      ws.onopen = () => {
+        attempts = 0
+        setConnected(true)
+        void refreshStatus()
+        void refreshAlerts()
+        void refreshScenario()
+      }
+      ws.onmessage = (msg) => {
+        try {
+          handleEvent(JSON.parse(msg.data) as ArenaEvent)
+        } catch {
+          /* malformed frame */
+        }
+      }
+      ws.onclose = () => {
+        setConnected(false)
+        schedule()
+      }
+      ws.onerror = () => {
+        try {
+          ws?.close()
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const schedule = () => {
+      if (closed) return
+      attempts += 1
+      const delay = Math.min(1000 * 2 ** attempts, 15000)
+      timer = window.setTimeout(connect, delay)
+    }
+
+    connect()
+    return () => {
+      closed = true
+      if (timer !== null) window.clearTimeout(timer)
+      try {
+        ws?.close()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [handleEvent, refreshStatus, refreshAlerts, refreshScenario])
+
+  // Polling fallback: status 4s, alerts 5s.
+  useEffect(() => {
+    const t1 = window.setInterval(() => void refreshStatus(), 4000)
+    const t2 = window.setInterval(() => void refreshAlerts(), 5000)
+    void refreshScenario()
+    return () => {
+      window.clearInterval(t1)
+      window.clearInterval(t2)
+    }
+  }, [refreshStatus, refreshAlerts, refreshScenario])
+
+  const value = useMemo<ArenaState>(
+    () => ({
+      connected,
+      status,
+      scenario,
+      redSteps,
+      blueSteps,
+      team,
+      timeline,
+      alerts,
+      hosts,
+      benchLive,
+      benchStamp,
+      refreshStatus,
+      refreshAlerts,
+      refreshScenario,
+      clearSteps,
+    }),
+    [
+      connected, status, scenario, redSteps, blueSteps, team, timeline,
+      alerts, hosts, benchLive, benchStamp, refreshStatus,
+      refreshAlerts, refreshScenario, clearSteps,
+    ],
+  )
+
+  return <ArenaCtx.Provider value={value}>{children}</ArenaCtx.Provider>
+}
+
+export function useArena(): ArenaState {
+  const ctx = useContext(ArenaCtx)
+  if (!ctx) throw new Error('useArena must be used inside <ArenaProvider>')
+  return ctx
+}

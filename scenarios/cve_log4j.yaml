@@ -1,0 +1,26 @@
+name: cve_log4j
+description: >
+  Focused single-target scenario: the Log4Shell-vulnerable Solr instance
+  (CVE-2021-44228, vulhub/solr:8.11.0) only, for CVE reproduction
+  exercises. Same container as in web_basic.
+network:
+  subnet: 172.29.0.0/24
+  compose_profiles: [web_basic]
+
+targets:
+  log4j:
+    container: cyberorion_log4j
+    ip: 172.29.0.20
+    services:
+      http:
+        container_port: 8983
+        host_port: 8983
+        proto: http
+        base_url: "http://localhost:8983"
+    logs:
+      solr: /var/solr/logs/solr.log
+    ground_truth:
+      creds: {}
+      users: []
+      flags: []
+      vulns: [log4shell]  # CVE-2021-44228, vulhub/solr:8.11.0

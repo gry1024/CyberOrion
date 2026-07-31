@@ -23,11 +23,22 @@ from .event_bus import EventBus, Event
 class AgentRunner:
     """Runs an agent concurrently, streaming events to the EventBus."""
 
-    def __init__(self, event_bus: EventBus, side: str):
+    def __init__(self, event_bus: EventBus, side: str,
+                 agent_label: "str | None" = None):
         if side not in ("red", "blue"):
             raise ValueError(f"side must be 'red' or 'blue', got {side!r}")
         self.event_bus = event_bus
         self.side = side
+        # 多代理团队场景下标注事件来自哪个 agent（如 "orchestrator"），
+        # 会注入到每个发布事件的 data["agent"]；None 时保持原形状。
+        self.agent_label = agent_label
+
+    def _tag(self, data: dict[str, Any]) -> dict[str, Any]:
+        """给事件 data 注入 agent 标签（未设置时原样返回）。"""
+        if self.agent_label:
+            data = dict(data)
+            data["agent"] = self.agent_label
+        return data
 
     async def run(
         self,
@@ -88,7 +99,14 @@ class AgentRunner:
             output = f"({self.side} timed out after {timeout}s)"
             await self.event_bus.publish(Event(
                 type="tool_output", side=self.side,
-                data={"output": output, "error": "timeout"},
+                data=self._tag({"output": output, "error": "timeout"}),
+            ))
+            await self.event_bus.publish(Event(
+                type="error", side=self.side,
+                data=self._tag({
+                    "message": f"{self.side} agent 运行超时（{timeout}s）",
+                    "source": "agent_run",
+                }),
             ))
         except Exception as exc:
             ename = type(exc).__name__
@@ -96,7 +114,15 @@ class AgentRunner:
             output = f"(agent error: {ename}: {exc})"
             await self.event_bus.publish(Event(
                 type="tool_output", side=self.side,
-                data={"output": output, "error": ename, "traceback": tb},
+                data=self._tag({"output": output, "error": ename,
+                                "traceback": tb}),
+            ))
+            await self.event_bus.publish(Event(
+                type="error", side=self.side,
+                data=self._tag({
+                    "message": f"{ename}: {exc}"[:400],
+                    "source": "agent_run",
+                }),
             ))
 
         # Tool calls recorded during this run (best-effort slice).
@@ -129,7 +155,7 @@ class AgentRunner:
             if name:
                 await self.event_bus.publish(Event(
                     type="thinking", side=self.side,
-                    data={"text": f"[agent: {name}]"},
+                    data=self._tag({"text": f"[agent: {name}]"}),
                 ))
             return
 
@@ -148,7 +174,8 @@ class AgentRunner:
             if text:
                 trace_items.append({"type": "thinking", "text": text})
                 await self.event_bus.publish(Event(
-                    type="thinking", side=self.side, data={"text": text},
+                    type="thinking", side=self.side,
+                    data=self._tag({"text": text}),
                 ))
             return
 
@@ -161,7 +188,7 @@ class AgentRunner:
             })
             await self.event_bus.publish(Event(
                 type="tool_call", side=self.side,
-                data={"tool": tool_name, "args": arguments},
+                data=self._tag({"tool": tool_name, "args": arguments}),
             ))
             return
 
@@ -172,7 +199,8 @@ class AgentRunner:
             out_str = str(out)
             trace_items.append({"type": "tool_output", "output": out_str})
             await self.event_bus.publish(Event(
-                type="tool_output", side=self.side, data={"output": out_str},
+                type="tool_output", side=self.side,
+                data=self._tag({"output": out_str}),
             ))
             return
 
@@ -182,7 +210,7 @@ class AgentRunner:
                 trace_items.append({"type": "thinking", "text": text})
                 await self.event_bus.publish(Event(
                     type="thinking", side=self.side,
-                    data={"text": text, "reasoning": True},
+                    data=self._tag({"text": text, "reasoning": True}),
                 ))
             return
 

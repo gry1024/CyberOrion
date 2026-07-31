@@ -122,8 +122,12 @@ def _patch_dvwa_cookie_bypass(level: str) -> str:
         + level + "';\n"
         "}"
     )
-    pattern = r"function dvwaSecurityLevelGet\(\)\s*\{[^}]*\}"
-    new_page = re.sub(pattern, lambda m: new_func, page, count=1)
+    # 匹配到行首的函数结束大括号（stock 函数内部 if/elseif 也有嵌套
+    # 大括号，用 [^}]* 会截断在第一个内层 } 上，留下孤儿 elseif 残段
+    # 把 PHP 语法打破）。
+    pattern = r"function dvwaSecurityLevelGet\(\)\s*\{.*?\n\}"
+    new_page = re.sub(pattern, lambda m: new_func, page, count=1,
+                      flags=re.DOTALL)
 
     if new_page == page:
         return "cookie-bypass patch: function not matched (already patched or DVWA changed)"

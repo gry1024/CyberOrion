@@ -1,41 +1,46 @@
 """CyberOrion tools package.
 
-15 tools organized in 6 categories:
-  Recon:     scan_services, inspect_target
-  Web:       audit_web_app, harden_web_app
-  SSH:       audit_ssh, harden_ssh
-  Network:   manage_firewall, inspect_network
-  Response:  exec_command, report_vuln
-  SOC:       check_auth_log, check_web_log, check_network_connections, check_file_integrity, check_process_anomaly
+P3 architecture:
+  Blue: cyberorion.tools.blue（10 个基于遥测的 SOC 工具，见 blue/__init__.py）
+  Red:  cyberorion.tools.red（5 个纯网络攻击面工具 + 裁判，
+        nmap_scan / ssh_bruteforce / ssh_command / http_request /
+        claim_success，见 red/__init__.py）
 """
 
-from .recon import scan_services, inspect_target
-from .dvwa import audit_web_app, harden_web_app
-from .ssh import audit_ssh, harden_ssh
-from .generic import manage_firewall, inspect_network, exec_command
-from .ledger import report_vuln
-from .soc import (
-    check_auth_log,
-    check_web_log,
-    check_network_connections,
-    check_file_integrity,
-    check_process_anomaly,
+from .blue import (
+    query_logs,
+    network_summary,
+    process_audit,
+    file_integrity,
+    report_finding,
+    triage_alert,
+    list_alerts,
+    block_ip,
+    unblock_ip,
+    harden_service,
+)
+from .red import (
+    nmap_scan,
+    ssh_bruteforce,
+    ssh_command,
+    http_request,
+    claim_success,
 )
 
 __all__ = [
-    "scan_services",
-    "inspect_target",
-    "audit_web_app",
-    "harden_web_app",
-    "audit_ssh",
-    "harden_ssh",
-    "manage_firewall",
-    "inspect_network",
-    "exec_command",
-    "report_vuln",
-    "check_auth_log",
-    "check_web_log",
-    "check_network_connections",
-    "check_file_integrity",
-    "check_process_anomaly",
+    "query_logs",
+    "network_summary",
+    "process_audit",
+    "file_integrity",
+    "report_finding",
+    "triage_alert",
+    "list_alerts",
+    "block_ip",
+    "unblock_ip",
+    "harden_service",
+    "nmap_scan",
+    "ssh_bruteforce",
+    "ssh_command",
+    "http_request",
+    "claim_success",
 ]

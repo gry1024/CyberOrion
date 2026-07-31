@@ -1,7 +1,12 @@
 # CyberOrion arena targets.
 # Self-contained: 3 vulnerable targets on an isolated bridge network.
-# Start:  docker compose up -d
+# Start:  docker compose up -d                      (web_basic 3 targets)
+# Start heavy set:  docker compose --profile web_plus up -d
 # Stop:   docker compose down
+#
+# The dvwa/weak_ssh/log4j services carry no `profiles:` key, so they
+# always start (default = web_basic). Heavier targets are opt-in via
+# compose profiles.
 
 services:
   dvwa:
@@ -35,6 +40,52 @@ services:
       cyberorion_net:
         ipv4_address: 172.29.0.12
     restart: unless-stopped
+
+  # --- profile: web_plus (opt-in heavier targets) -------------------------
+
+  webgoat:
+    image: webgoat/webgoat:latest
+    container_name: cyberorion_webgoat
+    profiles: [web_plus]
+    ports:
+      - "28081:8080"
+    volumes:
+      - ./scenarios/flags/webgoat_flag.txt:/opt/flag.txt:ro
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.13
+    restart: unless-stopped
+
+  vampi:
+    image: erev0s/vampi:latest
+    container_name: cyberorion_vampi
+    profiles: [web_plus]
+    environment:
+      - vulnerable=1
+    ports:
+      - "25000:5000"
+    volumes:
+      - ./scenarios/flags/vampi_flag.txt:/opt/flag.txt:ro
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.14
+    restart: unless-stopped
+
+  # --- future: crAPI (profile: api_heavy) ---------------------------------
+  # OWASP crAPI (https://github.com/OWASP/crAPI) is a full microservices
+  # stack (mongodb, postgres, mailhog, gateway, ...); too heavy for the
+  # default arena. When needed, vendor its compose file and attach the
+  # services to cyberorion_net under a dedicated profile, e.g.:
+  #
+  #   crapi_gateway:
+  #     image: crapi/crapi-gateway:latest
+  #     container_name: cyberorion_crapi
+  #     profiles: [api_heavy]
+  #     ports:
+  #       - "28888:80"
+  #     networks:
+  #       cyberorion_net:
+  #         ipv4_address: 172.29.0.15
 
 networks:
   cyberorion_net:
