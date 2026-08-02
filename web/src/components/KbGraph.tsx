@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KbTactic } from '../types'
+import { useTheme } from '../theme'
 
 interface GNode {
   id: string
@@ -34,7 +35,34 @@ interface Graph {
   edges: GEdge[]
 }
 
-const ACCENT = '#5ed29c'
+// 画布调色板：跟随明暗主题（canvas 不消费 CSS 变量，显式取值）。
+function palette(theme: 'light' | 'dark') {
+  return theme === 'dark'
+    ? {
+        accent: '#f5f5f5',
+        edgeHot: 'rgba(255,255,255,0.45)',
+        edgeNormal: 'rgba(255,255,255,0.10)',
+        edgeDim: 'rgba(255,255,255,0.04)',
+        tacticFill: 'rgba(255,255,255,0.10)',
+        labelStrong: 'rgba(255,255,255,0.90)',
+        labelWeak: 'rgba(255,255,255,0.55)',
+        techHi: '#e0e0e0',
+        techBase: '#9aa39e',
+        ring: 'rgba(255,255,255,0.45)',
+      }
+    : {
+        accent: '#111',
+        edgeHot: 'rgba(0,0,0,0.10)',
+        edgeNormal: 'rgba(0,0,0,0.03)',
+        edgeDim: 'rgba(0,0,0,0.015)',
+        tacticFill: 'rgba(0,0,0,0.06)',
+        labelStrong: 'rgba(0,0,0,0.85)',
+        labelWeak: 'rgba(0,0,0,0.55)',
+        techHi: '#333',
+        techBase: '#8a8a8a',
+        ring: 'rgba(0,0,0,0.45)',
+      }
+}
 const REP_RADIUS2 = 240 * 240
 
 function buildGraph(tactics: KbTactic[]): Graph {
@@ -168,6 +196,9 @@ export function KbGraph({
   const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
   const alphaRef = useRef(1)
   const [query, setQuery] = useState('')
+  // 主题切换时重绘：palette 随主题取色。
+  const theme = useTheme()
+  const P = palette(theme)
 
   const graph = useMemo(() => buildGraph(tactics), [tactics])
   graphRef.current = graph
@@ -271,10 +302,10 @@ export function KbGraph({
           (e.a === hover || e.b === hover) &&
           (isHi(e.a) && isHi(e.b))
         ctx.strokeStyle = hot
-          ? 'rgba(94,210,156,0.55)'
+          ? P.edgeHot
           : dimOthers
-            ? 'rgba(255,255,255,0.02)'
-            : 'rgba(255,255,255,0.055)'
+            ? P.edgeDim
+            : P.edgeNormal
         ctx.beginPath()
         ctx.moveTo(a.x, a.y)
         ctx.lineTo(b.x, b.y)
@@ -289,39 +320,39 @@ export function KbGraph({
         if (n.kind === 'tactic') {
           ctx.beginPath()
           ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-          ctx.fillStyle = 'rgba(94,210,156,0.16)'
+          ctx.fillStyle = P.tacticFill
           ctx.fill()
           ctx.lineWidth = 1.4 / v.k
-          ctx.strokeStyle = ACCENT
+          ctx.strokeStyle = P.accent
           ctx.stroke()
           ctx.beginPath()
           ctx.arc(n.x, n.y, 3, 0, Math.PI * 2)
-          ctx.fillStyle = ACCENT
+          ctx.fillStyle = P.accent
           ctx.fill()
-          ctx.font = `600 ${11 / v.k}px Inter, sans-serif`
+          ctx.font = `600 ${11 / v.k}px Barlow, sans-serif`
           ctx.textAlign = 'center'
-          ctx.fillStyle = 'rgba(242,245,243,0.92)'
+          ctx.fillStyle = P.labelStrong
           ctx.fillText(n.label, n.x, n.y - n.r - 6 / v.k)
         } else {
           ctx.beginPath()
           ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-          ctx.fillStyle = i === hover ? ACCENT : '#9aa39e'
+          ctx.fillStyle = i === hover ? P.techHi : P.techBase
           ctx.fill()
           if (n.ring) {
             ctx.beginPath()
             ctx.arc(n.x, n.y, n.r + 2, 0, Math.PI * 2)
             ctx.lineWidth = 0.8 / v.k
-            ctx.strokeStyle = 'rgba(94,210,156,0.5)'
+            ctx.strokeStyle = P.ring
             ctx.stroke()
           }
           // 放大后显示技术名；悬停/搜索命中始终显示。
           if (v.k >= 1.9 || i === hover || i === match) {
-            ctx.font = `${9.5 / v.k}px Inter, sans-serif`
+            ctx.font = `${9.5 / v.k}px Barlow, sans-serif`
             ctx.textAlign = 'center'
             ctx.fillStyle =
               i === hover || i === match
-                ? 'rgba(242,245,243,0.95)'
-                : 'rgba(200,208,203,0.7)'
+                ? P.labelStrong
+                : P.labelWeak
             ctx.fillText(
               n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label,
               n.x,
@@ -336,7 +367,7 @@ export function KbGraph({
           ctx.beginPath()
           ctx.arc(n.x, n.y, n.r + 4 + t * 10, 0, Math.PI * 2)
           ctx.lineWidth = 1.2 / v.k
-          ctx.strokeStyle = ACCENT
+          ctx.strokeStyle = P.accent
           ctx.stroke()
         }
         ctx.globalAlpha = 1
@@ -348,7 +379,7 @@ export function KbGraph({
       cancelAnimationFrame(raf)
       ro.disconnect()
     }
-  }, [])
+  }, [P])
 
   // ------------------------------------------------------------------ //
   // 交互
@@ -459,7 +490,7 @@ export function KbGraph({
           }}
           onKeyDown={(e) => e.key === 'Enter' && jumpTo(query)}
           placeholder="搜索技术编号 / 名称，回车定位…"
-          className="glass w-[240px] rounded-full border border-hairline px-3.5 py-1.5 text-[11px] text-neutral-200 outline-none transition-colors placeholder:text-text-3 focus:border-accent/40"
+          className="w-[240px] rounded-full border border-hairline bg-panel px-3.5 py-1.5 text-[11px] text-fg outline-none transition-colors placeholder:text-text-3 focus:border-line-3"
         />
         <span className="glass rounded-full border border-hairline px-2.5 py-1 font-mono text-[9px] text-text-2">
           {tactics.length} 战术 · {techCount} 技术
@@ -471,7 +502,7 @@ export function KbGraph({
           战术
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#9aa39e]" />
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#8a8a8a]" />
           技术
         </span>
         <span className="flex items-center gap-1">

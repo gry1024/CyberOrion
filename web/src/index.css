@@ -1,238 +1,452 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   CyberOrion — Kimi 布局 + Grok 深色默认 · 紧凑字号
+   -------------------------------------------------------------
+   布局令牌：Kimi chat 桌面版实测（240px 侧边栏 / 768px 内容列 /
+   白卡 12–24px 圆角 / 14px 基础字号）。
+   配色默认：Grok 式近黑深色（#0D0D0D 底 / 白字 / 灰阶控件）。
+   .light 类可切回 Kimi 浅色。字号整体紧凑（body 13px 基调）。
+   ============================================================================ */
+
 @theme {
-  /* surfaces — CodeNest-inspired dark green: near-black green base,
-     panels are translucent white with hairline borders */
-  --color-ink: #070b0a;
-  --color-raised: #0c100e;
-  --color-overlay: #131917;
-  --color-hover: #1b2320;
-  --color-hairline: rgba(255, 255, 255, 0.08);
+  /* ---- 基底（默认 = Grok 深色；.light 覆盖为 Kimi 浅色） ---- */
+  --color-bg:        #0d0d0d;
+  --color-bg-2:      #151515;
+  --color-panel:     #171717;
+  --color-panel-2:   #1f1f1f;
+  --color-panel-3:   #2a2a2a;
+  --color-ink:       #f5f5f5;
 
-  /* neutral text ramp (green-tinted grays) */
-  --color-text-1: #f2f5f3;
-  --color-text-2: #8a938f;
-  --color-text-3: #4a524e;
+  /* ---- 线 & 分隔 ---- */
+  --color-line:      rgba(255, 255, 255, 0.09);
+  --color-line-2:    rgba(255, 255, 255, 0.16);
+  --color-line-3:    rgba(255, 255, 255, 0.24);
+  --color-hairline:  rgba(255, 255, 255, 0.08);
 
-  /* primary accent — CyberOrion green */
-  --color-accent: #5ed29c;
+  /* ---- 文字（白灰层级） ---- */
+  --color-fg:        rgba(255, 255, 255, 0.92);
+  --color-fg-2:      rgba(255, 255, 255, 0.64);
+  --color-fg-3:      rgba(255, 255, 255, 0.44);
+  --color-fg-4:      rgba(255, 255, 255, 0.30);
+  --color-text-1:    rgba(255, 255, 255, 0.92);
+  --color-text-2:    rgba(255, 255, 255, 0.64);
+  --color-text-3:    rgba(255, 255, 255, 0.44);
+  --color-text-4:    rgba(255, 255, 255, 0.30);
 
-  /* semantic accents only — everything else stays monochrome */
-  --color-attacker: #ff453a; /* 红方 / 攻击 */
-  --color-defender: #5ed29c; /* 蓝方 — 与主 accent 统一 */
-  --color-success: #5ed29c;
-  --color-warning: #ff9f0a;
-  --color-link: #5ed29c;
+  /* ---- 叠层 ---- */
+  --color-overlay:   rgba(255, 255, 255, 0.06);
+  --color-raised:    rgba(255, 255, 255, 0.09);
+  --color-hover:     rgba(255, 255, 255, 0.12);
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI", Roboto, "PingFang SC", "Helvetica Neue", "Microsoft YaHei",
-    sans-serif;
-  --font-display: "Plus Jakarta Sans", "Inter", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-  --font-serif: "Instrument Serif", Georgia, serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+  /* ---- 语义色（深色下可读） ---- */
+  --color-amber:     #e8a33d;
+  --color-amber-2:   #ffc46b;
+  --color-amber-soft:rgba(232, 163, 61, 0.12);
+  --color-cyan:      #5eead4;
+  --color-cyan-2:    #8ff0e2;
+  --color-cyan-soft: rgba(94, 234, 212, 0.12);
+  --color-red:       #ff6b78;
+  --color-red-soft:  rgba(255, 107, 120, 0.12);
+  --color-green:     #4ade80;
+  --color-green-soft:rgba(74, 222, 128, 0.12);
+  --color-purple:    #c4b5fd;
+  --color-purple-soft:rgba(196, 181, 253, 0.12);
+  --color-blue:      #7ab2ff;
+  --color-blue-soft: rgba(122, 178, 255, 0.12);
+  --color-orange:    #ff9c5b;
+
+  /* ---- 攻击/成功/警示 别名 ---- */
+  --color-attacker:  #ff6b78;
+  --color-success:   #4ade80;
+  --color-warning:   #e8a33d;
+
+  /* ---- 流式输出语义 ---- */
+  --color-thinking:  rgba(255, 255, 255, 0.55);
+  --color-reasoning: #c4b5fd;
+  --color-tool:      #5eead4;
+  --color-output:    rgba(255, 255, 255, 0.72);
+  --color-error:     #ff6b78;
+  --color-cmd:       #e8a33d;
+
+  /* ---- 蓝队角色 ---- */
+  --color-watcher:   #7ab2ff;
+  --color-analyst:   #c4b5fd;
+  --color-responder: #ff9c5b;
+  --color-hunter:    #4ade80;
+
+  /* ---- 字体：Claude 网页版（system-ui 打头 + SF mono 代码栈） ---- */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans CJK SC";
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas,
     "Liberation Mono", monospace;
+  --font-disp: var(--font-sans);
 }
 
-html,
-body,
-#root {
+/* ---- 浅色模式（Kimi 风，切换类 .light） ---- */
+.light {
+  --color-bg:        #fbfaf9;
+  --color-bg-2:      #f2f1ef;
+  --color-panel:     #ffffff;
+  --color-panel-2:   #f5f4f2;
+  --color-panel-3:   #efeeec;
+  --color-ink:       #0c0c0c;
+
+  --color-line:      rgba(0, 0, 0, 0.07);
+  --color-line-2:    rgba(0, 0, 0, 0.12);
+  --color-line-3:    rgba(0, 0, 0, 0.18);
+  --color-hairline:  rgba(0, 0, 0, 0.06);
+
+  --color-fg:        rgba(0, 0, 0, 0.9);
+  --color-fg-2:      rgba(0, 0, 0, 0.62);
+  --color-fg-3:      rgba(0, 0, 0, 0.45);
+  --color-fg-4:      rgba(0, 0, 0, 0.30);
+  --color-text-1:    rgba(0, 0, 0, 0.9);
+  --color-text-2:    rgba(0, 0, 0, 0.62);
+  --color-text-3:    rgba(0, 0, 0, 0.45);
+  --color-text-4:    rgba(0, 0, 0, 0.30);
+
+  --color-overlay:   rgba(0, 0, 0, 0.04);
+  --color-raised:    rgba(0, 0, 0, 0.06);
+  --color-hover:     rgba(0, 0, 0, 0.08);
+
+  --color-amber:     #b26a00;
+  --color-amber-2:   #8f5400;
+  --color-amber-soft:rgba(178, 106, 0, 0.08);
+  --color-cyan:      #0f766e;
+  --color-cyan-2:    #115e59;
+  --color-cyan-soft: rgba(15, 118, 110, 0.08);
+  --color-red:       #d64550;
+  --color-red-soft:  rgba(214, 69, 80, 0.08);
+  --color-green:     #1a7f4e;
+  --color-green-soft:rgba(26, 127, 78, 0.08);
+  --color-purple:    #6d5bd0;
+  --color-purple-soft:rgba(109, 91, 208, 0.08);
+  --color-blue:      #1d6fd1;
+  --color-blue-soft: rgba(29, 111, 209, 0.08);
+  --color-orange:    #c2410c;
+
+  --color-attacker:  #d64550;
+  --color-success:   #1a7f4e;
+  --color-warning:   #b26a00;
+
+  --color-thinking:  rgba(0, 0, 0, 0.55);
+  --color-reasoning: #6d5bd0;
+  --color-tool:      #0f766e;
+  --color-output:    rgba(0, 0, 0, 0.68);
+  --color-error:     #d64550;
+  --color-cmd:       #b26a00;
+
+  --color-watcher:   #1d6fd1;
+  --color-analyst:   #6d5bd0;
+  --color-responder: #c2410c;
+  --color-hunter:    #1a7f4e;
+}
+
+html, body, #root {
   height: 100%;
   margin: 0;
-  background: var(--color-ink);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
 }
 
 body {
-  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow: hidden;
 }
 
-/* Panel chrome: translucent white on dark green, hairline border */
+/* ============================================================================
+   卡片
+   ============================================================================ */
 .panel {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-panel);
   border: 1px solid var(--color-hairline);
   border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-
-/* Eyebrow / micro-label style: Jakarta bold uppercase, green */
-.eyebrow {
-  font-family: var(--font-display);
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
+.liquid-glass,
+.liquid-glass-strong { background: var(--color-panel); border: 1px solid var(--color-hairline); border-radius: 12px; }
+.liquid-glass:hover,
+.liquid-glass-strong:hover { background: var(--color-panel-2); }
+.liquid-glass-strong { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35); }
 
 .panel-title {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1rem;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-fg);
   border-bottom: 1px solid var(--color-hairline);
-  font-family: var(--font-display);
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
+}
+.eyebrow {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--color-fg-4);
   text-transform: uppercase;
-  color: var(--color-accent);
-  flex: none;
 }
 
-/* Liquid glass for header / floating cards (toasts, drawers, modals) */
-.glass {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08);
-}
-
-/* Pill buttons */
-.btn-pill {
+/* ============================================================================
+   按钮 — 紧凑
+   ============================================================================ */
+.btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  border-radius: 9999px;
-  padding: 0.25rem 0.8rem;
-  font-family: var(--font-display);
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-fg);
+  background: var(--color-panel);
+  border: 1px solid var(--color-line-2);
+  border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
 }
-.btn-pill:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
+.btn:hover:not(:disabled) { background: var(--color-panel-2); }
+.btn:active:not(:disabled) { background: var(--color-panel-3); }
+.btn:disabled { cursor: not-allowed; opacity: 0.38; }
+
 .btn-primary {
-  background: var(--color-accent);
-  color: #070b0a;
+  color: #161616;
+  background: #f5f5f5;
+  border-color: #f5f5f5;
 }
-.btn-primary:hover:not(:disabled) {
-  background: #7be0b2;
-}
+.btn-primary:hover:not(:disabled) { background: #ddd; border-color: #ddd; }
+.light .btn-primary { color: #fff; background: #111; border-color: #111; }
+.light .btn-primary:hover:not(:disabled) { background: #2a2a2a; border-color: #2a2a2a; }
+
 .btn-danger {
-  background: rgba(255, 69, 58, 0.1);
-  color: var(--color-attacker);
-  border: 1px solid rgba(255, 69, 58, 0.3);
+  color: var(--color-red);
+  background: var(--color-red-soft);
+  border-color: color-mix(in srgb, var(--color-red) 35%, transparent);
 }
-.btn-danger:hover:not(:disabled) {
-  background: rgba(255, 69, 58, 0.2);
-}
-.btn-ghost {
-  background: rgba(255, 255, 255, 0.05);
-  color: #c4ccc8;
-  border: 1px solid transparent;
-}
-.btn-ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f2f5f3;
-}
-.btn-accent-ghost {
-  background: rgba(94, 210, 156, 0.1);
-  color: var(--color-accent);
-  border: 1px solid rgba(94, 210, 156, 0.25);
-}
-.btn-accent-ghost:hover:not(:disabled) {
-  background: rgba(94, 210, 156, 0.18);
-}
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-red) 14%, transparent); }
 
-/* thin scrollbars for internal panel scrolling */
-.scroll-thin {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
-}
-.scroll-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scroll-thin::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 3px;
-}
-.scroll-thin::-webkit-scrollbar-track {
+.btn-ghost { border-color: transparent; background: transparent; color: var(--color-fg-2); }
+.btn-ghost:hover:not(:disabled) { background: var(--color-overlay); color: var(--color-fg); }
+
+/* 导航 tab */
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--color-fg-2);
+  border-radius: 8px;
+  border: none;
   background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tab:hover { background: var(--color-overlay); color: var(--color-fg); }
+.tab-active { background: var(--color-panel-2); color: var(--color-fg); font-weight: 500; }
+
+/* 滚动条 */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.22) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.35); }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.light .scroll-thin { scrollbar-color: rgba(0, 0, 0, 0.18) transparent; }
+.light .scroll-thin::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); }
+.light .scroll-thin::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.30); }
+
+/* ============================================================================
+   动画
+   ============================================================================ */
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.live-pulse { animation: livepulse 1.6s ease-in-out infinite; }
+
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadein 0.22s ease-out; }
+
+@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.cursor-blink::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--color-fg-3);
+  animation: blink 1s steps(1) infinite;
 }
 
-/* subtle live dot pulse */
-@keyframes livepulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.live-pulse {
-  animation: livepulse 1.8s ease-in-out infinite;
-}
+/* ============================================================================
+   流式输出语义色
+   ============================================================================ */
+.stream-thinking  { color: var(--color-thinking); font-size: 12.5px; line-height: 1.7; }
+.stream-reasoning { color: var(--color-reasoning); font-size: 12.5px; line-height: 1.7; }
+.stream-tool      { color: var(--color-tool); font-weight: 600; }
+.stream-output    { color: var(--color-output); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; }
+.stream-error     { color: var(--color-error); }
 
-/* agent-chain edge "pulse": marching dashes toward the sub-agent node */
-@keyframes edgeflow {
-  to { stroke-dashoffset: -20; }
-}
-.edge-flow {
-  animation: edgeflow 0.9s linear infinite;
-}
-
-/* per-agent panel top-border "执行中" sweep */
-@keyframes scanline {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-.agent-running-line {
-  position: relative;
-  overflow: hidden;
-}
-.agent-running-line::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 1px;
-  width: 25%;
-  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-  animation: scanline 1.6s linear infinite;
-}
-
-/* rendered report markdown */
-.md-view {
-  font-size: 0.8125rem;
-  line-height: 1.65;
-  color: #c9d1cc;
-}
-.md-view h1, .md-view h2, .md-view h3, .md-view h4 {
-  color: var(--color-text-1);
-  margin: 1em 0 0.45em;
-  font-weight: 600;
-}
-.md-view h1 { font-size: 1.15rem; border-bottom: 1px solid var(--color-hairline); padding-bottom: 0.35em; }
-.md-view h2 { font-size: 1rem; }
-.md-view h3 { font-size: 0.9rem; }
+/* ============================================================================
+   Markdown 渲染 — 深色为主，.light 自动反转
+   ============================================================================ */
+.md-view { font-size: 13px; line-height: 1.7; color: var(--color-fg); word-break: break-word; }
+.md-view h1, .md-view h2, .md-view h3, .md-view h4 { font-weight: 600; color: var(--color-fg); margin: 1.1em 0 0.45em; line-height: 1.35; }
+.md-view h1 { font-size: 1.25rem; }
+.md-view h2 { font-size: 1.1rem; }
+.md-view h3 { font-size: 0.98rem; }
+.md-view h4 { font-size: 0.92rem; }
 .md-view p { margin: 0.5em 0; }
+.md-view p:first-child { margin-top: 0; }
 .md-view code {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-panel-2);
   border: 1px solid var(--color-hairline);
   border-radius: 4px;
-  padding: 0 4px;
-  font-size: 0.75rem;
-  color: #d1d1d6;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+  color: var(--color-fg);
 }
 .md-view pre {
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--color-panel-2);
   border: 1px solid var(--color-hairline);
   border-radius: 10px;
-  padding: 0.65rem 0.8rem;
+  padding: 10px 14px;
   overflow-x: auto;
   margin: 0.6em 0;
+  font-size: 12px;
+  line-height: 1.55;
 }
-.md-view pre code { background: none; border: none; padding: 0; color: #a3a3a3; }
-.md-view ul, .md-view ol { padding-left: 1.35em; margin: 0.45em 0; }
-.md-view li { margin: 0.2em 0; }
-.md-view table { border-collapse: collapse; margin: 0.6em 0; width: 100%; }
-.md-view th, .md-view td { border: 1px solid var(--color-hairline); padding: 4px 9px; font-size: 0.75rem; text-align: left; }
-.md-view th { background: rgba(255, 255, 255, 0.05); color: #a3a3a3; }
-.md-view blockquote { border-left: 2px solid var(--color-text-3); padding-left: 0.9em; color: #a3a3a3; margin: 0.6em 0; }
-.md-view a { color: var(--color-link); text-decoration: none; }
+.md-view pre code { background: none; border: none; padding: 0; color: var(--color-fg); font-size: inherit; }
+.md-view ul, .md-view ol { padding-left: 1.4em; margin: 0.5em 0; }
+.md-view li { margin: 0.22em 0; }
+.md-view li::marker { color: var(--color-fg-3); }
+.md-view table { border-collapse: collapse; margin: 0.7em 0; width: 100%; font-size: 12px; }
+.md-view th, .md-view td { border: 1px solid var(--color-line); padding: 5px 9px; text-align: left; }
+.md-view th { background: var(--color-panel-2); color: var(--color-fg); font-weight: 600; }
+.md-view blockquote { border-left: 3px solid var(--color-line-3); padding-left: 12px; color: var(--color-fg-2); margin: 0.7em 0; }
+.md-view a { color: var(--color-blue); text-decoration: none; }
 .md-view a:hover { text-decoration: underline; }
-.md-view hr { border: none; border-top: 1px solid var(--color-hairline); margin: 0.9em 0; }
+.md-view hr { border: none; border-top: 1px solid var(--color-line); margin: 1em 0; }
+.md-view strong { color: var(--color-fg); font-weight: 600; }
+
+/* 文档（长文）渲染 */
+.md-doc { font-size: 13.5px; line-height: 1.75; color: var(--color-fg); }
+.md-doc h1, .md-doc h2, .md-doc h3, .md-doc h4 { font-weight: 600; color: var(--color-fg); margin: 1.4em 0 0.5em; }
+.md-doc h1 { font-size: 1.4rem; margin-top: 0; }
+.md-doc h2 { font-size: 1.15rem; }
+.md-doc h3 { font-size: 1.0rem; }
+.md-doc p { margin: 0.55em 0; }
+.md-doc code { background: var(--color-panel-2); border: 1px solid var(--color-hairline); border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.85em; font-family: var(--font-mono); color: var(--color-fg); }
+.md-doc pre { background: var(--color-panel-2); border: 1px solid var(--color-hairline); border-radius: 10px; padding: 12px 16px; overflow-x: auto; margin: 0.8em 0; }
+.md-doc pre code { background: none; border: none; padding: 0; font-size: 12px; line-height: 1.6; color: var(--color-fg); }
+.md-doc ul, .md-doc ol { padding-left: 1.5em; margin: 0.55em 0; }
+.md-doc li { margin: 0.25em 0; }
+.md-doc table { border-collapse: collapse; margin: 0.8em 0; width: 100%; }
+.md-doc th, .md-doc td { border: 1px solid var(--color-line); padding: 6px 11px; font-size: 12.5px; text-align: left; }
+.md-doc th { background: var(--color-panel-2); color: var(--color-fg); font-weight: 600; }
+.md-doc blockquote { border-left: 3px solid var(--color-line-3); padding-left: 14px; color: var(--color-fg-2); margin: 0.8em 0; }
+.md-doc a { color: var(--color-blue); text-decoration: none; }
+.md-doc a:hover { text-decoration: underline; }
+.md-doc hr { border: none; border-top: 1px solid var(--color-line); margin: 1.1em 0; }
+
+/* ============================================================================
+   Kimi 式聊天流组件
+   ============================================================================ */
+.kimi-msg { padding: 8px 14px; border-radius: 14px; font-size: 13px; line-height: 1.7; }
+.kimi-msg-user { background: var(--color-panel); border: 1px solid var(--color-hairline); }
+.kimi-msg-assistant { background: var(--color-panel-2); border: 1px solid var(--color-hairline); }
+.kimi-toolcard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-line);
+  color: var(--color-fg-2);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.kimi-toolcard:hover { background: var(--color-panel-3); color: var(--color-fg); }
+.kimi-toolcard.is-red { color: var(--color-red); background: var(--color-red-soft); border-color: color-mix(in srgb, var(--color-red) 30%, transparent); }
+.kimi-toolcard.is-blue { color: var(--color-tool); background: var(--color-cyan-soft); border-color: color-mix(in srgb, var(--color-tool) 30%, transparent); }
+
+/* 侧边栏 */
+.sidebar {
+  width: 240px;
+  flex: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-hairline);
+  background: var(--color-bg);
+}
+.sidebar-section-title {
+  padding: 12px 16px 5px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--color-fg-4);
+}
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 16px);
+  padding: 6px 12px;
+  margin: 1px 8px;
+  font-size: 12.5px;
+  color: var(--color-fg-2);
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.sidebar-item:hover { background: var(--color-overlay); color: var(--color-fg); }
+.sidebar-item-active { background: var(--color-panel-2); color: var(--color-fg); font-weight: 500; }
+
+/* 输入框（Kimi 式：大圆角卡） */
+.kimi-input {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line-2);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.kimi-input:focus-within { border-color: var(--color-line-3); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
+
+/* 徽章/圆点 */
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-fg-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pulse, .fade-in, .cursor-blink::after { animation: none; }
+}

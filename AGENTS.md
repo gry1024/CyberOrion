@@ -12,9 +12,9 @@
 **当前状态快照**：
 
 - 代码包 `cyberorion/`，服务入口 `server.py`（FastAPI，:8000），前端 `web/`（React 19 + Vite + Tailwind v4，构建产物 `web/dist` 由 server 托管）；
-- **测试 316 项全绿**（`/home/groy/cai/cai_env/bin/python -m pytest tests/ -q`，约 14s，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
-- 最近里程碑：① 蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task 派遣 4 角色子代理，`agents/blue_team.py`）；② 基准三套件（CyberSOCEval malware_analysis + attack_kb 知识访问测试 + CyberGym 真实漏洞 PoC 复现，`bench/`）；③ 前端 v3（四视图：作战台 / Benchmark / 历史 / 知识图谱，历史页有 AI 复盘 storyline）；
-- 文档体系：`docs/ARCHITECTURE.md`（架构与扩展指南）、`docs/BENCHMARK.md`（基准）、`docs/REVIEW.md`（验收）、`docs/CAI_IMPROVEMENTS.md`（CAI 复用 vs 自建）。
+- **测试 331 项全绿**（`/home/groy/cai/cai_env/bin/python -m pytest tests/ -q`，约 14s，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
+- 最近里程碑：① 蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task 派遣 4 角色子代理，`agents/blue_team.py`）；② 基准两套件（CyberSOCEval malware_analysis + attack_kb 知识访问测试，`bench/`；CyberGym 套件经实测后因数据/镜像体量过大已废弃移除）；③ 前端 v3（五视图：作战台 / Benchmark / 历史 / 知识图谱 / 文档；历史页有 AI 复盘 storyline；Benchmark 有「纯 LLM vs CyberOrion 框架」双臂对比、题目预览、逐题/逐任务 drill-down 抽屉与逐题 markdown 报告 `logs/bench/<run_id>.md`）；
+- 文档体系：`docs/ARCHITECTURE.md`（架构与扩展指南）、`docs/BENCHMARK.md`（基准）、`docs/REVIEW.md`（验收）、`docs/CAI_IMPROVEMENTS.md`（CAI 复用 vs 自建）、`docs/FRAMEWORK.md`（框架文档，前端「文档」tab 经 `GET /api/about` 渲染）。
 
 ---
 
@@ -27,7 +27,6 @@
 - **靶机容器**（`docker compose up -d` 起 3 台）：`cyberorion_dvwa`（172.29.0.10，宿主 28080→80）、`cyberorion_weak_ssh`（.12，22222→22）、`cyberorion_log4j`（.20，8983）。红方攻击一律走 **127.0.0.1 + 宿主端口**（见"已知坑"）。
 - **外部基准在 `/home/groy/cai/benchmarks/`**：
   - `cybersoceval/`：PurpleLlama 数据集（malware_analysis 609 题 JSON）；
-  - `cybergym/`：CyberGym（Berkeley，ICLR 2026）本地部署。**需要独立的 `venv311/`（python3.11）**，因为上游 `requires-python >=3.12` 且本地 clone 已打**两个 py3.11 兼容补丁**（`gen_task.py`、`server_utils.py`，缺了第二个每个 /submit-vul 都 500）。数据按需从 HF 拉、镜像按任务拉。**部署与排障前先读 `/home/groy/cai/benchmarks/cybergym/RECON.md`**，那是最权威的环境记录。
 - 前端：`web/` 下 node 20 + npm 可用；`web/dist` 已随仓库构建好，**只看不改前端就不需要 Node**。
 
 ---
@@ -62,7 +61,6 @@ cyberorion/                        # 仓库根
 │   │   └── benchmarks/            CybORG 适配器（可选、懒加载）
 │   ├── bench/
 │   │   ├── cybersoceval.py        malware_analysis + attack_kb 套件 harness（SUITES 注册表）
-│   │   ├── cybergym_bench.py      CyberGym 套件（vanilla/framework 双臂）
 │   │   └── attack_kb.py           attack_kb 套件（KB 检测摘录 → 技术编号 MCQ）
 │   ├── kb/
 │   │   ├── build_kb.py / rag.py   KB 构建器 / 检索器（embedding npz 缓存 + BM25 回退）
@@ -80,10 +78,10 @@ cyberorion/                        # 仓库根
 │   ├── agent.py / arena.py        legacy 兼容层（run.py 用）
 │   └── logs.py / viz.py           legacy 会话日志 / 终端可视化
 ├── web/                           前端（React 19 + Vite + Tailwind v4，见 web/README.md）
-├── tests/                         pytest 316 项（16 个文件）
+├── tests/                         pytest 331 项（17 个文件）
 ├── scripts/                       e2e_smoke / e2e_fight / run_bench / gen_cve_scenario /
 │                                  cve_target.sh / reset_targets.sh / smoke_* / run_cyborg
-├── docs/                          ARCHITECTURE / BENCHMARK / REVIEW / CAI_IMPROVEMENTS
+├── docs/                          ARCHITECTURE / BENCHMARK / REVIEW / CAI_IMPROVEMENTS / FRAMEWORK
 └── logs/                          运行产物：session_<ts>/{telemetry.db,metrics.json,report.md}、bench/*.json
 ```
 
@@ -125,7 +123,7 @@ cyberorion/                        # 仓库根
 
 **加场景**：写 `scenarios/<name>.yaml`（network + targets：container/ip/services/logs/ground_truth）→ `docker-compose.yml` 加服务（重靶机挂 profile）→ UI 下拉框自动列出（`GET /api/scenarios`）。CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 生成。
 
-**加 benchmark 套件**：`bench/` 新建模块实现 `run_bench(...) -> dict`（落盘 `logs/bench/`）与 `list_runs(...)` → 在 `cybersoceval.py::SUITES` 与 `run_bench` 的 suite 分发注册 → `scripts/run_bench.py` 的 `--suite` 自动生效 → server.py bench 端点加分发（当前只硬编码了部分套件）→ 前端 `web/src/types.ts` + `BenchmarkView.tsx` 同步 → 测试参照 `tests/test_bench.py` / `tests/test_cybergym_bench.py`。
+**加 benchmark 套件**：`bench/` 新建模块实现 `run_bench(...) -> dict`（落盘 `logs/bench/`）与 `list_runs(...)` → 在 `cybersoceval.py::SUITES` 与 `run_bench` 的 suite 分发注册 → `scripts/run_bench.py` 的 `--suite` 自动生效 → server.py bench 端点加分发（当前只硬编码了部分套件）→ 前端 `web/src/types.ts` + `BenchmarkView.tsx` 同步 → 测试参照 `tests/test_bench.py` / `tests/test_attack_kb.py`。
 
 **改前端**：`cd web && npm run dev`（HMR，后端另起 `python server.py`）→ 改 `src/components/` → **`npm run build`（tsc + vite）** → server.py 直接托管新 `dist`。WS 事件分发在 `src/arena.tsx::handleEvent`。注意 `web/README.md` 的组件清单滞后于代码（以 `src/components/` 实际文件为准）。
 
@@ -141,10 +139,10 @@ cd /home/groy/cai/cyberorion && python server.py   # → http://localhost:8000
 
 ## 6. 验证清单（交付前逐项过）
 
-- [ ] `cd /home/groy/cai/cyberorion && /home/groy/cai/cai_env/bin/python -m pytest tests/ -q` → **316 passed**（数量随开发增长，关键是无 fail）；
+- [ ] `cd /home/groy/cai/cyberorion && /home/groy/cai/cai_env/bin/python -m pytest tests/ -q` → **331 passed**（数量随开发增长，关键是无 fail）；
 - [ ] 改了前端 → `cd web && npm run build` 成功；
 - [ ] 改了会话/对抗链路 → `docker compose up -d` 后 `python scripts/e2e_smoke.py`（真实 LLM + docker，无 key 自动 SKIP 不算失败，断言失败才是失败）；
-- [ ] 改了 bench → 跑小 n 真实验证：`python scripts/run_bench.py --n 5 --mode base`（cybergym 套件 `--suite cybergym --n 1 --mode vanilla`，需先按 RECON.md 备环境）；
+- [ ] 改了 bench → 跑小 n 真实验证：`python scripts/run_bench.py --n 5 --mode base`；
 - [ ] 改了场景/重置 → `scripts/reset_targets.sh` 能跑通（会真实 ssh 登录 weak_ssh 验证）。
 
 ---
@@ -157,11 +155,15 @@ cd /home/groy/cai/cyberorion && python server.py   # → http://localhost:8000
 4. **靶机状态污染**：上一轮蓝队加固（关 ssh 密码认证、DVWA 调 high、删后门）会让新一轮"没东西可打"。`Controller.start_session` 会自动 `arena_reset.reset_all`，手动用 `scripts/reset_targets.sh`。遇到"红队突然打不进"先想这个。
 5. **WSL2 里容器 IP（172.29.x.x）从 Windows 侧/某些路径不可直连**：红方工具一律走 **127.0.0.1 + 宿主映射端口**（28080/22222/8983），蓝方遥测走 docker exec/容器网段。新增目标时两条路径都要配对设置，`CO_TARGET_*_IP` / `CO_*_HOST_PORT` 环境变量可覆盖。
 6. **ATT&CK v18 是 13 个战术**：Defense Evasion 已拆成 Stealth + Defense Impairment（`kb/service.py` 注释）。写死 12 战术的代码/测试都是错的。
-7. **推理型模型（如 MiniMax-M 系列）会把 max_tokens 烧在思考上导致输出截断** → bench 答案行缺失 → `parse_fail` 飙升被判 wrong。`bench/cybersoceval.py::_MAX_TOKENS=1024`。换模型跑 bench 时先看 parse_fail，必要时调大。
-8. **CyberGym 镜像拉取极慢**（Docker Hub 直连/多数镜像站被限速到 100-350KB/s）：用 `/home/groy/cai/benchmarks/cybergym/fast_pull.py`；daemon.json 里死镜像站会让拉取卡在 0 B/s（RECON.md 有修复记录）。
-9. **CyberGym 需要 venv311 且本地 clone 有补丁**：见 §2。升级/重装 `benchmarks/cybergym/repo` 会把补丁冲掉。
-10. **官方 CyberSOCEval runner 不可直接用**：endpoint 会把 `response_format=json_object` 的 schema 提示复读出来（历史上 100 题 23 题 INVALID）——这就是自有 harness 存在的原因，别回退。
-11. **`run.py` 是降级路径**：不起遥测/评分，蓝队工具会返回"store 未绑定"。验证功能一律用 `server.py`。
+7. **推理型模型（MiniMax-M 系列 / deepseek-v4-flash）会把 max_tokens 全烧在思维链上导致答案行缺失** → bench `parse_fail` 飙升被判 wrong。实测 deepseek-v4-flash 在 rag 长提示（注入知识后 ~4k 字符）下 4096 甚至 8192 tokens 全部变成 reasoning_tokens、content 为空（finish_reason=length）；`extra_body={"thinking": {"type": "disabled"}}` 可关闭思维链（5s 出完整答案）。`bench/cybersoceval.py` 支持 `CO_BENCH_THINKING=disabled` 下发该参数（DeepSeek 兼容端点；其他端点不认识时不要设）。`_MAX_TOKENS=4096`（2026-08 起）。换模型跑 bench 先看 parse_fail。
+8. **官方 CyberSOCEval runner 不可直接用**：endpoint 会把 `response_format=json_object` 的 schema 提示复读出来（历史上 100 题 23 题 INVALID）——这就是自有 harness 存在的原因，别回退。
+9. **`run.py` 是降级路径**：不起遥测/评分，蓝队工具会返回"store 未绑定"。验证功能一律用 `server.py`。
+10. **`cai_env` 里的 CAI SDK 带 4 个本地补丁（重装 cai-framework 会被冲掉，必须重打）**，全部是 2026-08-02 蓝队"无声卡死"排查的产物：
+    ① `cai/sdk/agents/models/openai_chatcompletions.py`：`if reasoning_content:` 块里 yield `SimpleNamespace(type="response.reasoning_summary_text.delta", ...)`（否则 DeepSeek 推理流只打印到控制台，run_streamed 消费者永远看不到 thinking）；
+    ② 同文件 `_fetch_response` 的 `except litellm.exceptions.BadRequestError`：`retry_count += 1` + 耗尽即 raise（原代码 fall-through 不 raise 也不计数，`while retry_count < max_retries` 变成**无限重试循环**，实测一次 400 重发 613 次）；
+    ③ 同文件 `_fetch_response`/`get_response`：`message_history` 只在 `isinstance(input, str)` 时前置（run-item list 已含全量对话；否则并行工具调用的历史被复制成"每个 call 一条 assistant + 孤儿 tool 消息"，DeepSeek 直接 400）；
+    ④ `cai/util.py::fix_message_list` 第二遍：前一条是同一 assistant 的兄弟 tool 消息也算合法序列（原逻辑在两个并行 tool 响应间**乒乓死循环**，CPU 占满、事件循环冻结）。
+11. **DeepSeek 推理轮很慢（单轮 30-120s）**：四个 `_model()` 的 `AsyncOpenAI(timeout=300.0)` 不能降回 60；子代理墙钟 `_SUBAGENT_TIMEOUT=420`、指挥官 900、红方 600。超时判死必须用 `asyncio.wait` + 显式 cancel（`core/agent_runner.py::run_with_timeout`）——**`asyncio.wait_for` 无效**：SDK `result.py::stream_events` 会吞 `CancelledError`，wait_for 拿到部分结果正常返回，超时分支是死代码。
 
 ---
 

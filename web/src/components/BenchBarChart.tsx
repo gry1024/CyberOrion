@@ -1,30 +1,50 @@
-// 论文风格对比柱状图 (paper-style grouped bar chart): 每个套件一张图,
-// X 组 = 指标, 每组两根柱子 — 裸模型 (gray) vs CyberOrion 框架 (green),
-// 取每臂最近一次有分数的运行; 柱顶数值标签, 0–100% 轴 + 25/50/75 细网格线,
-// 右上角图例 (含该次运行 n 与日期) + Δ 徽章 (首指标 框架 − 裸模型, 单位 pt)。
-// CyberGym 图下方附逐任务对比小表 (vanilla ✓/✗ | framework ✓/✗)。
+// 标准分组柱状图（参考大模型发布时的跑分评估图）：
+// Y 轴 = 得分（0-100%，刻度 + 网格线 + 轴标题），X 轴 = 指标组
+// （选择题正确率 / Jaccard 得分，组下双行字标），每组两根柱 —
+// DeepSeek（纯 LLM 基座，半透明）vs DeepSeek + CyberOrion 防御框架
+// （实心白），柱顶数值，图例含每次运行的 n 与日期，右上 Δ 徽章，
+// 图下方逐字说明指标含义。
 
-import { useEffect, useMemo, useState } from 'react'
-import { api } from '../api'
+import { useMemo } from 'react'
 import type {
-  BenchAnyScores,
-  BenchRunDetail,
   BenchRunSummary,
+  BenchScores,
   BenchSuite,
-  CyberGymTaskResult,
 } from '../types'
 import {
   BENCH_ARMS,
   BENCH_SUITES,
   LEGACY_BENCH_MODES,
   armOfMode,
-  isCyberGymResult,
-  isCyberGymScores,
 } from '../types'
 import { fmtRunTime } from './BenchmarkView'
+import { useTheme } from '../theme'
 
-const COLOR_BARE = '#6b7280'
-const COLOR_FRAMEWORK = '#5ed29c'
+// 图表色板跟随明暗主题（SVG 不消费 CSS 变量，需显式取值）。
+export interface ChartPalette {
+  bare: string
+  framework: string
+  axis: string
+  grid: string
+  tick: string
+  label: string
+  labelSoft: string
+  value: string
+}
+
+function chartPalette(theme: 'light' | 'dark'): ChartPalette {
+  const dark = theme === 'dark'
+  return {
+    bare: dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)',
+    framework: dark ? '#f5f5f5' : '#111',
+    axis: dark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.15)',
+    grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+    tick: dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+    label: dark ? 'rgba(255,255,255,0.70)' : 'rgba(0,0,0,0.70)',
+    labelSoft: dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+    value: dark ? '#fff' : '#111',
+  }
+}
 
 // ---------------------------------------------------------------------------
 // metric definitions per suite
@@ -33,34 +53,23 @@ const COLOR_FRAMEWORK = '#5ed29c'
 interface MetricDef {
   key: string
   label: string
-  get: (scores: BenchAnyScores) => number | undefined
+  desc: string
+  get: (scores: BenchScores) => number | undefined
 }
 
-function metricsFor(suite: BenchSuite): MetricDef[] {
-  if (suite === 'cybergym') {
-    return [
-      {
-        key: 'any_of_pct',
-        label: '成功率 ANY-OF',
-        get: (s) => (isCyberGymScores(s) ? s.any_of_pct : undefined),
-      },
-      {
-        key: 'success_pct',
-        label: '最终提交成功率',
-        get: (s) => (isCyberGymScores(s) ? s.success_pct : undefined),
-      },
-    ]
-  }
+function metricsFor(_suite: BenchSuite): MetricDef[] {
   return [
     {
       key: 'correct_mc_pct',
-      label: '正确率',
-      get: (s) => (!isCyberGymScores(s) ? s.correct_mc_pct : undefined),
+      label: '选择题正确率',
+      desc: 'exact-match 全对比例',
+      get: (s) => s.correct_mc_pct,
     },
     {
       key: 'avg_score',
-      label: 'JACCARD',
-      get: (s) => (!isCyberGymScores(s) ? s.avg_score : undefined),
+      label: 'Jaccard 得分',
+      desc: '部分分（交集 ÷ 并集）',
+      get: (s) => s.avg_score,
     },
   ]
 }
@@ -69,7 +78,7 @@ function fmtPctLabel(v: number): string {
   return `${(v * 100).toFixed(1)}%`
 }
 
-/** Latest scored run of one arm (run_id starts with a sortable timestamp). */
+/** Latest scored run of one arm (runs already sorted oldest-first). */
 function latestOfArm(
   runs: BenchRunSummary[],
   arm: 'bare' | 'framework',
@@ -77,117 +86,18 @@ function latestOfArm(
   return [...runs].reverse().find((r) => armOfMode(r.mode) === arm)
 }
 
-// ---------------------------------------------------------------------------
-// per-task mini-table (cybergym): makes framework wins concrete
-// ---------------------------------------------------------------------------
-
-function TaskMark({ r }: { r: CyberGymTaskResult | undefined }) {
-  if (!r) return <span className="text-text-3">—</span>
-  return r.success ? (
-    <span className="font-semibold text-accent">✓</span>
-  ) : (
-    <span className="text-text-3">✗</span>
-  )
-}
-
-function CyberGymTaskTable({
-  bare,
-  framework,
-}: {
-  bare: BenchRunSummary
-  framework: BenchRunSummary
-}) {
-  const [results, setResults] = useState<{
-    bare?: CyberGymTaskResult[]
-    framework?: CyberGymTaskResult[]
-  }>({})
-
-  useEffect(() => {
-    let alive = true
-    const pick = (d: BenchRunDetail) =>
-      (d.results ?? []).filter(isCyberGymResult)
-    Promise.all([api.getBenchRun(bare.run_id), api.getBenchRun(framework.run_id)])
-      .then(([b, f]) => {
-        if (alive) setResults({ bare: pick(b), framework: pick(f) })
-      })
-      .catch(() => {
-        /* table stays hidden */
-      })
-    return () => {
-      alive = false
-    }
-  }, [bare.run_id, framework.run_id])
-
-  const rows = useMemo(() => {
-    if (!results.bare || !results.framework) return []
-    const byId = (list: CyberGymTaskResult[]) =>
-      new Map(list.map((r) => [r.task_id, r]))
-    const b = byId(results.bare)
-    const f = byId(results.framework)
-    return [...new Set([...b.keys(), ...f.keys()])].sort().map((id) => ({
-      id,
-      project: b.get(id)?.project ?? f.get(id)?.project ?? '?',
-      bare: b.get(id),
-      framework: f.get(id),
-    }))
-  }, [results])
-
-  if (rows.length === 0) return null
-  return (
-    <div className="mt-4 border-t border-hairline pt-4">
-      <div className="mb-2 text-[10px] uppercase tracking-widest text-text-2">
-        逐任务对比 · 最终提交口径
-      </div>
-      <table className="w-full text-[11px]">
-        <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
-          <tr>
-            <th className="pb-1.5 text-left font-normal">task_id</th>
-            <th className="pb-1.5 text-left font-normal">项目</th>
-            <th className="pb-1.5 text-center font-normal">
-              {BENCH_ARMS.cybergym.bare.label}
-            </th>
-            <th className="pb-1.5 text-center font-normal">
-              {BENCH_ARMS.cybergym.framework.label}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const fwWin = !!row.framework?.success && !row.bare?.success
-            return (
-              <tr
-                key={row.id}
-                className={`border-t border-hairline/60 ${
-                  fwWin ? 'bg-accent/[0.06]' : ''
-                }`}
-              >
-                <td className="py-1.5 pr-2 font-mono text-neutral-300">{row.id}</td>
-                <td className="py-1.5 pr-2 text-text-2">{row.project}</td>
-                <td className="py-1.5 text-center">
-                  <TaskMark r={row.bare} />
-                </td>
-                <td className="py-1.5 text-center">
-                  <TaskMark r={row.framework} />
-                  {fwWin && (
-                    <span className="ml-1.5 rounded-full border border-accent/40 px-1.5 py-px text-[9px] text-accent">
-                      框架胜
-                    </span>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
+/** 基座模型展示名：deepseek-* -> "DeepSeek"，其余取模型短名。 */
+export function modelLabel(model: string | undefined): string {
+  const m = (model || '').toLowerCase()
+  if (m.startsWith('deepseek')) return 'DeepSeek'
+  return model || 'LLM'
 }
 
 // ---------------------------------------------------------------------------
 // chart
 // ---------------------------------------------------------------------------
 
-/** Bar path with only the top corners rounded (rounded-t-[2px]). */
+/** Bar path with only the top corners rounded. */
 function barPath(x: number, y: number, w: number, h: number, r: number): string {
   const rr = Math.min(r, h, w / 2)
   return `M ${x} ${y + h} L ${x} ${y + rr} Q ${x} ${y} ${x + rr} ${y} ` +
@@ -201,6 +111,8 @@ export function BenchBarChart({
   suite: BenchSuite
   runs: BenchRunSummary[]
 }) {
+  const theme = useTheme()
+  const C = chartPalette(theme)
   const scored = useMemo(
     () =>
       runs
@@ -220,6 +132,7 @@ export function BenchBarChart({
 
   const metrics = metricsFor(suite)
   const arms = BENCH_ARMS[suite]
+  const baseModel = modelLabel((bare ?? framework)?.model)
 
   // ---- paired? otherwise dashed empty state -------------------------------
   if (!bare || !framework) {
@@ -234,6 +147,8 @@ export function BenchBarChart({
           bare={bare}
           framework={framework}
           delta={null}
+          baseModel={baseModel}
+          palette={C}
         />
         <div className="rounded-xl border border-dashed border-hairline px-6 py-10 text-center">
           <div className="text-[12px] text-text-2">
@@ -262,115 +177,142 @@ export function BenchBarChart({
       ? values[0].framework - values[0].bare
       : null
 
-  const W = 660
-  const H = 240
-  const PAD = { l: 46, r: 20, t: 26, b: 34 }
+  const W = 700
+  const H = 264
+  const PAD = { l: 56, r: 18, t: 22, b: 48 }
   const plotW = W - PAD.l - PAD.r
   const plotH = H - PAD.t - PAD.b
   const yBase = H - PAD.b
   const y = (v: number) => PAD.t + (1 - Math.max(0, Math.min(v, 1))) * plotH
-  const barW = 36
-  const barGap = 12
+  const barW = 42
+  const barGap = 16
   const groupW = barW * 2 + barGap
-  const groupX = (i: number) => PAD.l + (plotW * (i + 0.5)) / metrics.length - groupW / 2
+  const groupX = (i: number) =>
+    PAD.l + (plotW * (i + 0.5)) / metrics.length - groupW / 2
 
   return (
     <section className="panel flex-none p-5">
-      <ChartHeader suite={suite} bare={bare} framework={framework} delta={delta} />
+      <ChartHeader
+        suite={suite}
+        bare={bare}
+        framework={framework}
+        delta={delta}
+        baseModel={baseModel}
+        palette={C}
+      />
+
       <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full">
-        {/* horizontal hairline gridlines 25/50/75 + baseline */}
-        {[0.25, 0.5, 0.75].map((f) => (
-          <line
-            key={f}
-            x1={PAD.l}
-            x2={W - PAD.r}
-            y1={y(f)}
-            y2={y(f)}
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth="1"
-          />
-        ))}
-        <line
-          x1={PAD.l}
-          x2={W - PAD.r}
-          y1={yBase}
-          y2={yBase}
-          stroke="rgba(255,255,255,0.14)"
-          strokeWidth="1"
-        />
-        {/* y ticks */}
+        {/* Y 轴标题（旋转）：得分（%） */}
+        <text
+          transform={`translate(15 ${PAD.t + plotH / 2}) rotate(-90)`}
+          textAnchor="middle"
+          fontSize="9.5"
+          letterSpacing="0.14em"
+          fill={C.tick}
+          fontFamily='"Barlow", "PingFang SC", sans-serif'
+        >
+          得分（%）
+        </text>
+
+        {/* Y 轴竖线 */}
+        <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={yBase}
+              stroke={C.axis} strokeWidth="1" />
+
+        {/* 网格线 + Y 刻度标签（0/25/50/75/100） */}
         {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-          <text
-            key={f}
-            x={PAD.l - 8}
-            y={y(f) + 3}
-            textAnchor="end"
-            fontSize="9"
-            fill="#4a524e"
-            fontFamily="ui-monospace, Menlo, monospace"
-          >
-            {Math.round(f * 100)}%
-          </text>
+          <g key={f}>
+            <line
+              x1={PAD.l}
+              x2={W - PAD.r}
+              y1={y(f)}
+              y2={y(f)}
+              stroke={f === 0 ? C.axis : C.grid}
+              strokeWidth="1"
+            />
+            <text
+              x={PAD.l - 8}
+              y={y(f) + 3}
+              textAnchor="end"
+              fontSize="9.5"
+              fill={C.tick}
+              fontFamily="ui-monospace, Menlo, monospace"
+            >
+              {Math.round(f * 100)}%
+            </text>
+          </g>
         ))}
-        {/* grouped bars */}
+
+        {/* 分组柱 + 柱顶数值 + X 轴组标签 */}
         {values.map((m, i) => {
           const gx = groupX(i)
           return (
             <g key={m.key}>
               {([
-                { v: m.bare, color: COLOR_BARE, x: gx },
-                { v: m.framework, color: COLOR_FRAMEWORK, x: gx + barW + barGap },
+                { v: m.bare, color: C.bare, x: gx },
+                { v: m.framework, color: C.framework, x: gx + barW + barGap },
               ] as const).map(
                 (b, j) =>
                   b.v != null && (
                     <g key={j}>
                       <path
-                        d={barPath(b.x, y(b.v), barW, Math.max(yBase - y(b.v), 1), 2)}
+                        d={barPath(b.x, y(b.v), barW, Math.max(yBase - y(b.v), 1), 3)}
                         fill={b.color}
                       />
                       <text
                         x={b.x + barW / 2}
-                        y={y(b.v) - 6}
+                        y={y(b.v) - 7}
                         textAnchor="middle"
-                        fontSize="11"
-                        fill="#f2f5f3"
-                        fontFamily="ui-monospace, Menlo, monospace"
+                        fontSize="12.5"
+                        fill={C.value}
+                        fontFamily='"Instrument Serif", Georgia, serif'
+                        fontStyle="italic"
                       >
                         {fmtPctLabel(b.v)}
                       </text>
                     </g>
                   ),
               )}
+              {/* X 轴组标签：指标名 + 说明 */}
               <text
                 x={gx + groupW / 2}
-                y={H - 10}
+                y={H - 28}
                 textAnchor="middle"
-                fontSize="10"
-                fill="#8a938f"
-                letterSpacing="0.08em"
-                fontFamily='"Plus Jakarta Sans", "Inter", "PingFang SC", sans-serif'
+                fontSize="11.5"
+                fill={C.label}
+                fontFamily='"Barlow", "PingFang SC", sans-serif'
               >
                 {m.label}
+              </text>
+              <text
+                x={gx + groupW / 2}
+                y={H - 13}
+                textAnchor="middle"
+                fontSize="8.5"
+                fill={C.tick}
+                fontFamily="ui-monospace, Menlo, monospace"
+              >
+                {m.desc}
               </text>
             </g>
           )
         })}
       </svg>
-      {suite === 'cybergym' && (
-        <>
-          <div className="mt-2 text-[9px] leading-4 text-text-3">
-            口径：最终提交成功率 = 最后一次提交的 PoC 崩溃漏洞版且不影响修复版
-            （CyberGym 官方 checker 判定）；any-of = 任意一次提交满足同条件。
-          </div>
-          <CyberGymTaskTable bare={bare} framework={framework} />
-        </>
-      )}
+
+      {/* 指标含义说明 */}
+      <p className="mt-3 border-t border-hairline/60 pt-2.5 text-[10px] leading-5 text-text-3">
+        两组柱均为 <span className="text-text-2">得分越高越好</span>：
+        选择题正确率 = 答案与标准选项完全一致的比例（全对才算对）；
+        Jaccard 得分 = 部分得分（预测选项与标准选项的<b>交集 ÷ 并集</b>，
+        多选漏选/误选都会扣分）。两臂回答<b>同一批题目</b>、同一个基座
+        模型，唯一差异是 CyberOrion 防御框架注入的知识库层，柱高差即
+        框架增益（Δ）。
+      </p>
     </section>
   )
 }
 
 // ---------------------------------------------------------------------------
-// header: title + legend (arm names + run n/date) + Δ badge on first metric
+// header: 套件 + 基座模型 + 图例（臂名/n/日期）+ Δ 徽章
 // ---------------------------------------------------------------------------
 
 function ChartHeader({
@@ -378,39 +320,41 @@ function ChartHeader({
   bare,
   framework,
   delta,
+  baseModel,
+  palette,
 }: {
   suite: BenchSuite
   bare?: BenchRunSummary
   framework?: BenchRunSummary
   delta: number | null
+  baseModel: string
+  palette: ChartPalette
 }) {
-  const arms = BENCH_ARMS[suite]
   const legend = (
     [
-      { run: bare, color: COLOR_BARE, name: arms.bare.label },
-      { run: framework, color: COLOR_FRAMEWORK, name: arms.framework.label },
+      { run: bare, color: palette.bare, name: `${baseModel}（纯 LLM 基座）` },
+      {
+        run: framework,
+        color: palette.framework,
+        name: `${baseModel} + CyberOrion 防御框架`,
+      },
     ] as const
   ).filter((l) => l.run)
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-      <span className="text-[10px] uppercase tracking-widest text-text-2">
-        裸模型 vs 框架
-      </span>
-      <span
-        title={BENCH_SUITES[suite].hint}
-        className={`rounded-full px-2 py-px text-[9px] ${
-          suite === 'cybergym'
-            ? 'border border-accent/50 text-accent'
-            : 'bg-overlay text-neutral-400'
-        }`}
-      >
-        {BENCH_SUITES[suite].label}
-      </span>
+      <div className="flex flex-col gap-1">
+        <span className="text-[13px] font-semibold text-text-1">
+          {BENCH_SUITES[suite].label}
+        </span>
+        <span className="text-[9px] tracking-wide text-text-3">
+          基座模型：{baseModel}（{bare?.model ?? framework?.model}）
+        </span>
+      </div>
       <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-text-2">
         {legend.map((l) => (
           <span key={l.name} className="flex items-center gap-1.5">
             <span
-              className="inline-block h-2 w-2 rounded-[2px]"
+              className="inline-block h-2.5 w-2.5 rounded-[3px]"
               style={{ background: l.color }}
             />
             {l.name}
@@ -421,16 +365,16 @@ function ChartHeader({
         ))}
         {delta != null && (
           <span
-            title="首指标：框架 − 裸模型（百分点）"
+            title="首指标（选择题正确率）：框架 − 基座（百分点）"
             className={`rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold tabular-nums ${
               delta > 0
-                ? 'border-accent/40 bg-accent/10 text-accent'
+                ? 'border-line bg-panel text-fg'
                 : delta < 0
                   ? 'border-attacker/40 bg-attacker/10 text-attacker'
                   : 'border-hairline text-text-2'
             }`}
           >
-            {delta > 0 ? '+' : ''}
+            Δ {delta > 0 ? '+' : ''}
             {(delta * 100).toFixed(1)}pt
           </span>
         )}

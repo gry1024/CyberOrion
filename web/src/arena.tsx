@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from 'react'
 import { api } from './api'
 import { pushToast } from './toasts'
+import { teamKey } from './types'
 import type {
   AlertRow,
   ArenaEvent,
@@ -81,17 +82,16 @@ function capped<T>(list: T[], item: T, cap: number): T[] {
 }
 
 /** Pull suite/mode/n out of a bench run_id like
- * `20260727_172628_attack_kb_rag_n100` or
- * `20260801_015004_cybergym_framework_n1` (pre-suite ids lack the suite part). */
+ * `20260727_172628_attack_kb_rag_n100` (pre-suite ids lack the suite part). */
 function parseBenchRunId(runId: string): {
   mode: BenchMode
   suite: BenchSuite
   n: number
 } {
   const m =
-    /_(malware_analysis|attack_kb|cybergym)_(rag_fs|rag_g|sc_base|base|rag|sc|vanilla|framework)_n(\d+)/.exec(
+    /_(malware_analysis|attack_kb|threat_intel)_(rag_fs|rag_g|sc_base|base|rag|sc)_n(\d+)/.exec(
       runId,
-    ) ?? /_(rag_fs|rag_g|sc_base|base|rag|sc|vanilla|framework)_n(\d+)/.exec(runId)
+    ) ?? /_(rag_fs|rag_g|sc_base|base|rag|sc)_n(\d+)/.exec(runId)
   if (!m) return { mode: 'base', suite: 'malware_analysis', n: 0 }
   if (m.length === 4) {
     return { suite: m[1] as BenchSuite, mode: m[2] as BenchMode, n: Number(m[3]) }
@@ -156,6 +156,17 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
     blue: { tool: '', args: '' },
     system: { tool: '', args: '' },
   })
+  // Open thinking-bubble step id per (side, agent). Parallel sub-agent
+  // streams interleave, so "append to the last step" is wrong — each agent's
+  // deltas accumulate into its own open bubble wherever it sits in the list.
+  const openThinking = useRef<Record<Side, Record<string, string>>>({
+    red: {},
+    blue: {},
+    system: {},
+  })
+  // Bumped on every session reset; in-flight alert fetches from before the
+  // reset are discarded so stale alerts can't repopulate a fresh session.
+  const alertsEpoch = useRef(0)
   const scenarioRef = useRef<ScenarioInfo | null>(null)
   scenarioRef.current = scenario
 
@@ -181,15 +192,27 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
 
   const refreshStatus = useCallback(async () => {
     try {
-      setStatus(await api.getStatus())
+      const st = await api.getStatus()
+      setStatus(st)
+      // 后端已无活动会话（可能错过了 session_end WS 事件）：清掉残留的
+      // 红蓝流与团队状态，避免终端显示上一会话的子代理输出。
+      if (!st.session_active) {
+        setRedSteps([])
+        setBlueSteps([])
+        setTeam({ active: {}, done: [], dispatched: {} })
+      }
     } catch {
       /* keep last known state */
     }
   }, [])
 
   const refreshAlerts = useCallback(async () => {
+    const epoch = alertsEpoch.current
     try {
-      setAlerts(await api.getAlerts())
+      const rows = await api.getAlerts()
+      // Stale response (a session reset happened while fetching) — drop it.
+      if (epoch !== alertsEpoch.current) return
+      setAlerts(rows)
     } catch {
       /* keep last */
     }
@@ -221,6 +244,13 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
       switch (ev.type) {
         case 'snapshot': {
           setStatus((prev) => ({ ...prev, ...(d as Partial<ControllerStatus>) }))
+          // 连接时若后端没有活动会话，清空残留的红/蓝流与团队状态——
+          // 避免打开页面看到上一会话（或已停止的会话）的子代理输出。
+          if (!d.session_active) {
+            setRedSteps([])
+            setBlueSteps([])
+            setTeam({ active: {}, done: [], dispatched: {} })
+          }
           break
         }
         case 'error': {
@@ -246,21 +276,45 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
           break
         }
         case 'thinking': {
+          const text = String(d.text ?? '')
+          const agentKey = agent ?? 'orchestrator'
+          // Streaming delta chunk: append to this agent's open thinking
+          // bubble (tracked per agent — parallel streams interleave), so a
+          // streamed message renders as one growing bubble per agent.
+          const openId = d.delta
+            ? openThinking.current[ev.side][agentKey]
+            : undefined
           const step: ThoughtStep = {
             id: nextId('s'),
             kind: 'thinking',
-            text: String(d.text ?? ''),
+            text,
             agent,
             timestamp: ts,
           }
-          if (ev.side === 'red') setRedSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
-          else if (ev.side === 'blue') setBlueSteps((p) => capped(p, step, MAX_STEPS_PER_SIDE))
+          if (!openId) openThinking.current[ev.side][agentKey] = step.id
+          const pushStep = (prev: ThoughtStep[]): ThoughtStep[] => {
+            if (openId) {
+              let found = false
+              const next = prev.map((s) => {
+                if (s.id !== openId) return s
+                found = true
+                return { ...s, text: (s.text ?? '') + text, timestamp: ts }
+              })
+              if (found) return next
+            }
+            return capped(prev, step, MAX_STEPS_PER_SIDE)
+          }
+          if (ev.side === 'red') setRedSteps(pushStep)
+          else if (ev.side === 'blue') setBlueSteps(pushStep)
           break
         }
         case 'tool_call': {
           const tool = String(d.tool ?? '')
           const args = String(d.args ?? '')
           lastTool.current[ev.side] = { tool, args }
+          // Thinking resumes after a tool call — the next delta opens a fresh
+          // bubble below the tool rows instead of growing the pre-call one.
+          delete openThinking.current[ev.side][agent ?? 'orchestrator']
           const step: ThoughtStep = {
             id: nextId('s'),
             kind: 'tool_call',
@@ -295,6 +349,7 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
         case 'tool_output': {
           const output = String(d.output ?? '')
           const { tool, args } = lastTool.current[ev.side]
+          delete openThinking.current[ev.side][agent ?? 'orchestrator']
           const step: ThoughtStep = {
             id: nextId('s'),
             kind: 'tool_output',
@@ -351,6 +406,16 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
               raw: d,
             })
             if (success) setHost(String(d.target), 'compromised', ts, String(d.technique ?? ''))
+            // 红方聊天流：每次攻击作为一条系统消息（Kimi 式对局可读性）。
+            const atk: ThoughtStep = {
+              id: nextId('s'),
+              kind: 'system',
+              text: `${success ? '⚔' : '✗'} ${String(d.action ?? '')} @ ${String(d.target)}` +
+                `${String(d.technique ?? '') ? ' · ' + String(d.technique) : ''}` +
+                `${success ? ' ✓ 成功' : ' ✗ 失败'}`,
+              timestamp: ts,
+            }
+            setRedSteps((p) => capped(p, atk, MAX_STEPS_PER_SIDE))
           } else {
             pushTimeline({
               kind: 'system',
@@ -375,6 +440,14 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
             raw: d,
           })
           setHost(host, 'alert', ts, sev)
+          // 蓝方聊天流：遥测事件作为系统消息。
+          const tel: ThoughtStep = {
+            id: nextId('s'),
+            kind: 'system',
+            text: `📡 ${host} · ${String(d.source ?? '')}：${String(d.summary ?? '').slice(0, 120)}`,
+            timestamp: ts,
+          }
+          setBlueSteps((p) => capped(p, tel, MAX_STEPS_PER_SIDE))
           break
         }
         case 'detection': {
@@ -442,34 +515,65 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
         }
         case 'team': {
           // Blue super-agent team: orchestrator dispatched a sub-agent
-          // (spawn) or the sub-agent reported back (done).
+          // (spawn) or the sub-agent reported back (done). Parallel
+          // dispatches carry data.seq — instances are keyed by role#seq.
           if (ev.side !== 'blue') break
           const role = String(d.role ?? '')
           if (!role) break
+          const seq = typeof d.seq === 'number' ? d.seq : undefined
+          const key = teamKey(role, seq)
           const mission = String(d.mission ?? '')
+          const seqTag = seq != null ? ` #${seq}` : ''
           if (d.event === 'spawn') {
-            setTeam((prev) => ({
-              ...prev,
-              active: { ...prev.active, [role]: { mission, since: ts } },
-            }))
+            setTeam((prev) => {
+              // Spawn consumed the pending dispatch_task linkage for this role.
+              const dispatched = { ...prev.dispatched }
+              delete dispatched[role]
+              return {
+                active: { ...prev.active, [key]: { role, seq, mission, since: ts } },
+                done: prev.done,
+                dispatched,
+              }
+            })
             pushTimeline({
               kind: 'team',
               ts,
-              title: `▸ 派遣 ${role}`,
+              title: `▸ 派遣 ${role}${seqTag}`,
               detail: mission.slice(0, 300),
               raw: d,
             })
           } else if (d.event === 'done') {
             const report = String(d.report ?? '')
+            const error =
+              typeof d.error === 'string' && d.error ? d.error : undefined
             setTeam((prev) => {
               const active = { ...prev.active }
-              delete active[role]
+              let info = active[key]
+              if (info) {
+                delete active[key]
+              } else {
+                // seq mismatch fallback: close any open instance of this role.
+                const alt = Object.keys(active).find((k) => active[k].role === role)
+                if (alt) {
+                  info = active[alt]
+                  delete active[alt]
+                }
+              }
               return {
                 active,
                 dispatched: prev.dispatched,
                 done: capped(
                   prev.done,
-                  { id: nextId('r'), role, mission, report, ts },
+                  {
+                    id: nextId('r'),
+                    role,
+                    seq,
+                    mission,
+                    report,
+                    error,
+                    since: info?.since,
+                    ts,
+                  },
                   50,
                 ),
               }
@@ -481,15 +585,17 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
               agent: role,
               role,
               mission,
-              report,
+              report: error ? `✗ ${error}\n\n${report}`.trim() : report,
               timestamp: ts,
             }
+            delete openThinking.current.blue[role]
             setBlueSteps((p) => capped(p, card, MAX_STEPS_PER_SIDE))
             pushTimeline({
               kind: 'team',
               ts,
-              title: `✓ ${role} 完成`,
-              detail: report.slice(0, 300),
+              title: error ? `✗ ${role}${seqTag} 超时/错误` : `✓ ${role}${seqTag} 完成`,
+              detail: (error ?? report).slice(0, 300),
+              severity: error ? 'critical' : undefined,
               raw: d,
             })
           }
@@ -514,10 +620,22 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
             detail: String(d.session_id ?? ''),
             raw: d,
           })
-          setHosts({})
-          setTeam({ active: {}, done: [], dispatched: {} })
-          setTimeline((prev) => prev)
+          // reset:true（后端会话重建标记）→ 清空全部视图状态，不留上一会话残留。
+          // session_end 不清：结束后保留上一会话结果可见，只在新会话开始时擦除。
+          if (d.reset) {
+            setRedSteps([])
+            setBlueSteps([])
+            setAlerts([])
+            // pushTimeline 把「会话开始」插到最前 — 只保留它，丢弃旧会话条目。
+            setTimeline((prev) => prev.slice(0, 1))
+            setHosts({})
+            setTeam({ active: {}, done: [], dispatched: {} })
+            openThinking.current = { red: {}, blue: {}, system: {} }
+            // Invalidate any in-flight alerts fetch from the previous session.
+            alertsEpoch.current += 1
+          }
           void refreshStatus()
+          void refreshAlerts()
           break
         }
         case 'session_end': {
@@ -528,6 +646,10 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
             detail: String(d.session_id ?? ''),
             raw: d,
           })
+          // 会话结束：清空红蓝流与团队状态，终端回到空态——
+          // 不做“保留上一会话结果可见”，避免打开页面看到旧对局输出。
+          setRedSteps([])
+          setBlueSteps([])
           setTeam({ active: {}, done: [], dispatched: {} })
           void refreshStatus()
           void refreshAlerts()

@@ -81,8 +81,7 @@ cyberorion/                          # 仓库根
 │   │   └── benchmarks/cyborg_adapter.py   CybORG CAGE-2（可选、懒加载；llm_driven 未实现）
 │   ├── bench/
 │   │   ├── cybersoceval.py          CyberSOCEval harness（base/rag + legacy 模式；SUITES 注册表）
-│   │   ├── attack_kb.py             attack_kb 套件（KB 检测摘录 → 技术编号 MCQ）
-│   │   └── cybergym_bench.py        CyberGym 套件（vanilla/framework 双臂，见 BENCHMARK.md §7）
+│   │   └── attack_kb.py             attack_kb 套件（KB 检测摘录 → 技术编号 MCQ）
 │   ├── kb/
 │   │   ├── build_kb.py              STIX/Malpedia/沙箱知识 → attack_kb.jsonl 构建器
 │   │   ├── rag.py                   AttackKB：embedding（npz 缓存）+ BM25 回退

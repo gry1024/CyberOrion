@@ -29,8 +29,9 @@ import time
 from pathlib import Path
 
 from .cybersoceval import (
-    DEFAULT_LOG_DIR, CONCURRENCY, LLM_TIMEOUT, _model_name, compute_scores,
-    grade, make_llm, parse_answers, sample_questions,
+    DEFAULT_LOG_DIR, CONCURRENCY, LLM_TIMEOUT, ARM_OF_MODE, _model_name,
+    _THINKING, compute_scores, grade, make_llm, parse_answers,
+    sample_questions, write_report,
 )
 
 SUITE = "attack_kb"
@@ -317,6 +318,8 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "suite": SUITE,
         "suite_desc": SUITE_DESC,
         "mode": mode,
+        "arm": ARM_OF_MODE.get(mode),   # 对比臂：bare=纯 LLM / framework=框架
+        "thinking": _THINKING,          # CO_BENCH_THINKING（推理模型关闭思维链）
         "n": len(results),
         "seed": seed,
         "model": _model_name(),
@@ -341,4 +344,6 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     with open(out, "w", encoding="utf-8") as f:
         json.dump(run, f, ensure_ascii=False, indent=1)
     run["path"] = str(out)
+    # 逐题可读报告（完整题干/选项/gold vs pred/模型原始回答）。
+    run["report"] = write_report(run, questions, log_dir / f"{run_id}.md")
     return run

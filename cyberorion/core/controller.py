@@ -49,6 +49,11 @@ class Controller:
         self._stop_red = asyncio.Event()
         self._stop_blue = asyncio.Event()
 
+        # run_with_timeout 内部 create_task 的任务登记（红/蓝各一），
+        # stop 时显式 cancel，否则会变成继续发事件的孤儿子任务。
+        self._red_stream_tasks: "set[asyncio.Task]" = set()
+        self._blue_stream_tasks: "set[asyncio.Task]" = set()
+
         # Stop signal for the optional blue patrol loop (decoupled from
         # _stop_blue which governs a single agent run).
         self._stop_patrol = asyncio.Event()
@@ -111,9 +116,12 @@ class Controller:
             try:
                 result = await runner.run(
                     agent, prompt,
-                    max_turns=10, timeout=240,
+                    # DeepSeek 推理模型单轮可达 1-2 分钟；240s 会把多数
+                    # 红方回合静默截断（timeout 现在会如实发错误事件）。
+                    max_turns=10, timeout=600,
                     pause_event=self._red_paused,
                     stop_event=self._stop_red,
+                    task_registry=self._red_stream_tasks,
                 )
                 self._red_history.append(result.get("output", ""))
                 await self.event_bus.publish(Event(
@@ -168,6 +176,8 @@ class Controller:
         self._stop_red.set()
         # Unblock the pause gate so the runner can observe the stop signal.
         self._red_paused.set()
+        # 取消 run_with_timeout 内部登记的流式任务（外层 cancel 不会传播）。
+        _cancel_tasks(self._red_stream_tasks)
         if self._red_task is not None and not self._red_task.done():
             try:
                 await asyncio.wait_for(self._red_task, timeout=5)
@@ -219,6 +229,7 @@ class Controller:
                     max_turns=14, timeout=900,
                     pause_event=self._blue_paused,
                     stop_event=self._stop_blue,
+                    task_registry=self._blue_stream_tasks,
                 )
                 self._blue_history.append(result.get("output", ""))
                 await self.event_bus.publish(Event(
@@ -245,6 +256,12 @@ class Controller:
                           "source": "agent_run"},
                 ))
             finally:
+                # 指挥官 run 结束（正常或被打断）：清理仍未结束的子代理。
+                try:
+                    from ..agents.blue_team import cancel_running_subagents
+                    cancel_running_subagents()
+                except Exception:
+                    pass
                 await self.event_bus.publish(Event(
                     type="round_end", side="blue", data={},
                 ))
@@ -272,6 +289,15 @@ class Controller:
         """Stop the blue team task (does not affect the patrol loop)."""
         self._stop_blue.set()
         self._blue_paused.set()
+        # 取消孤儿子代理 run：指挥官任务的取消不会传播到 dispatch_task
+        # 内部创建的 task，不显式取消它们会继续发流事件（"蓝方停不下来"）。
+        try:
+            from ..agents.blue_team import cancel_running_subagents
+            cancel_running_subagents()
+        except Exception:
+            pass
+        # 同样取消指挥官自身的流式任务（run_with_timeout 内部 create_task）。
+        _cancel_tasks(self._blue_stream_tasks)
         if self._blue_task is not None and not self._blue_task.done():
             try:
                 await asyncio.wait_for(self._blue_task, timeout=5)
@@ -310,14 +336,16 @@ class Controller:
                     except Exception:
                         prompt = (
                             f"=== AUTO PATROL #{rn} ===\n"
-                            "组织一次防御巡逻：先派 watcher 全面巡查，"
+                            "组织一次防御巡逻：同一回合并行派遣 watcher 全面"
+                            "巡查 + hunter 失陷排查（两次独立 dispatch_task），"
                             "对可疑点派 analyst 研判，确认威胁派 responder "
                             "处置并复查，最后 report_finding 汇总。"
                         )
                 else:
                     prompt = (
                         f"=== AUTO PATROL #{rn} ===\n"
-                        "组织一次防御巡逻：先派 watcher 全面巡查，"
+                        "组织一次防御巡逻：同一回合并行派遣 watcher 全面"
+                        "巡查 + hunter 失陷排查（两次独立 dispatch_task），"
                         "对可疑点派 analyst 研判，确认威胁派 responder "
                         "处置并复查，最后 report_finding 汇总。"
                     )
@@ -408,6 +436,33 @@ class Controller:
                       "source": "session_reset"},
             ))
 
+        # 靶机健康检查：容器没起时立刻给出可操作的错误提示，而不是让
+        # 蓝队在战斗中才发现"暂无快照/容器已停止"。best-effort，不阻断。
+        try:
+            if _sc:
+                import subprocess
+                down = []
+                for _t in _sc.targets.values():
+                    if not _t.container:
+                        continue
+                    r = subprocess.run(
+                        ["docker", "inspect", "-f", "{{.State.Running}}",
+                         _t.container],
+                        capture_output=True, text=True, timeout=10)
+                    if r.stdout.strip() != "true":
+                        down.append((_t.name, _t.container))
+                if down:
+                    names = "、".join(f"{n}({c})" for n, c in down)
+                    hint = ("CVE 场景请先运行 scripts/cve_target.sh up <CVE-ID>；"
+                            "内置靶场请运行 docker compose up -d")
+                    await self.event_bus.publish(Event(
+                        type="error", side="system",
+                        data={"message": f"靶机未运行: {names}。{hint}"[:400],
+                              "source": "target_health"},
+                    ))
+        except Exception:
+            pass
+
         # Telemetry: fresh store + collector + ground-truth channel for
         # this session. Failures here must never break session start.
         try:
@@ -453,6 +508,8 @@ class Controller:
         await self.event_bus.publish(Event(
             type="session_start", side="system",
             data={
+                # 前端以此为“清空全部视图状态”的标记（新会话不残留旧数据）。
+                "reset": True,
                 "red_agent": getattr(self._red_agent, "name", None),
                 "blue_agent": getattr(self._blue_agent, "name", None),
                 "session_id": self.session_id,
@@ -520,6 +577,11 @@ class Controller:
         await self.stop_red()
         await self.stop_blue()
         await self._stop_telemetry()
+        # 置空引用，让 status() 的 session_active 正确复位（finalize 已
+        # 在 _stop_telemetry 内完成，指标已存入 last_metrics；DB 文件在
+        # 磁盘上，后续复盘走 session_detail 路径，不依赖 store 句柄）。
+        self.store = None
+        self.ground_truth = None
         self.state.update_session("ended", True)
         if self.last_metrics is not None:
             # P4: push the final score once so WS clients can render it.
@@ -553,3 +615,24 @@ class Controller:
             "red_history_count": len(self._red_history),
             "blue_history_count": len(self._blue_history),
         }
+
+
+def _cancel_tasks(tasks: "set[asyncio.Task]") -> None:
+    """Cancel every task in a registry, then drain them in the background.
+
+    Registry entries are live (run_with_timeout discards finished tasks via
+    a done callback), so this only touches tasks still running at stop time.
+    """
+    pending = [t for t in list(tasks) if not t.done()]
+    for t in pending:
+        t.cancel()
+    if pending:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        loop.create_task(_drain(pending))
+
+
+async def _drain(tasks: "list[asyncio.Task]") -> None:
+    await asyncio.gather(*tasks, return_exceptions=True)

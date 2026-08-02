@@ -26,7 +26,7 @@
 | **真实裁判，不信嘴炮** | 红方"我成功了"必须经服务端裁判客观验证（外部评分器 `/done` > flag 比对 > `uid=` > 目标内部凭据）；红方每次工具调用自动落地面真值 |
 | **信息隔离** | 蓝方代码层面接触不到 attacks 表/ground_truth（静态测试看守）；指标引擎把红方真值与蓝方告警做时间-主机-技术三维对齐 |
 | **知识库 RAG** | 3204 条文档（ATT&CK v18 + Malpedia + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
-| **三大基准套件** | CyberSOCEval malware_analysis（609 题）+ attack_kb 知识访问测试 + CyberGym 真实漏洞 PoC 复现（官方提交服务器 + vul/fix 镜像客观判定） |
+| **两大基准套件** | CyberSOCEval malware_analysis（609 题）+ attack_kb 知识访问测试（CyberGym PoC 复现套件经实测后因数据/镜像体量过大已废弃移除） |
 | **SOC 大屏前端** | 作战台（双终端 + 拓扑 + 时间线 + 实时评分）/ Benchmark / 历史复盘（AI 故事线）/ 知识图谱 四视图 |
 
 ---
@@ -110,10 +110,9 @@ UI：Benchmark 标签页选 base/rag + 题量 n → 实时进度 → 历史对�
 ```bash
 python scripts/run_bench.py --n 100 --mode both                            # CyberSOCEval base+rag 对比
 python scripts/run_bench.py --suite attack_kb --n 30 --mode both           # KB 访问能力测试
-python scripts/run_bench.py --suite cybergym --n 5 --mode both --seed 42   # CyberGym 双臂（需先备环境，见下）
 ```
 
-结果落盘 `logs/bench/<run_id>.json`。CyberGym 需先按 `/home/groy/cai/benchmarks/cybergym/RECON.md` 备数据与镜像（镜像拉取慢用同目录 `fast_pull.py`）。最新实测（n=100, seed=42, qwen3.7-max）：base 0.180/0.454，rag v6 0.190/0.451——完整结果史与局限见 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
+结果落盘 `logs/bench/<run_id>.json`。最新实测（n=100, seed=42, qwen3.7-max）：base 0.180/0.454，rag v6 0.190/0.451——完整结果史与局限见 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
 
 ---
 
@@ -142,7 +141,7 @@ CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从
 | 前端白屏/样式旧 | 强制刷新（Ctrl+Shift+R）；仍异常则 `cd web && npm run build` 重建 |
 | 靶机连不上/遥测无事件 | `docker compose ps` 确认三容器 Up；`docker logs cyberorion_weak_ssh` 看靶机日志 |
 | 红队突然打不进 | 靶场被上一轮加固污染：`scripts/reset_targets.sh`（start_session 本会自动重置） |
-| 镜像拉取慢/卡 0 B/s | CyberGym 用 `benchmarks/cybergym/fast_pull.py`；清掉 daemon.json 里失效的镜像加速器 |
+| 镜像拉取慢/卡 0 B/s | 清掉 daemon.json 里失效的镜像加速器（Windows 侧 `C:\Users\<user>\.docker\daemon.json`，改完重启 Docker Desktop） |
 | e2e 冒烟输出 SKIP | 降级不是失败：按打印的原因配 `.env` 或起 docker 后重跑 |
 
 ---

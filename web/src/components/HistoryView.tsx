@@ -14,6 +14,7 @@ import type {
   SessionToolCall,
 } from '../types'
 import { MarkdownView } from './MarkdownView'
+import { FadeIn } from './FadeIn'
 
 function fmtMtime(mtime: number): string {
   const d = new Date(mtime * 1000)
@@ -111,14 +112,14 @@ function StorylineSection({
   return (
     <section className="panel flex-none overflow-hidden">
       <header className="panel-title">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-white" />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-fg-4" />
         <span className="text-text-1">AI 复盘</span>
         <div className="ml-auto flex items-center gap-2">
           {md && (
             <button
               onClick={() => generate(true)}
               disabled={generating}
-              className="rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-neutral-400 transition-colors hover:bg-hover hover:text-neutral-200 disabled:opacity-40"
+              className="rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40"
             >
               {generating ? '生成中…' : '重新生成'}
             </button>
@@ -129,15 +130,15 @@ function StorylineSection({
         {md ? (
           <MarkdownView markdown={md} />
         ) : generating ? (
-          <div className="flex items-center gap-2 py-4 text-[11px] text-neutral-400">
-            <span className="live-pulse inline-block h-1.5 w-1.5 rounded-full bg-white" />
+          <div className="flex items-center gap-2 py-4 text-[11px] text-text-3">
+            <span className="live-pulse inline-block h-1.5 w-1.5 rounded-full bg-fg-4" />
             AI 正在复盘整场对抗，通常需要几十秒…
           </div>
         ) : (
           <div className="flex items-center gap-3 py-2">
             <button
               onClick={() => generate(false)}
-              className="rounded-full bg-text-1 px-4 py-1.5 text-[11px] font-medium text-black transition-colors hover:bg-white"
+              className="rounded-full bg-text-1 px-4 py-1.5 text-[11px] font-medium text-bg transition-colors hover:bg-text-2"
             >
               生成 AI 复盘
             </button>
@@ -163,7 +164,7 @@ function StatCell({ label, value, tone = 'text-text-1' }: {
   return (
     <div className="px-4 py-2.5">
       <div className="text-[8px] uppercase tracking-[0.15em] text-text-2">{label}</div>
-      <div className={`mt-0.5 font-mono text-[15px] font-semibold tabular-nums ${tone}`}>
+      <div className={`mt-0.5 font-serif text-xl italic tabular-nums ${tone}`}>
         {value}
       </div>
     </div>
@@ -219,15 +220,15 @@ const KIND_META: Record<
   { label: string; cls: string; dot: string }
 > = {
   attack: { label: '攻击', cls: 'border-attacker/40 text-attacker', dot: 'bg-attacker' },
-  alert: { label: '告警', cls: 'border-hairline text-text-1', dot: 'bg-white' },
-  event: { label: '事件', cls: 'border-warning/40 text-warning', dot: 'bg-warning' },
+  alert: { label: '告警', cls: 'border-hairline text-text-1', dot: 'bg-fg-4' },
+  event: { label: '事件', cls: 'border-line text-text-3', dot: 'bg-fg-4/60' },
   response: { label: '处置', cls: 'border-success/40 text-success', dot: 'bg-success' },
 }
 
 function TimelineTab({ rows }: { rows: SessionTimelineRow[] }) {
   const sorted = useMemo(() => [...rows].sort((a, b) => a.ts - b.ts), [rows])
   if (sorted.length === 0) {
-    return <div className="py-16 text-center text-[11px] text-neutral-600">暂无时间线数据</div>
+    return <div className="py-16 text-center text-[11px] text-text-3">暂无时间线数据</div>
   }
   return (
     <div>
@@ -235,7 +236,7 @@ function TimelineTab({ rows }: { rows: SessionTimelineRow[] }) {
         const meta = KIND_META[r.kind] ?? KIND_META.event
         return (
           <div key={i} className="flex gap-3 border-b border-hairline/60 px-4 py-2">
-            <span className="w-16 flex-none pt-0.5 text-right font-mono text-[10px] tabular-nums text-[#86868b]">
+            <span className="w-16 flex-none pt-0.5 text-right font-mono text-[10px] tabular-nums text-text-3">
               {fmtTime(r.ts)}
             </span>
             <span className={`mt-1.5 h-1.5 w-1.5 flex-none rounded-full ${meta.dot}`} />
@@ -244,20 +245,20 @@ function TimelineTab({ rows }: { rows: SessionTimelineRow[] }) {
                 <span className={`flex-none rounded border px-1 py-px text-[9px] ${meta.cls}`}>
                   {meta.label}
                 </span>
-                <span className="truncate text-[12px] text-[#ececf0]">{r.title}</span>
+                <span className="truncate text-[12px] text-text-2">{r.title}</span>
                 {r.kind === 'attack' && r.success !== undefined && (
-                  <span className={`flex-none text-[10px] ${r.success ? 'text-attacker' : 'text-neutral-600'}`}>
+                  <span className={`flex-none text-[10px] ${r.success ? 'text-attacker' : 'text-text-3'}`}>
                     {r.success ? '✓' : '✗'}
                   </span>
                 )}
                 {r.technique && (
-                  <span className="flex-none rounded bg-overlay px-1 py-px font-mono text-[9px] text-neutral-400">
+                  <span className="flex-none rounded bg-overlay px-1 py-px font-mono text-[9px] text-text-3">
                     {r.technique}
                   </span>
                 )}
               </div>
               {r.detail && (
-                <div className="mt-0.5 text-[10px] leading-4 text-[#86868b]">{r.detail}</div>
+                <div className="mt-0.5 text-[10px] leading-4 text-text-3">{r.detail}</div>
               )}
             </div>
           </div>
@@ -267,10 +268,16 @@ function TimelineTab({ rows }: { rows: SessionTimelineRow[] }) {
   )
 }
 
+/** 摘要像散文/报告（含 markdown 结构）→ MarkdownView 渲染；
+ * 像原始日志/命令输出 → 保持 mono 原样。 */
+function looksLikeProse(s: string): boolean {
+  return /(^|\n)\s*(#{1,4}\s|[-*]\s|\d+\.\s|【[^】]+】)|\*\*[^*]+\*\*/.test(s)
+}
+
 function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
   const [openIdx, setOpenIdx] = useState<number | null>(null)
   if (rows.length === 0) {
-    return <div className="py-16 text-center text-[11px] text-neutral-600">暂无工具调用记录</div>
+    return <div className="py-16 text-center text-[11px] text-text-3">暂无工具调用记录</div>
   }
   return (
     <table className="w-full text-[11px]">
@@ -288,7 +295,7 @@ function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
           <Fragment key={i}>
             <tr
               onClick={() => setOpenIdx(openIdx === i ? null : i)}
-              className="cursor-pointer border-t border-hairline/60 text-neutral-300 transition-colors hover:bg-overlay/50"
+              className="cursor-pointer border-t border-hairline/60 text-text-2 transition-colors hover:bg-overlay/50"
             >
               <td className="py-1.5 pl-4 font-mono tabular-nums text-text-2">
                 {fmtTime(r.ts)}
@@ -305,9 +312,15 @@ function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
             {openIdx === i && r.summary && (
               <tr className="border-t border-hairline/40">
                 <td colSpan={5} className="px-4 py-2">
-                  <pre className="scroll-thin max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-hairline bg-ink p-2 font-mono text-[10px] leading-4 text-[#c7c7cc]">
-                    {r.summary}
-                  </pre>
+                  {looksLikeProse(r.summary) ? (
+                    <div className="scroll-thin max-h-52 overflow-y-auto rounded border border-hairline bg-panel-2 px-3 py-2 text-fg">
+                      <MarkdownView markdown={r.summary} className="md-inline" />
+                    </div>
+                  ) : (
+                    <pre className="scroll-thin max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-hairline bg-panel-2 p-2 font-mono text-[10px] leading-4 text-text-2">
+                      {r.summary}
+                    </pre>
+                  )}
                 </td>
               </tr>
             )}
@@ -326,7 +339,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
         告警（{alerts.length}）
       </div>
       {alerts.length === 0 ? (
-        <div className="py-6 text-center text-[11px] text-neutral-600">无告警</div>
+        <div className="py-6 text-center text-[11px] text-text-3">无告警</div>
       ) : (
         <table className="mb-6 w-full text-[11px]">
           <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
@@ -341,7 +354,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
           </thead>
           <tbody>
             {alerts.map((a, i) => (
-              <tr key={i} className="border-t border-hairline/60 text-neutral-300">
+              <tr key={i} className="border-t border-hairline/60 text-text-2">
                 <td className="py-1.5 font-mono tabular-nums text-text-2">
                   {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
                 </td>
@@ -361,7 +374,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
         攻击真值（{attacks.length}）
       </div>
       {attacks.length === 0 ? (
-        <div className="py-6 text-center text-[11px] text-neutral-600">无攻击记录</div>
+        <div className="py-6 text-center text-[11px] text-text-3">无攻击记录</div>
       ) : (
         <table className="w-full text-[11px]">
           <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
@@ -377,7 +390,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
             {attacks.map((a, i) => {
               const ok = a.success === true || a.success === 'true'
               return (
-                <tr key={i} className="border-t border-hairline/60 text-neutral-300">
+                <tr key={i} className="border-t border-hairline/60 text-text-2">
                   <td className="py-1.5 font-mono tabular-nums text-text-2">
                     {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
                   </td>
@@ -386,7 +399,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
                   <td className="max-w-0 w-[40%] truncate pr-3 text-text-2">
                     {cell(a, 'action') || '--'}
                   </td>
-                  <td className={`text-right ${ok ? 'text-attacker' : 'text-neutral-600'}`}>
+                  <td className={`text-right ${ok ? 'text-attacker' : 'text-text-3'}`}>
                     {ok ? '✓ 成功' : '✗ 失败'}
                   </td>
                 </tr>
@@ -431,7 +444,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-thin pr-1">
       {error && <div className="panel flex-none p-6 text-[11px] text-attacker">{error}</div>}
       {!error && !detail && (
-        <div className="panel flex-none p-6 text-[11px] text-neutral-600">加载中…</div>
+        <div className="panel flex-none p-6 text-[11px] text-text-3">加载中…</div>
       )}
       {detail && (
         <>
@@ -445,8 +458,8 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
                   onClick={() => setTab(t.key)}
                   className={`rounded-full px-3 py-1 text-[10px] transition-colors ${
                     tab === t.key
-                      ? 'bg-[#48484a] font-medium text-white'
-                      : 'text-neutral-500 hover:text-neutral-200'
+                      ? 'bg-ink font-medium text-bg'
+                      : 'text-text-3 hover:text-fg'
                   }`}
                 >
                   {t.label}
@@ -463,7 +476,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
                     <MarkdownView markdown={detail.report_md} />
                   </div>
                 ) : (
-                  <div className="py-16 text-center text-[11px] text-neutral-600">
+                  <div className="py-16 text-center text-[11px] text-text-3">
                     该会话没有 report.md
                   </div>
                 ))}
@@ -495,21 +508,29 @@ export function HistoryView() {
   }, [load])
 
   return (
-    <main className="flex min-h-0 flex-1 gap-4 overflow-hidden p-5">
+    <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-5 pb-4">
+      <div className="flex flex-none items-baseline gap-4 px-1">
+        <h1 className="text-[20px] font-semibold leading-none tracking-normal text-fg">
+          历史
+        </h1>
+        <span className="text-[13px] text-text-3">会话回放</span>
+      </div>
+      <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
       {/* left: session list */}
-      <aside className="panel flex w-[320px] flex-none flex-col overflow-hidden">
+      <FadeIn className="flex w-[320px] flex-none flex-col overflow-hidden">
+      <aside className="panel flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <header className="panel-title">
           <span>历史会话</span>
           <button
             onClick={load}
-            className="ml-auto rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-neutral-400 transition-colors hover:bg-hover hover:text-neutral-200"
+            className="ml-auto rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2"
           >
             刷新
           </button>
         </header>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
           {sessions.length === 0 && (
-            <div className="py-16 text-center text-[11px] text-neutral-600">
+            <div className="py-16 text-center text-[11px] text-text-3">
               暂无历史会话
             </div>
           )}
@@ -517,10 +538,10 @@ export function HistoryView() {
             <button
               key={s.id}
               onClick={() => setSelected(s)}
-              className={`mb-1.5 flex w-full flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors ${
+              className={`mb-1.5 flex w-full flex-col gap-1 rounded-xl border px-3 py-2 text-left transition-colors ${
                 selected?.id === s.id
-                  ? 'border-[#636366] bg-overlay'
-                  : 'border-hairline bg-raised hover:border-[#48484a]'
+                  ? 'border-line-3 bg-panel'
+                  : 'border-hairline bg-panel hover:border-line-3'
               }`}
             >
               <div className="flex w-full items-center gap-2">
@@ -534,10 +555,10 @@ export function HistoryView() {
               <div className="flex w-full items-center gap-2 text-[9px] text-text-2">
                 <span className="font-mono">{fmtMtime(s.mtime)}</span>
                 <span className="ml-auto flex gap-1.5 font-mono">
-                  <span title="report.md" className={s.has_report ? 'text-neutral-300' : 'text-text-3'}>
+                  <span title="report.md" className={s.has_report ? 'text-text-2' : 'text-text-3'}>
                     ▤
                   </span>
-                  <span title="metrics" className={s.has_metrics ? 'text-neutral-300' : 'text-text-3'}>
+                  <span title="metrics" className={s.has_metrics ? 'text-text-2' : 'text-text-3'}>
                     ◈
                   </span>
                 </span>
@@ -546,20 +567,24 @@ export function HistoryView() {
           ))}
         </div>
       </aside>
+      </FadeIn>
 
       {/* right: detail */}
+      <FadeIn delay={0.08} className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {selected ? (
         <SessionDetailView key={selected.id} session={selected} />
       ) : (
         <div className="panel flex flex-1 items-center justify-center">
           <div className="text-center">
-            <div className="text-[13px] font-medium text-text-1">选择一个会话</div>
+            <div className="text-[18px] font-medium text-text-3">选择一个会话</div>
             <div className="mt-1 text-[11px] text-text-2">
               AI 复盘 · 战役统计 · 完整时间线 · 工具调用 · 告警与攻击真值 · 报告
             </div>
           </div>
         </div>
       )}
+      </FadeIn>
+      </div>
     </main>
   )
 }

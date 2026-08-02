@@ -21,7 +21,7 @@ def _model():
     model_name = os.getenv("CAI_MODEL", "openai/MiniMax-M3")
     api_key = os.getenv("OPENAI_API_KEY", "missing-key")
     base_url = os.getenv("OPENAI_API_BASE") or os.getenv("OPENAI_BASE_URL")
-    client_kwargs = {"api_key": api_key, "timeout": 60.0, "max_retries": 1}
+    client_kwargs = {"api_key": api_key, "timeout": 300.0, "max_retries": 1}
     if base_url:
         client_kwargs["base_url"] = base_url
     return OpenAIChatCompletionsModel(

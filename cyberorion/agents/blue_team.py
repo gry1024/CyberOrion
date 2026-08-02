@@ -23,13 +23,16 @@
 
 事件形状（WS 前端可见）：
   派遣: {"type":"team","side":"blue",
-        "data":{"event":"spawn","role":"watcher","mission":"..."}}
+        "data":{"event":"spawn","role":"watcher","mission":"...","seq":N}}
   完成: {"type":"team","side":"blue",
-        "data":{"event":"done","role":"watcher","mission":"...",
+        "data":{"event":"done","role":"watcher","mission":"...","seq":N,
                 "report":"<截断后的结论>"}}
   子代理活动: thinking/tool_call/tool_output 事件 side="blue"，
         data 中带 "agent": "<role>"；指挥官本身的事件带
         "agent": "orchestrator"（由 AgentRunner 的 agent_label 注入）。
+        thinking 可能带 "delta": true（实时增量片段）与
+        "reasoning": true（推理流）；tool_call 可能带 "live": true
+        （模型一生成完调用即转播，不等工具执行完）。
 
 信息隔离规则不变：本模块与蓝队工具一样，绝不接触 ground truth。
 ====================================================================
@@ -37,7 +40,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import threading
 from typing import TYPE_CHECKING, Any
@@ -45,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 from cai.sdk.agents import Agent, OpenAIChatCompletionsModel, Runner, function_tool
 from openai import AsyncOpenAI
 
-from ..core.agent_runner import AgentRunner
+from ..core.agent_runner import AgentRunner, RawDeltaForwarder, run_with_timeout
 from ..core.event_bus import Event, EventBus
 from ..tools.blue import (
     query_logs, network_summary, process_audit, file_integrity,
@@ -58,9 +60,12 @@ from .blue import _scratchpad_tools, _target_context
 if TYPE_CHECKING:
     from ..scenarios import Scenario
 
-# 子代理单次任务的最大轮数与墙钟超时（秒）。
+# 子代理单次任务的最大轮数与墙钟超时（秒）。DeepSeek 推理模型单轮可达
+# 1-2 分钟，8 轮预算下 420s 是合理上限；超时【必须】产生错误事件
+# （run_with_timeout 保证——SDK 的 stream_events 会吞掉 CancelledError，
+# asyncio.wait_for 因此从不抛 TimeoutError，见 agent_runner 模块注释）。
 _SUBAGENT_MAX_TURNS = 8
-_SUBAGENT_TIMEOUT = 240
+_SUBAGENT_TIMEOUT = 420
 # 返回给指挥官的子代理报告最大长度（超出截断）。
 _REPORT_MAX_CHARS = 2500
 
@@ -110,7 +115,9 @@ def _model() -> OpenAIChatCompletionsModel:
     model_name = os.getenv("CAI_MODEL", "openai/MiniMax-M3")
     api_key = os.getenv("OPENAI_API_KEY", "missing-key")
     base_url = os.getenv("OPENAI_API_BASE") or os.getenv("OPENAI_BASE_URL")
-    client_kwargs = {"api_key": api_key, "timeout": 60.0, "max_retries": 1}
+    # 推理模型（DeepSeek 等）单轮可能远超 60s；客户端超时要容纳慢推理轮，
+    # 墙钟约束由 run_with_timeout 的 _SUBAGENT_TIMEOUT 负责。
+    client_kwargs = {"api_key": api_key, "timeout": 300.0, "max_retries": 1}
     if base_url:
         client_kwargs["base_url"] = base_url
     return OpenAIChatCompletionsModel(
@@ -223,12 +230,22 @@ def _build_role_agent(role: str, scenario: "Scenario | None") -> Agent:
 # 子代理流式运行：转播事件到 EventBus
 # ---------------------------------------------------------------------------
 
-async def _relay_stream_event(role: str, ev: Any) -> None:
+async def _relay_stream_event(role: str, ev: Any,
+                              fwd: "RawDeltaForwarder | None" = None) -> None:
     """把子代理的一条 SDK 流事件转播为 blue 侧事件（data 带 agent=role）。
 
     事件形状与 AgentRunner 发布的保持一致，仅多一个 "agent" 键。
+    原始增量事件（raw_response_event）经 RawDeltaForwarder 实时转播，
+    否则子代理要等一整轮结束才可见（SDK 只在轮末发 item 事件）。
     """
     etype = getattr(ev, "type", "")
+    if etype == "raw_response_event":
+        if fwd is not None:
+            try:
+                await fwd.handle(getattr(ev, "data", None))
+            except Exception:
+                pass  # 实时转播绝不能拖垮子代理运行
+        return
     if etype != "run_item_stream_event":
         return
     name = getattr(ev, "name", "")
@@ -240,9 +257,15 @@ async def _relay_stream_event(role: str, ev: Any) -> None:
     if name == "message_output_created" or item_type == "message_output_item":
         text = AgentRunner._extract_message_text(item)
         if text:
+            # 已作为增量实时转播过的不重复发全文。
+            if fwd is not None and fwd.message_completed():
+                return
             await _publish("thinking", {"text": text, "agent": role})
         return
     if name == "tool_called" or item_type == "tool_call_item":
+        # 已经由 response.output_item.done 实时转播过。
+        if fwd is not None and fwd.tool_call_is_dup(item):
+            return
         tool_name, arguments = AgentRunner._extract_tool_call(item)
         await _publish("tool_call", {
             "tool": tool_name, "args": arguments, "agent": role})
@@ -260,28 +283,70 @@ async def _relay_stream_event(role: str, ev: Any) -> None:
         return
 
 
+# 在飞的子代理 run 任务登记表：指挥官被 stop/cancel 时，await 的取消
+# 不会传播到 run_with_timeout 内部创建的 task（create_task 是分离的），
+# 孤儿子代理会继续执行并发布流事件 —— 需要显式 cancel_running_subagents。
+_sub_tasks: "set[Any]" = set()
+
+
+def cancel_running_subagents() -> int:
+    """取消所有在飞的子代理 run 任务，返回取消数量。
+
+    由 Controller.stop_blue / 指挥官 run 结束时调用，杜绝"蓝方停不下来"
+    （停止后子代理仍继续思考/调工具/发事件）。
+    """
+    n = 0
+    for t in list(_sub_tasks):
+        if not t.done():  # type: ignore[attr-defined]
+            t.cancel()  # type: ignore[attr-defined]
+            n += 1
+    return n
+
+
 async def _run_role_agent(role: str, mission: str,
                           scenario: "Scenario | None") -> str:
     """流式运行一个角色子代理，返回其最终报告文本。"""
     agent = _build_role_agent(role, scenario)
 
+    async def _pub_delta_thinking(text: str, reasoning: bool) -> None:
+        data: dict[str, Any] = {"text": text, "delta": True, "agent": role}
+        if reasoning:
+            data["reasoning"] = True
+        await _publish("thinking", data)
+
+    async def _pub_live_tool_call(tool: str, args: str) -> None:
+        await _publish("tool_call", {
+            "tool": tool, "args": args, "live": True, "agent": role})
+
+    fwd = RawDeltaForwarder(_pub_delta_thinking, _pub_live_tool_call)
+
     async def _stream() -> Any:
         result = Runner.run_streamed(
             agent, input=mission, max_turns=_SUBAGENT_MAX_TURNS)
         async for ev in result.stream_events():
-            await _relay_stream_event(role, ev)
+            await _relay_stream_event(role, ev, fwd)
+        await fwd.flush()
         return result
 
     try:
-        result = await asyncio.wait_for(_stream(), timeout=_SUBAGENT_TIMEOUT)
-        return (getattr(result, "final_output", "") or "").strip()
-    except asyncio.TimeoutError:
-        msg = f"（{role} 任务超时 {_SUBAGENT_TIMEOUT}s）"
-        await _publish("tool_output", {"output": msg, "error": "timeout",
-                                       "agent": role})
-        await _publish("error", {"message": msg, "source": "agent_run",
-                                 "agent": role})
-        return msg
+        result, timed_out = await run_with_timeout(
+            _stream, _SUBAGENT_TIMEOUT, task_registry=_sub_tasks)
+        if timed_out:
+            msg = f"（{role} 任务超时 {_SUBAGENT_TIMEOUT}s）"
+            await _publish("tool_output", {"output": msg, "error": "timeout",
+                                           "agent": role})
+            await _publish("error", {"message": msg, "source": "agent_run",
+                                     "agent": role})
+            return msg
+        report = (getattr(result, "final_output", "") or "").strip()
+        if not report and not getattr(result, "is_complete", True):
+            # 流被中途截断（stop/cancel）且没有任何产出：如实上报，
+            # 别让指挥官把"静默夭折"当成"未发现异常"。
+            msg = f"（{role} 任务被中断且未产出结论）"
+            await _publish("error", {"message": msg, "source": "agent_run",
+                                     "agent": role})
+            return msg
+        return report
     except Exception as exc:
         msg = f"（{role} 任务异常：{type(exc).__name__}: {exc}）"
         await _publish("tool_output", {
@@ -299,10 +364,17 @@ async def _run_role_agent(role: str, mission: str,
 # 当前场景（构建子代理 instructions 用），由 build_blue_team 记录。
 _scenario_ref: "Scenario | None" = None
 
+# 派遣序号（单调递增）：并行派遣时前端可按 seq 对齐 spawn/done 事件。
+_dispatch_seq = 0
+
 
 @function_tool
 async def dispatch_task(role: str, mission: str) -> str:
     """派遣一名角色子代理执行一项防御任务，返回其结论报告。
+
+    同一回合内可以发起多个 dispatch_task 调用——SDK 会用 asyncio.gather
+    并发执行它们（子代理之间完全独立：角色缓存的构建无 await、事件按
+    role 标签区分、报告各自返回），并行派遣是安全的。
 
     Args:
         role: 角色，取值 watcher(哨兵-巡逻检测) / analyst(研判-告警定性) /
@@ -312,6 +384,7 @@ async def dispatch_task(role: str, mission: str) -> str:
     Returns:
         子代理的结构化结论（发现/证据/建议/已执行动作）。
     """
+    global _dispatch_seq
     role = (role or "").strip().lower()
     if role not in _ROLE_SPECS:
         return (f"未知角色 {role!r}，取值: "
@@ -321,14 +394,17 @@ async def dispatch_task(role: str, mission: str) -> str:
     if not mission:
         return "mission 不能为空：请给出目标、背景与期望产出"
 
+    _dispatch_seq += 1
+    seq = _dispatch_seq
     await _publish("team", {"event": "spawn", "role": role,
-                            "mission": mission[:500]})
+                            "mission": mission[:500], "seq": seq})
     report = await _run_role_agent(role, mission, _scenario_ref)
     truncated = (report[:_REPORT_MAX_CHARS]
                  + ("\n...(报告已截断)" if len(report) > _REPORT_MAX_CHARS
                     else ""))
     await _publish("team", {"event": "done", "role": role,
-                            "mission": mission[:500], "report": truncated})
+                            "mission": mission[:500], "report": truncated,
+                            "seq": seq})
     return truncated or f"（{role} 未返回任何结论）"
 
 
@@ -347,17 +423,20 @@ _ORCHESTRATOR_TEMPLATE = """你是 CyberOrion 蓝队的【指挥官】，带领�
   hunter    狩猎 — 失陷排查与现场清理（文件 + 进程维度）
 
 == 指挥 SOP（每次巡逻都执行） ==
-  ① 侦察：派 watcher 对全部目标做一轮全面巡查（一次 dispatch 解决）；
-  ② 研判：watcher 报出可疑点后，派 analyst 深挖定性（带上 watcher
-     的具体发现作为 mission 背景）；简单明了的威胁（如日志里全是
-     爆破失败+成功登录）可跳过 analyst 直接定性；
+  ① 侦察【并行】：在【同一个回合】里用两次独立的 dispatch_task 调用
+     同时派遣 watcher（日志/网络/进程/文件基线全面巡查）和 hunter
+     （失陷排查：文件篡改 + 可疑进程）——多个 dispatch_task 会并发
+     执行，不必等 watcher 回来才派 hunter；
+  ② 研判：任一子代理报出可疑点后，派 analyst 深挖定性（带上具体
+     发现作为 mission 背景）；简单明了的威胁（如日志里全是爆破
+     失败+成功登录）可跳过 analyst 直接定性；
   ③ 上报：威胁一确认【立即】亲自 report_finding（host/technique/
      verdict/confidence/evidence），这是评分接口，绝不能等到处置
      完成才上报；technique 用 ATT&CK 编号（拿不准先 search_attack_kb /
      lookup_technique 核对）；
-  ④ 处置：派 responder 按建议处置（mission 中明确写出受害主机、
-     技术编号、来源 IP、需清除的对象）；有 webshell/可疑进程等
-     失陷痕迹时加派 hunter 清理现场；
+  ④ 处置【可并行】：派 responder 按建议处置（mission 中明确写出
+     受害主机、技术编号、来源 IP、需清除的对象）；多处失陷痕迹可
+     同回合并行派遣 responder 与 hunter 分头清理；
   ⑤ 复查：处置后派 watcher 复查受害主机，确认威胁已消除；
   ⑥ 汇总：最后输出一段中文防御总结。
 

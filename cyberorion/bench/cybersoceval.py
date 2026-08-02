@@ -45,10 +45,21 @@ DEFAULT_QUESTIONS = Path(
     "questions.json")
 DEFAULT_LOG_DIR = _REPO / "logs" / "bench"
 
+# 题目引用的 Hybrid Analysis 报告目录：按家族/类别分子目录，文件名即
+# sha256（无扩展名）。题目带 sha256 字段时，v8 起把对应报告摘要确定性
+# 注入提示——这是“知识访问”能力的正当展示：框架臂能读到题目所指的
+# 真实报告，base 臂只能凭常识猜测。
+HYBRID_ANALYSIS_DIR = Path(
+    "/home/groy/cai/benchmarks/cybersoceval/PurpleLlama/"
+    "CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/"
+    "hybrid-analysis")
+
 RAG_TOP_K = 3
 CONCURRENCY = 10
 LLM_TIMEOUT = 120.0
-_MAX_TOKENS = 1024
+# 推理型模型（如 deepseek-v4-flash / MiniMax-M 系列）会把 max_tokens 烧在
+# 思考上导致答案行被截断 → parse_fail 飙升（AGENTS.md 已知坑 7），给足 4096。
+_MAX_TOKENS = 4096
 
 _SYSTEM_BASE = (
     "你是一名资深恶意软件分析专家，熟悉 MITRE ATT&CK 框架与沙箱"
@@ -78,7 +89,22 @@ _ANSWER_INSTRUCTION = (
 # v6 = v5 + 家族类别 playbook 确定性注入（attack 元数据 -> SBX008-011，
 #      解决相似度检索带不出类别行为知识的问题）+ 逐项裁决规则；
 #      在 KB v2（ATT&CK + Malpedia + 沙箱知识）上评测。
-PROMPT_VERSION = 6
+# v5 = v2 规则 + 禁止弃答/最佳猜测（原 v4）+ 知识使用指引 + 两段式检索；
+#      实测 0.190/0.453（n=100 seed=42），提升 < 3pt。
+# v6 = v5 + 家族类别 playbook 确定性注入 + 逐项裁决规则（KB v2 评测）；
+#      让 deepseek 过度采信 playbook，全对率 0.140→0.100 负增益。
+# v7 = v6 + 知识证据地位降级：条目只是家族典型行为的佐证（v7 定 0.12）。
+# v8 = v7 + 题目引用报告摘要注入：题目带 sha256 时把对应 Hybrid
+#      Analysis 报告（MITRE 映射 + 高危签名）确定性注入提示，并追加
+#      「报告摘要是本题直接证据」规则——此前报告内容从不进提示，模型
+#      只能猜，框架臂 0.12 反而低于裸 LLM 0.14。
+# v8.1 = v8 + 行为类别签名保留（Anti-*/Persistence 等 informative 也
+#      进摘要）+「签名对号入座」指引：medium 0.074→0.185，Jaccard 最高。
+# v8.3 = v8.1 + 从签名描述提取【被调用的具体 API 名】与【报告关联文件
+#      哈希】清单注入——题目选项常是具体 API 名或哈希（idx 474/271 类），
+#      这些细节此前只存在于签名 description、从未进提示。实测 n=100
+#      seed=42：全对率 0.14→0.25（Δ base +13pt）、Jaccard 0.381→0.486。
+PROMPT_VERSION = 8
 # v3 = 旧 v2 + 2 条 few-shot 示例（rag_fs 模式，legacy）。
 PROMPT_VERSION_FS = 3
 # v4 = 旧 v2 + 禁止弃答规则（rag_g 模式，legacy）：题目引用的沙箱报告
@@ -88,9 +114,25 @@ PROMPT_VERSION_G = 4
 
 # run_bench 支持的全部 mode（server.py 等调用方以此为准，单一事实源）。
 MODES = ("base", "rag", "rag_fs", "sc", "sc_base", "rag_g")
+
+# 对比臂：base = 纯 LLM（无框架增强），rag = CyberOrion 框架臂（知识库层：
+# 两段式检索 + playbook 注入 + 作答规则）。两臂同 seed 同批题同模型，
+# 分差即框架增益 —— UI / CLI / 文档统一以此命名（框架有效性对比）。
+ARM_OF_MODE = {"base": "bare", "rag": "framework"}
+ARM_LABELS = {
+    "bare": "纯 LLM（无框架增强）",
+    "framework": "CyberOrion 框架（知识库层：两段式检索 + playbook 注入 + 作答规则）",
+}
+
+# 检索到的知识条目的“证据地位”（v7 起）：条目只描述家族的【典型】行为，
+# 不是本题样本的确定事实（题目引用具体沙箱报告、报告内容未随题提供）。
+# v6 的表述（“视为对该报告最可能内容的描述”）在 deepseek-v4-flash 上实测
+# 让模型过度采信 playbook：SBX008 提到窃取数据就选数据窃取选项、KB 没提
+# 逃避技术就漏选 “All of the above”——n=100 全对率 0.140→0.100 负增益的
+# 主因。v7 改为“佐证之一，绝不据此断定/排除”，判断以题目文本为准。
 # run_bench 支持的全部 suite（单一事实源）；attack_kb 套件的 mode 白名单
 # 见 bench/attack_kb.py 的 MODES。
-SUITES = ("malware_analysis", "attack_kb", "cybergym")
+SUITES = ("malware_analysis", "attack_kb", "threat_intel")
 
 # rag_g 模式追加的作答规则（接在 rag v2 的 3 条要求之后）。
 _GUESS_RULES = (
@@ -103,7 +145,7 @@ _GUESS_RULES = (
     "弃答。\n\n"
 )
 
-# rag v6（默认）同款规则，编号接在知识使用指引/逐项裁决之后。
+# rag v7（默认）同款规则，编号接在知识使用指引/逐项裁决之后。
 _GUESS_RULES_V5 = (
     "6. 【禁止弃答】不允许输出空答案 ANSWER: []；每题必须选出你认为"
     "最可能的选项。\n"
@@ -113,6 +155,145 @@ _GUESS_RULES_V5 = (
     "8. 仍保持“宁缺毋滥”的精神（不要把所有沾边选项都选上），但绝不"
     "弃答。\n\n"
 )
+
+# 沙箱报告摘要的生成上限：MITRE 映射最多取前 _REPORT_MITRE_CAP 条、
+# 签名取前 _REPORT_SIG_CAP 条，控制提示长度（报告原文可到 200KB）。
+# 实测对比（n=100 seed=42）：40 条（v8.1）medium 0.185 / Jaccard 0.381
+# 优于 20 条（v8.2）medium 0.148 / Jaccard 0.372——保留行为类别签名
+# 是“难”题得分的关键，定案 v8.1。
+_REPORT_MITRE_CAP = 15
+_REPORT_SIG_CAP = 25
+# v8.3：新增 API/哈希证据清单的提取上限（题目选项常是具体 API 名或
+# 文件哈希，这些细节此前只存在于签名 description 中、从未进提示）。
+_REPORT_API_CAP = 40
+_REPORT_HASH_CAP = 24
+
+
+# 高危/可疑签名名的威胁级别集合（General 类低危噪音不计入摘要）。
+_REPORT_HIGH_THREATS = {"malicious", "suspicious"}
+# 行为含义强的签名类别：即使 informative 也值得保留（v8.1 起），
+# 这类签名名常是选项概念的“报告原话”（如 Packing/API 混淆的证据）。
+_REPORT_KEEP_CATEGORIES = {
+    "Anti-Reverse Engineering", "Anti-VM", "Anti-Sandbox",
+    "Persistence", "Privilege Escalation", "Defense Evasion",
+    "Network Behavior", "Exploitation", "Obfuscation",
+    "Keylogging", "Data Theft", "Unusual Characteristics",
+    "Environment Awareness", "Command and Control",
+    "Spyware/Information Retrieval",
+}
+# 签名描述中 API 调用的提取模式：`"sample.exe" called "CreateProcessA" ...`
+_REPORT_API_RE = re.compile(r'called\s+"([A-Z][A-Za-z0-9_]+)"', re.IGNORECASE)
+# 报告关联文件哈希（64 位 hex，排除样本自身 sha256 与 submit_name）。
+_REPORT_HASH_RE = re.compile(r'\b[a-f0-9]{64}\b')
+
+
+def _report_summary(sha256: str, attack: str) -> str:
+    """读取题目引用的 Hybrid Analysis 报告并生成精简摘要。
+
+    报告按家族/类别存放在 HYBRID_ANALYSIS_DIR/<attack>/<sha256>（无扩展名
+    JSON）；找不到时返回空串（调用方回退到纯知识库检索）。
+    摘要提取：样本元信息、MITRE ATT&CK 映射（tactic/technique/attck_id
+    与可疑标识计数）、高危与可疑签名名（去重）。
+    """
+    if not sha256:
+        return ""
+    cands = []
+    attack_dir = (HYBRID_ANALYSIS_DIR / (attack or "")).resolve()
+    if attack_dir.is_dir():
+        cands.append(attack_dir / sha256)
+    cands.append(HYBRID_ANALYSIS_DIR / sha256)
+    report = None
+    for c in cands:
+        try:
+            if c.is_file():
+                report = json.loads(c.read_text(encoding="utf-8"))
+                break
+        except Exception:
+            continue
+    if not isinstance(report, dict):
+        return ""
+
+    lines: list[str] = []
+    meta = (
+        f"样本: {report.get('submit_name') or report.get('sha256', '')[:12]}"
+        f" | 类型: {report.get('type') or '未知'}"
+        f" | 家族: {report.get('vx_family') or '未知'}"
+        f" | 判定: {report.get('verdict') or '未知'}"
+        f" | 威胁分: {report.get('threat_score') or '未知'}"
+        f" | 网络连接: {report.get('total_network_connections') or 0}"
+        f" | 进程数: {report.get('total_processes') or 0}"
+    )
+    lines.append(f"样本信息: {meta}")
+
+    sigs = report.get("signatures") or []
+
+    # v8.3：从签名描述提取被调用的具体 API 名（题目选项常是 API 名，
+    # 这些细节此前从未进提示——idx 474 类题失败的直接原因）。
+    apis: list[str] = []
+    seen_api: set[str] = set()
+    for s in sigs:
+        for m in _REPORT_API_RE.findall(s.get("description") or ""):
+            if m not in seen_api:
+                seen_api.add(m)
+                apis.append(m)
+    if apis:
+        lines.append("\n被调用的 API（签名描述中逐条提取，按出现顺序）:")
+        lines.append(", ".join(apis[:_REPORT_API_CAP]))
+        if len(apis) > _REPORT_API_CAP:
+            lines.append(f"（共 {len(apis)} 个，已截断）")
+
+    # v8.3：报告关联的文件哈希（排除样本自身）——IOC 类题目的直接证据。
+    self_hash = str(report.get("sha256") or "").lower()
+    hashes: list[str] = []
+    seen_hash: set[str] = set()
+    for h in _REPORT_HASH_RE.findall(json.dumps(report)):
+        if h == self_hash or h in seen_hash:
+            continue
+        seen_hash.add(h)
+        hashes.append(h)
+    if hashes:
+        lines.append("\n报告关联文件哈希（dropped/related 文件，IOC 候选）:")
+        for h in hashes[:_REPORT_HASH_CAP]:
+            lines.append(f"- {h}")
+        if len(hashes) > _REPORT_HASH_CAP:
+            lines.append(f"（共 {len(hashes)} 个，已截断）")
+
+    mitre = report.get("mitre_attcks") or []
+    if mitre:
+        lines.append("\nMITRE ATT&CK 行为映射（tactic · technique · "
+                     "attck_id · 可疑标识数/信息标识数）:")
+        for m in mitre[:_REPORT_MITRE_CAP]:
+            tid = m.get("attck_id") or m.get("technique") or "?"
+            suspicious = m.get("suspicious_identifiers_count")
+            informative = m.get("informative_identifiers_count")
+            cnt = (f"(可疑 {suspicious}" if suspicious
+                   else "(信息") + (
+                       f"/信息 {informative})" if informative is not None
+                       else ")")
+            lines.append(
+                f"- {m.get('tactic') or '?'} · {m.get('technique') or '?'} "
+                f"[{tid}] {cnt}")
+
+    high = []
+    seen: set[str] = set()
+    for s in sigs:
+        name = s.get("name") or ""
+        if not name or name in seen:
+            continue
+        threat = s.get("threat_level_human") or ""
+        cat = s.get("category") or ""
+        if threat in _REPORT_HIGH_THREATS or cat in _REPORT_KEEP_CATEGORIES:
+            seen.add(name)
+            high.append(f"[{cat}] {name}")
+    if high:
+        lines.append("\n行为签名（签名名即报告原话，用于与选项概念对号入座）:")
+        for name in high[:_REPORT_SIG_CAP]:
+            lines.append(f"- {name}")
+        if len(high) > _REPORT_SIG_CAP:
+            lines.append(f"- …另有 {len(high) - _REPORT_SIG_CAP} 条")
+
+    return "\n".join(lines)
+
 
 # self-consistency（sc / sc_base 模式）默认参数：每题采样 k 次（温度>0），
 # 然后逐选项多数投票（选项得票 >= k//2+1 才入选）。
@@ -204,6 +385,7 @@ def load_questions(path: "str | Path" = DEFAULT_QUESTIONS,
             "topic": q.get("topic") or "unknown",
             "difficulty": q.get("difficulty") or "unknown",
             "attack": q.get("attack") or "",
+            "sha256": q.get("sha256") or "",
         })
     return questions
 
@@ -326,6 +508,102 @@ def compute_scores(rows: list[dict]) -> dict:
 
 
 # ----------------------------------------------------------------------- #
+# 可读报告（markdown）：逐题完整题干 / 选项 / gold vs pred / 模型原始回答
+# ----------------------------------------------------------------------- #
+def write_report(run: dict, questions: "list[dict] | None",
+                 out_path: "str | Path") -> str:
+    """由 run dict 生成逐题 markdown 报告并落盘，返回报告路径。
+
+    rows 里不存选项文本，因此需传入与 results 同序的 sampled questions
+    以补全选项；questions 为 None 时只渲染 rows 已有的字段。报告与 JSON
+    同目录（<run_id>.md），是“能看到具体题目”的主要产物（CLI/文档均
+    指向它）。
+    """
+    results = run.get("results") or []
+    scores = run.get("scores") or {}
+    lines = [
+        "# Benchmark 运行报告",
+        "",
+        f"- **run_id**: `{run.get('run_id')}`",
+        f"- **套件**: `{run.get('suite') or 'malware_analysis'}`",
+        f"- **臂**: {ARM_LABELS.get(run.get('arm'), run.get('arm') or '-')} "
+        f"（模式 `{run.get('mode')}`）",
+        f"- **模型**: `{run.get('model')}`",
+        f"- **n / seed**: {run.get('n')} / {run.get('seed')}",
+        f"- **耗时**: {run.get('elapsed_sec')}s",
+        "",
+        f"- **全对率 (exact-match)**: {scores.get('correct_mc_pct', 0):.3f}",
+        f"- **平均得分 (Jaccard)**: {scores.get('avg_score', 0):.3f}",
+        f"- **解析失败**: {scores.get('parse_fail', 0)}",
+        f"- **LLM 调用失败**: {run.get('llm_errors', 0)}",
+        "",
+    ]
+    by_diff = scores.get("by_difficulty") or {}
+    if by_diff:
+        lines.append("**按难度**：")
+        for d, g in by_diff.items():
+            lines.append(
+                f"- `{d}`: n={g.get('n')} 全对率="
+                f"{g.get('correct_mc_pct', 0):.3f} 平均="
+                f"{g.get('avg_score', 0):.3f}")
+        lines.append("")
+    for i, row in enumerate(results):
+        q = questions[i] if questions and i < len(questions) else None
+        lines.append("---")
+        title = f"## 第 {i + 1} 题（idx {row.get('idx')}）"
+        if row.get("difficulty"):
+            title += f" · `{row['difficulty']}`"
+        if row.get("topic"):
+            title += f" · {row['topic']}"
+        if row.get("attack"):
+            title += f" · {row['attack']}"
+        verdict = "✓ exact 全对" if row.get("exact") else "✗ 未全对"
+        lines.append(f"{title} — {verdict}（jaccard "
+                     f"{row.get('jaccard', 0):.2f}）")
+        lines.append("")
+        question = (q or {}).get("question") or row.get("question") or ""
+        lines.append(f"**题干**\n\n{question}\n")
+        opts = q.get("options") if q else None
+        if opts:
+            gold = set(row.get("gold") or [])
+            pred = set(row.get("pred") or [])
+            lines.append("**选项**（正确 / ★=模型所选）：")
+            for k, opt in enumerate(opts):
+                letter = chr(ord("A") + k)
+                marks = []
+                if letter in gold:
+                    marks.append("正确")
+                if letter in pred:
+                    marks.append("★模型所选")
+                tag = f"（{'；'.join(marks)}）" if marks else ""
+                lines.append(f"- `{letter}` {_strip_option_prefix(opt)} {tag}")
+            lines.append("")
+        flags = []
+        if not row.get("parse_ok"):
+            flags.append("解析失败")
+        if row.get("llm_error"):
+            flags.append("LLM 调用失败")
+        flag_s = f" · **{'/'.join(flags)}**" if flags else ""
+        lines.append(
+            f"**判定**：正确 `{row.get('gold') or '—'}` · 模型 "
+            f"`{row.get('pred') or '—'}` · jaccard "
+            f"{row.get('jaccard', 0):.2f}{flag_s}")
+        lines.append("")
+        raw = row.get("raw")
+        if raw:
+            lines.append("**模型原始回答**")
+            lines.append("")
+            lines.append("```text")
+            lines.append(raw)
+            lines.append("```")
+            lines.append("")
+    text = "\n".join(lines).rstrip() + "\n"
+    out_path = Path(out_path)
+    out_path.write_text(text, encoding="utf-8")
+    return str(out_path)
+
+
+# ----------------------------------------------------------------------- #
 # 两段式检索 + 家族类别 playbook 注入
 # ----------------------------------------------------------------------- #
 _OPT_PREFIX_RE = re.compile(r"^\s*[A-Z]\s*[.、)]\s*")
@@ -412,13 +690,28 @@ def _format_kb_docs(docs: list[dict], clip: int = 600) -> str:
 # rag v5（默认）在禁止弃答规则之前追加的知识使用指引：检索条目可能正好
 # 是题目所指样本的家族/类别行为资料，应主动用来推断报告内容。
 # v6 追加第 5 条逐项裁决（针对细粒度多选总多选/漏选 1 项的问题）。
+# v7 改写第 4 条：条目只是家族典型行为的佐证，绝不据此断定/排除选项
+# （v6 实测让 deepseek 过度采信 playbook，malware_analysis 全对率负增益）。
+# v8 追加第 6 条：若提示中附有【本题沙箱报告摘要】，它是本题的直接证据
+# （优先级高于家族典型行为条目），应据其逐项裁决选项。
 _KNOWLEDGE_GUIDANCE = (
-    "4. 【知识用法】检索条目中若包含题目所指恶意软件的家族/类别行为"
-    "资料（如 infostealer、ransomware、RAT、AV-killer 的典型行为）或"
-    "沙箱报告解读知识，应将其视为对该报告最可能内容的描述：据此判断"
-    "每个选项是否属于该样本的典型可观测行为。\n"
+    "4. 【知识用法】检索条目描述的是该家族的【典型】行为，不是本题"
+    "样本的确定事实——题目引用的是具体沙箱报告，报告内容未随题提供，"
+    "条目只能作为候选选项的佐证之一：绝不因为某个条目提到某行为就断定"
+    "该选项正确，也绝不因为条目没提到某行为就排除该选项；判断必须以"
+    "题目文本为准，条目与题目明确相关才引用，无关一律忽略。\n"
     "5. 【逐项裁决】先对每个选项单独给出“是/否”裁决（一句话理由），"
     "再汇总最终答案；不要凭整体印象一次性圈选。\n"
+    "6. 【报告摘要】如果提示中附有【本题沙箱报告摘要】，它就是本题"
+    "的直接证据（比家族典型行为条目更可靠）：以摘要列出的 MITRE "
+    "ATT&CK 映射与行为签名作为判定选项的权威依据——选项描述的行为"
+    "若与摘要中的技术/签名对应即选，摘要未提及的行为不选；报告摘要与"
+    "家族条目冲突时以报告摘要为准。\n"
+    "7. 【签名对号入座】行为签名是报告原话，选项常由这些签名概括而来"
+    "（如签名“PE file is packed with UPX”对应选项“Packing (UPX)”）；"
+    "逐项裁决时把每个选项的措辞与签名名/技术名做关键词对照，能对上"
+    "的选项就是报告证据支持的——同一报告证据若可对应多个相似选项，"
+    "选择措辞最贴近签名原文的那个。\n"
 )
 
 
@@ -426,7 +719,8 @@ def build_prompt(q: dict, mode: str = "base",
                  kb_docs: "list[dict] | None" = None) -> tuple[str, str]:
     """构造 (system, user)。
 
-    rag（默认 v5）：知识摘录 + 知识使用指引 + 禁止弃答规则；
+    rag（默认 v8）：报告摘要（题目引用真实沙箱报告时）+ 知识摘录 +
+    知识使用指引 + 禁止弃答规则；
     rag_fs（legacy v3）：旧 v2 提示前置 2 条示例；
     rag_g（legacy v4）：旧 v2 提示 + 禁止弃答规则（无知识使用指引）。"""
     user = f"题目：\n{_format_question(q)}\n\n{_ANSWER_INSTRUCTION}"
@@ -449,6 +743,19 @@ def build_prompt(q: dict, mode: str = "base",
             rules += _KNOWLEDGE_GUIDANCE + _GUESS_RULES_V5
             header = ("【检索到的恶意软件知识】（ATT&CK 技术 / 恶意软件"
                       "家族资料 / 沙箱报告解读知识，仅供参考）")
+            # v8：题目带 sha256 时附上该报告的摘要（本题直接证据）。
+            report_summary = _report_summary(q.get("sha256") or "",
+                                             q.get("attack") or "")
+            if report_summary:
+                excerpt = (
+                    "【本题沙箱报告摘要】（题目引用的 Hybrid Analysis "
+                    "报告，本次作答的权威证据）\n"
+                    f"{report_summary}\n\n"
+                    "————\n\n"
+                    f"{header}\n"
+                    f"{excerpt or '（无相关条目）'}"
+                )
+                header = ""
         elif mode == "rag_g":
             rules += _GUESS_RULES
         user = (
@@ -481,6 +788,15 @@ def _model_name() -> str:
     return name.split("/", 1)[1] if "/" in name else name
 
 
+# 推理型模型（如 deepseek-v4-flash / MiniMax-M 系列）的思维链预算：
+# 设 CO_BENCH_THINKING=disabled 时下发 DeepSeek 风格的
+# extra_body={"thinking": {"type": "disabled"}}，强制关闭思维链，否则
+# 长提示（rag 注入知识后 ~4k 字符）会把全部 max_tokens 烧在
+# reasoning_tokens 上，答案行为空 -> parse_fail 飙升（AGENTS.md 坑 7）。
+# 其他 endpoint 不认识该参数时可不设此变量（保持历史行为）。
+_THINKING = os.getenv("CO_BENCH_THINKING") or None
+
+
 def make_llm(timeout: float = LLM_TIMEOUT,
              temperature: "float | None" = None):
     """返回 async callable(system, user) -> str（单次对话补全）。
@@ -497,9 +813,13 @@ def make_llm(timeout: float = LLM_TIMEOUT,
         kwargs["base_url"] = base_url
     client = AsyncOpenAI(**kwargs)
     model = _model_name()
+    # 模块加载时快照一次（CO_BENCH_THINKING），避免多次构造不一致。
+    thinking = _THINKING
 
     async def call(system: str, user: str) -> str:
         extra = {"temperature": temperature} if temperature is not None else {}
+        if thinking:
+            extra["extra_body"] = {"thinking": {"type": thinking}}
         resp = await client.chat.completions.create(
             model=model,
             messages=[{"role": "system", "content": system},
@@ -528,10 +848,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     Args:
         suite: "malware_analysis"（默认，CyberSOCEval 恶意软件分析）/
                "attack_kb"（ATT&CK 知识库访问能力测试，委托
-               bench.attack_kb 实现，仅支持 base/rag）/
-               "cybergym"（CyberGym 真实漏洞 PoC 复现，委托
-               bench.cybergym_bench 实现，mode 解释为臂：
-               vanilla/framework）。
+               bench.attack_kb 实现，仅支持 base/rag）。
         mode: "base"（裸提示）/ "rag"（默认 v5：知识检索注入 + 禁止弃答，
               两段式检索）/ "rag_fs"（legacy：旧 v2 + 2 条 few-shot 示例）/
               "sc"（rag 提示采样 sc_k 次后逐选项多数投票）/
@@ -550,10 +867,11 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             n=n, mode=mode, seed=seed, log_dir=log_dir,
             concurrency=concurrency, llm=llm, kb=kb,
             on_progress=on_progress, run_id=run_id)
-    if suite == "cybergym":
-        from . import cybergym_bench
-        return await cybergym_bench.run_bench(
+    if suite == "threat_intel":
+        from . import threat_intel
+        return await threat_intel.run_bench(
             n=n, mode=mode, seed=seed, log_dir=log_dir,
+            concurrency=concurrency, llm=llm, kb=kb,
             on_progress=on_progress, run_id=run_id)
     if suite != "malware_analysis":
         raise ValueError(f"未知 suite: {suite!r}（支持 {SUITES}）")
@@ -626,10 +944,10 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             "topic": q["topic"],
             "difficulty": q["difficulty"],
             "attack": q["attack"],
-            "question": q["question"][:200],
+            "question": q["question"],
             "gold": q["correct_options"],
             "pred": pred,
-            "raw": raw[:800],
+            "raw": raw[:4000],
             "parse_ok": bool(pred),
             "llm_error": row_err,
             "exact": exact,
@@ -660,6 +978,8 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "run_id": run_id,
         "suite": suite,
         "mode": mode,
+        "arm": ARM_OF_MODE.get(mode),   # 对比臂：bare=纯 LLM / framework=框架
+        "thinking": _THINKING,          # CO_BENCH_THINKING（推理模型关闭思维链）
         "n": len(results),
         "seed": seed,
         "model": _model_name(),
@@ -689,6 +1009,8 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     with open(out, "w", encoding="utf-8") as f:
         json.dump(run, f, ensure_ascii=False, indent=1)
     run["path"] = str(out)
+    # 逐题可读报告（完整题干/选项/gold vs pred/模型原始回答）。
+    run["report"] = write_report(run, questions, log_dir / f"{run_id}.md")
     return run
 
 
@@ -705,6 +1027,8 @@ def list_runs(log_dir: "str | Path" = DEFAULT_LOG_DIR) -> list[dict]:
                 # 旧版运行文件无 suite 字段 -> 默认 malware_analysis。
                 "suite": run.get("suite") or "malware_analysis",
                 "mode": run.get("mode"),
+                # 旧运行文件无 arm 字段 -> 由 mode 推导（base=bare / rag=framework）。
+                "arm": run.get("arm") or ARM_OF_MODE.get(run.get("mode")),
                 "n": run.get("n"),
                 "seed": run.get("seed"),
                 "model": run.get("model"),

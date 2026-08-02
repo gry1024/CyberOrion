@@ -3,14 +3,17 @@
 import type {
   AlertRow,
   BenchMode,
+  BenchQuestionPreview,
   BenchRunDetail,
   BenchRunSummary,
   BenchSuite,
+  BenchTaskDetail,
   ControllerStatus,
   KbDoc,
   KbSearchHit,
   KbStats,
   KbTactic,
+  ScenarioDetail,
   ScenarioInfo,
   ScenarioList,
   ScoreMetrics,
@@ -90,6 +93,22 @@ export const api = {
   getBenchRuns: () => get('/api/bench/runs') as Promise<BenchRunSummary[]>,
   getBenchRun: (runId: string) =>
     get(`/api/bench/run/${runId}`) as Promise<BenchRunDetail>,
+  /** 单题完整 drill-down（QA 补全题干选项）。 */
+  getBenchTask: (runId: string, idx: number) =>
+    get(`/api/bench/run/${runId}/task/${idx}`) as Promise<BenchTaskDetail>,
+  /** 题目预览：按 seed 采样 n 道题（含正确答案），与正式基准同逻辑。 */
+  getBenchQuestions: (suite: BenchSuite, n: number, seed = 42) =>
+    get(
+      `/api/bench/questions?suite=${suite}&n=${n}&seed=${seed}`,
+    ) as Promise<{
+      suite: BenchSuite
+      n: number
+      seed: number
+      questions: BenchQuestionPreview[]
+    }>,
+
+  getScenarioInfo: () => get('/api/scenario/info') as Promise<ScenarioDetail>,
+  getAbout: () => get('/api/about') as Promise<{ markdown: string }>,
 
   sessionStart: () => post('/api/session/start'),
   sessionStop: () => post('/api/session/stop'),

@@ -568,3 +568,56 @@ class TestLlmErrorSurfacing:
         assert runs and runs[0]["status"] == "error"
         assert runs[0]["llm_errors"] == 2
         assert "arrears" in (runs[0]["error"] or "")
+
+
+# ----------------------------------------------------------------------- #
+# 对比臂（arm）与逐题 markdown 报告（题目可见性）
+# ----------------------------------------------------------------------- #
+class TestArmAndReport:
+    def test_arm_field(self, questions_path, tmp_path):
+        base = asyncio.run(bench.run_bench(
+            n=2, mode="base", seed=1, questions_path=questions_path,
+            log_dir=tmp_path, llm=_mock_llm({})))
+        assert base["arm"] == "bare"
+        rag = asyncio.run(bench.run_bench(
+            n=2, mode="rag", seed=1, questions_path=questions_path,
+            log_dir=tmp_path, llm=_mock_llm({}), kb=FakeKB()))
+        assert rag["arm"] == "framework"
+        # legacy 实验模式不在对比臂中
+        legacy = asyncio.run(bench.run_bench(
+            n=2, mode="rag_g", seed=1, questions_path=questions_path,
+            log_dir=tmp_path, llm=_mock_llm({}), kb=FakeKB()))
+        assert legacy["arm"] is None
+
+    def test_markdown_report_written(self, questions_path, tmp_path):
+        run = asyncio.run(bench.run_bench(
+            n=3, mode="rag", seed=42, questions_path=questions_path,
+            log_dir=tmp_path,
+            llm=_mock_llm({"Q0": 'ANSWER: ["A","B"]'}),
+            kb=FakeKB()))
+        md = tmp_path / f"{run['run_id']}.md"
+        assert run["report"] == str(md)
+        text = md.read_text(encoding="utf-8")
+        assert "Q0" in text                    # 完整题干
+        assert "Steal data" in text            # 选项文本（去字母前缀）
+        assert "正确" in text and "模型" in text
+        assert "jaccard" in text
+        # 与 JSON 同目录落盘
+        assert (tmp_path / f"{run['run_id']}.json").is_file()
+
+    def test_report_includes_raw_answer(self, questions_path, tmp_path):
+        async def reasoning_llm(system, user):
+            return "推理：行为分析……\nANSWER: [\"A\"]"
+
+        run = asyncio.run(bench.run_bench(
+            n=1, mode="base", seed=1, questions_path=questions_path,
+            log_dir=tmp_path, llm=reasoning_llm))
+        text = (tmp_path / f"{run['run_id']}.md").read_text(encoding="utf-8")
+        assert "推理：行为分析" in text
+
+    def test_list_runs_has_arm(self, questions_path, tmp_path):
+        asyncio.run(bench.run_bench(
+            n=2, mode="base", seed=1, questions_path=questions_path,
+            log_dir=tmp_path, llm=_mock_llm({})))
+        runs = bench.list_runs(tmp_path)
+        assert runs[0]["arm"] == "bare"

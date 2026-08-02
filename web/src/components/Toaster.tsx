@@ -1,14 +1,14 @@
 // 全局错误 toast：右上角堆叠，8s 自动消失，可手动关闭。
-// 数据来源：WS type="error" 事件 + 关键 REST 操作失败（见 api.ts 调用方）。
+// Kimi 式：白卡片 + 左侧语义色条 + 细边框。
 
 import { useEffect, useState } from 'react'
 import { subscribeToasts } from '../toasts'
 import type { Toast, ToastSide } from '../toasts'
 
-const SIDE_STYLE: Record<ToastSide, { border: string; label: string; text: string }> = {
-  red: { border: 'border-l-attacker', label: '红方', text: 'text-attacker' },
-  blue: { border: 'border-l-accent', label: '蓝方', text: 'text-accent' },
-  system: { border: 'border-l-warning', label: '系统', text: 'text-warning' },
+const SIDE_STYLE: Record<ToastSide, { border: string; label: string; color: string }> = {
+  red: { border: 'var(--color-red)', label: '红方', color: 'var(--color-red)' },
+  blue: { border: 'var(--color-blue)', label: '蓝方', color: 'var(--color-blue)' },
+  system: { border: 'var(--color-fg-3)', label: '系统', color: 'var(--color-fg-3)' },
 }
 
 const AUTO_DISMISS_MS = 8000
@@ -22,22 +22,26 @@ function ToastCard({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   return (
     <div
       role="alert"
-      className={`glass pointer-events-auto w-[340px] rounded-xl border border-hairline
-        border-l-2 ${meta.border} px-3.5 py-2.5 shadow-lg shadow-black/40`}
+      className="pointer-events-auto w-[340px] overflow-hidden rounded-xl border bg-[var(--color-panel)]"
+      style={{
+        borderColor: 'var(--color-line-2)',
+        borderLeft: `3px solid ${meta.border}`,
+        boxShadow: '0 8px 28px rgba(0, 0, 0, 0.10)',
+      }}
     >
-      <div className="flex items-center gap-2">
-        <span className={`text-[9px] font-bold uppercase tracking-[0.2em] ${meta.text}`}>
+      <div className="flex items-center gap-2 px-4 pt-2.5">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: meta.color }}>
           {toast.title ?? `${meta.label}错误`}
         </span>
         <button
           onClick={onClose}
-          className="ml-auto flex-none text-[11px] leading-none text-text-3 transition-colors hover:text-neutral-200"
+          className="ml-auto flex-none text-[12px] leading-none text-[var(--color-fg-4)] transition-colors hover:text-[var(--color-fg)]"
           aria-label="关闭"
         >
           ✕
         </button>
       </div>
-      <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.5] text-[#d1d1d6]">
+      <div className="whitespace-pre-wrap break-words px-4 pb-2.5 pt-1 font-mono text-[11.5px] leading-[1.55]" style={{ color: 'var(--color-fg-2)' }}>
         {toast.message}
       </div>
     </div>
@@ -57,7 +61,7 @@ export function Toaster() {
 
   if (toasts.length === 0) return null
   return (
-    <div className="pointer-events-none fixed right-4 top-16 z-[90] flex flex-col items-end gap-2">
+    <div className="pointer-events-none fixed right-4 top-4 z-[90] flex flex-col items-end gap-2">
       {toasts.map((t) => (
         <ToastCard
           key={t.id}

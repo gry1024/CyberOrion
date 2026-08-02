@@ -1,26 +1,34 @@
 // Benchmark 视图: 框架价值对比 —
-// 运行卡片(CyberGym 主套件 + CyberSOCEval; 裸模型 vs 框架臂 + 实时进度) ·
+// 运行卡片(CyberSOCEval; 裸模型 vs 框架臂 + 实时进度) ·
 // 论文风格分组柱状图 BenchBarChart (每套件一张, Δ 徽章) · 历史结果表格
-// (attack_kb 已废弃, 历史运行置灰; legacy 实验模式折叠)。
+// (legacy 实验模式折叠)。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useArena } from '../arena'
 import { pushToast } from '../toasts'
-import type { BenchMode, BenchRunSummary, BenchSuite } from '../types'
+import type {
+  BenchMode,
+  BenchQuestionPreview,
+  BenchRunSummary,
+  BenchSuite,
+} from '../types'
 import {
   BENCH_ARMS,
   BENCH_SUITES,
   LEGACY_BENCH_MODES,
+  armLabelOf,
   armOfMode,
-  isCyberGymScores,
   primaryScoreOf,
 } from '../types'
 import { BenchBarChart } from './BenchBarChart'
 import { BenchDetailDrawer } from './BenchDetail'
+import { FadeIn } from './FadeIn'
+import { MarkdownView } from './MarkdownView'
+import { Modal } from './Modal'
 
 // ---------------------------------------------------------------------------
-// formatting helpers (run_id looks like `20260801_015004_cybergym_framework_n1`)
+// formatting helpers (run_id looks like `20260727_172628_malware_analysis_rag_n100`)
 // ---------------------------------------------------------------------------
 
 export function fmtRunTime(runId: string): string {
@@ -46,32 +54,19 @@ function suiteOf(r: { suite?: BenchSuite }): BenchSuite {
 
 function SuiteBadge({ suite }: { suite: BenchSuite }) {
   const meta = BENCH_SUITES[suite]
-  if (suite === 'attack_kb') {
-    // 已废弃套件: 历史运行保留但置灰 + 删除线
-    return (
-      <span
-        title={meta.hint}
-        className="rounded-full bg-overlay px-2 py-px text-[9px] text-text-3"
-      >
-        <span className="line-through">attack_kb</span> · 已废弃
-      </span>
-    )
-  }
+  const name = suite === 'attack_kb' ? 'ATT&CK 知识' : 'CyberSOCEval'
   return (
     <span
       title={meta.hint}
-      className={`rounded-full px-2 py-px text-[9px] ${
-        suite === 'cybergym'
-          ? 'border border-accent/50 text-accent'
-          : 'bg-overlay text-neutral-400'
-      }`}
+      className="rounded-full bg-overlay px-2 py-px text-[9px] text-text-3"
     >
-      {suite === 'cybergym' ? 'CyberGym' : 'CyberSOCEval'}
+      {name}
     </span>
   )
 }
 
-/** 臂徽章: 裸模型 (vanilla/base) 灰, 框架 (framework/rag) 绿, legacy 模式描边。 */
+/** 臂徽章: 纯 LLM (vanilla/base) 灰, CyberOrion 框架 (framework/rag) 白,
+ * legacy 实验模式描边。 */
 function ArmBadge({ mode }: { mode: BenchMode }) {
   const arm = armOfMode(mode)
   if (!arm) {
@@ -83,17 +78,17 @@ function ArmBadge({ mode }: { mode: BenchMode }) {
   }
   return arm === 'framework' ? (
     <span
-      title="CyberOrion 框架臂"
-      className="rounded-full border border-accent/50 px-2 py-px font-mono text-[10px] font-medium text-accent"
+      title="CyberOrion 框架臂（知识库层：两段式检索 + playbook 注入 + 作答规则）"
+      className="rounded-full border border-hairline px-2 py-px font-mono text-[10px] font-medium text-fg"
     >
-      {mode}
+      {armLabelOf(mode)}
     </span>
   ) : (
     <span
-      title="裸模型臂"
-      className="rounded-full bg-overlay px-2 py-px font-mono text-[10px] text-neutral-400"
+      title="纯 LLM 对照臂（无框架增强）"
+      className="rounded-full bg-overlay px-2 py-px font-mono text-[10px] text-text-3"
     >
-      {mode}
+      {armLabelOf(mode)}
     </span>
   )
 }
@@ -118,19 +113,19 @@ function PillGroup<T extends string | number>({
       <span className="w-14 flex-none text-[10px] uppercase tracking-widest text-text-2">
         {label}
       </span>
-      <div className="flex items-center rounded-full border border-hairline bg-white/[0.03] p-0.5">
+      <div className="flex items-center rounded-full border border-hairline bg-overlay p-0.5">
         {options.map((o) => (
           <button
             key={String(o.value)}
             disabled={o.disabled}
             title={o.hint}
             onClick={() => onChange(o.value)}
-            className={`rounded-full px-3 py-1 font-display text-[11px] font-bold tracking-wide transition-colors ${
+            className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-wide transition-colors ${
               o.disabled
                 ? 'cursor-not-allowed text-text-3'
                 : value === o.value
-                  ? 'bg-white/5 text-accent'
-                  : 'text-neutral-400 hover:text-neutral-200'
+                  ? 'bg-ink text-bg'
+                  : 'text-text-3 hover:text-fg'
             }`}
           >
             {o.label}
@@ -141,24 +136,176 @@ function PillGroup<T extends string | number>({
   )
 }
 
-/** 可发起对比的套件 (attack_kb 已废弃, 不出现在运行卡片)。 */
-const RUNNABLE_SUITES: BenchSuite[] = ['cybergym', 'malware_analysis']
+/** 可发起对比的套件。 */
+const RUNNABLE_SUITES: BenchSuite[] = [
+  'malware_analysis',
+  'attack_kb',
+  'threat_intel',
+]
+
+/** 「ⓘ 套件说明」弹窗内容（静态 markdown，按套件）。 */
+const SUITE_DOCS: Record<string, string> = {
+  malware_analysis: `## CyberSOCEval · 恶意软件分析问答
+
+**环境**：Meta PurpleLlama CyberSOCEval 的 malware_analysis 数据集，609 道
+多选题（沙箱报告行为分析、ATT&CK 技术识别）。固定 seed 采样，两臂回答
+**同一批**题目，保证可比。
+
+**任务**：每题选出所有正确选项（1 个或多个），最后一行严格输出
+\`ANSWER: ["A","C"]\`；容错解析器从自然语言回答中提取选项字母。
+
+**对 AI 的期望**：以题目描述的恶意软件行为为依据**逐项裁决**，宁缺毋滥；
+禁止弃答（必须给出最佳猜测）。rag 臂额外注入知识库检索结果
+（ATT&CK 技术 / 恶意软件家族 / 沙箱报告解读知识）——只可参考，无关条目
+必须忽略。
+
+**评分**：**exact-match 正确率**（主指标）+ Jaccard 部分分，按难度 / 主题
+分组统计；解析失败与 LLM 调用失败单独计数，绝不静默成 0 分。
+
+**两臂对比（框架有效性）**：同一批题目、同一模型，唯一差异是框架的
+知识库层——Δ 即框架增益。
+- \`base\` 纯 LLM——单次 LLM 调用，裸提示（无框架增强）；
+- \`rag\` CyberOrion 框架——两段式检索（家族类别+题干，低分则并入选项
+  重检）+ 家族行为 playbook 确定性注入 + 禁止弃答/逐项裁决作答规则。`,
+  attack_kb: `## ATT&CK 知识检索 · 知识库访问能力测试
+
+**设计**：从 KB（ATT&CK 技术文档）取 detection 描述摘录作题干，5 个技术编号
+选项中选出正确项（同战术干扰项，确定性洗牌）。**答案就在知识库里**——
+纯 LLM 只能靠记忆背诵，框架臂把检索结果注入提示即可对号甄别。
+
+**这就是框架有效性最直接的证据**：两臂同 seed 同批题同模型，唯一差异是
+框架的知识库层。实测（deepseek-v4-flash, n=100, seed=42）：纯 LLM 51% →
+CyberOrion 框架 87%（+36pt），所有战术主题全线上涨。
+
+**评分**：单选题 exact-match 正确率（= Jaccard）。解析失败与 LLM 调用
+失败单独计数。`,
+}
+
+function SuiteInfoModal({
+  suite,
+  onClose,
+}: {
+  suite: BenchSuite
+  onClose: () => void
+}) {
+  return (
+    <Modal title="套件说明" onClose={onClose} width="w-[680px]">
+      <MarkdownView
+        markdown={SUITE_DOCS[suite] ?? SUITE_DOCS.malware_analysis}
+        className="md-doc"
+      />
+    </Modal>
+  )
+}
+
+/** 题目预览：按 seed 采样展示具体题目与正确答案（与正式基准同采样逻辑）。 */
+function QuestionPreviewModal({
+  suite,
+  onClose,
+}: {
+  suite: BenchSuite
+  onClose: () => void
+}) {
+  const [data, setData] = useState<{
+    n: number
+    questions: BenchQuestionPreview[]
+  } | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let stale = false
+    api
+      .getBenchQuestions(suite, 20, 42)
+      .then((d) => {
+        if (!stale) setData(d)
+      })
+      .catch(() => {
+        if (!stale) setErr('题目加载失败')
+      })
+    return () => {
+      stale = true
+    }
+  }, [suite])
+  return (
+    <Modal
+      title={`题目预览 · ${BENCH_SUITES[suite].label}`}
+      onClose={onClose}
+      width="w-[760px]"
+    >
+      {err ? (
+        <div className="text-[11px] text-attacker">{err}</div>
+      ) : !data ? (
+        <div className="text-[11px] text-text-2">加载中…</div>
+      ) : (
+        <div className="scroll-thin max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          <p className="text-[11px] leading-5 text-text-2">
+            按 seed 42 采样的 {data.n} 道题（base 与 rag 两臂正式基准回答的
+            就是这批题）。<span className="text-success">绿色为正确答案</span>；
+            运行结束后点历史结果行，可在抽屉里逐题查看模型的作答与原始回答。
+          </p>
+          {data.questions.map((q, i) => (
+            <div key={q.idx} className="rounded-lg border border-hairline/60 p-3">
+              <div className="mb-1.5 flex items-baseline gap-2 text-[9px] text-text-3">
+                <span className="font-mono">#{i + 1} (idx {q.idx})</span>
+                {q.difficulty && <span>{q.difficulty}</span>}
+                {q.topic && <span>{q.topic}</span>}
+                {q.attack && <span>{q.attack}</span>}
+              </div>
+              <div className="text-[11px] leading-5 text-text-2">
+                {q.question}
+              </div>
+              <ul className="mt-2 space-y-0.5">
+                {q.options.map((opt, j) => {
+                  const letter = String.fromCharCode(65 + j)
+                  const isGold = q.correct_options.includes(letter)
+                  return (
+                    <li
+                      key={j}
+                      className={`flex items-baseline gap-2 rounded px-2 py-0.5 text-[11px] leading-5 ${
+                        isGold
+                          ? 'bg-success/[0.07] text-success'
+                          : 'text-text-2'
+                      }`}
+                    >
+                      <span className="w-4 flex-none font-mono font-semibold">
+                        {letter}
+                      </span>
+                      <span className="min-w-0">
+                        {opt.replace(/^\s*[A-H]\s*[.、)]\s*/, '')}
+                      </span>
+                      {isGold && (
+                        <span className="ml-auto flex-none font-mono text-[9px]">
+                          正确
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  )
+}
 
 const N_OPTIONS: Record<BenchSuite, number[]> = {
-  cybergym: [1, 3, 5],
   malware_analysis: [20, 50, 100],
   attack_kb: [20, 50, 100],
+  threat_intel: [20, 50, 100],
 }
 
 function RunCard({ onStarted }: { onStarted: () => void }) {
   const { benchLive } = useArena()
-  const [suite, setSuite] = useState<BenchSuite>('cybergym')
-  const [n, setN] = useState(1)
+  const [suite, setSuite] = useState<BenchSuite>('malware_analysis')
+  const [n, setN] = useState(20)
   const [mode, setMode] = useState<BenchMode>(
-    BENCH_ARMS.cybergym.framework.mode,
+    BENCH_ARMS.malware_analysis.framework.mode,
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const running = Object.values(benchLive)
 
@@ -178,25 +325,25 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
         if (!r.ok) {
           const msg = r.error ?? '启动失败'
           setError(msg)
-          pushToast(`Benchmark 启动失败：${msg}`, {
+          pushToast(`基准测试启动失败：${msg}`, {
             side: 'system',
-            title: 'Benchmark',
+            title: '基准测试',
           })
         } else onStarted()
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : '请求失败 — 后端未响应'
         setError(msg)
-        pushToast(`Benchmark 启动失败：${msg}`, {
+        pushToast(`基准测试启动失败：${msg}`, {
           side: 'system',
-          title: 'Benchmark',
+          title: '基准测试',
         })
       })
       .finally(() => setBusy(false))
   }
 
   return (
-    <section className="panel flex-none p-5">
+    <section className="liquid-glass-strong flex-none rounded-[1.25rem] p-5">
       <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
         <PillGroup
           label="套件"
@@ -209,7 +356,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
           }))}
         />
         <PillGroup
-          label={suite === 'cybergym' ? '任务数' : '题量'}
+          label="题量"
           value={n}
           onChange={setN}
           options={N_OPTIONS[suite].map((v) => ({ value: v, label: String(v) }))}
@@ -229,13 +376,36 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
           {BENCH_SUITES[suite].hint}
         </span>
         <button
+          onClick={() => setPreviewOpen(true)}
+          title="按 seed 采样预览题目（含正确答案）"
+          className="btn-pill btn-ghost px-2!"
+        >
+          题目预览
+        </button>
+        <button
+          onClick={() => setInfoOpen(true)}
+          title="环境 / 任务 / 期望 / 评分方式"
+          className="btn-pill btn-ghost px-2!"
+        >
+          ⓘ 套件说明
+        </button>
+        <button
           onClick={start}
           disabled={busy}
-          className="btn-pill btn-primary ml-auto !px-5 !py-2 !text-[11px]"
+          className="btn-pill btn-primary ml-auto px-5! py-2! text-[11px]!"
         >
           {busy ? '启动中…' : '开始测试'}
         </button>
       </div>
+      {infoOpen && (
+        <SuiteInfoModal suite={suite} onClose={() => setInfoOpen(false)} />
+      )}
+      {previewOpen && (
+        <QuestionPreviewModal
+          suite={suite}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
       {error && <div className="mt-3 text-[11px] text-attacker">{error}</div>}
 
       {/* live progress for each concurrent run */}
@@ -253,13 +423,13 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
                 <span className="font-mono text-[10px] text-text-2">
                   {fmtRunTime(r.run_id)}
                 </span>
-                <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/5">
+                <div className="h-1 flex-1 overflow-hidden rounded-full bg-overlay">
                   <div
-                    className="h-full rounded-full bg-accent transition-all duration-500"
+                    className="h-full rounded-full bg-text-1 transition-all duration-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <span className="w-16 flex-none text-right font-mono text-[10px] tabular-nums text-neutral-300">
+                <span className="w-16 flex-none text-right font-mono text-[10px] tabular-nums text-text-3">
                   {r.progress.done}/{r.progress.total}
                 </span>
                 {(r.llm_errors ?? 0) > 0 && (
@@ -286,8 +456,8 @@ function CompareCharts({ runs }: { runs: BenchRunSummary[] }) {
     for (const r of runs) {
       if (r.scores && !LEGACY_BENCH_MODES.has(r.mode)) seen.add(suiteOf(r))
     }
-    // CyberGym first — 主基准; attack_kb 已废弃, 不参与对比图。
-    return (['cybergym', 'malware_analysis'] as BenchSuite[]).filter((s) =>
+    // 两套件都参与对比图。
+    return (['malware_analysis', 'attack_kb'] as BenchSuite[]).filter((s) =>
       seen.has(s),
     )
   }, [runs])
@@ -321,18 +491,19 @@ function RunRow({
   const failed = r.status === 'error'
   const llmErr =
     r.llm_errors ??
-    (r.scores && !isCyberGymScores(r.scores) ? r.scores.llm_errors : 0) ??
+    (r.scores ? r.scores.llm_errors : 0) ??
     0
   const span = showLlmErr ? 4 : 3
   return (
     <tr
       onClick={() => !running && onSelect(r)}
+      title="点击查看逐题详情（完整题干/选项/模型作答）"
       className={`border-t border-hairline/60 transition-colors ${
         running
           ? 'text-text-2'
           : failed
             ? 'cursor-pointer bg-attacker/[0.06] text-attacker/90 hover:bg-attacker/10'
-            : `cursor-pointer hover:bg-white/[0.03] ${dim ? 'text-text-3' : 'text-neutral-300'}`
+            : `cursor-pointer hover:bg-overlay ${dim ? 'text-text-3' : 'text-text-2'}`
       }`}
     >
       <td className="py-2.5 pl-5 font-mono tabular-nums">{fmtRunTime(r.run_id)}</td>
@@ -357,7 +528,7 @@ function RunRow({
       ) : (
         <>
           <td
-            title={suite === 'cybergym' ? '最终提交成功率' : '选择题正确率'}
+            title="选择题正确率"
             className={`text-right font-mono text-[13px] font-semibold tabular-nums ${
               dim ? 'text-text-2' : 'text-text-1'
             }`}
@@ -396,7 +567,7 @@ function ResultsTable({
   const showLlmErr = runs.some(
     (r) =>
       (r.llm_errors ??
-        (r.scores && !isCyberGymScores(r.scores) ? r.scores.llm_errors : 0) ??
+        (r.scores ? r.scores.llm_errors : 0) ??
         0) > 0,
   )
   const colSpan = showLlmErr ? 7 : 6
@@ -414,9 +585,9 @@ function ResultsTable({
           <div className="flex h-full flex-col items-center justify-center gap-2 px-8 py-16 text-center">
             <div className="text-[13px] font-medium text-text-1">尚无基准运行</div>
             <div className="max-w-md text-[11px] leading-5 text-text-2">
-              基准对比「裸模型」与「CyberOrion 框架」两臂：CyberGym
-              真实漏洞复现为主基准，CyberSOCEval 多选问答为辅助。各跑一次两臂
-              即可看到框架带来的提升。
+              框架有效性对比：纯 LLM vs CyberOrion 框架——同一批题目、同一
+              模型，唯一差异是框架注入的知识库层。各跑一次两臂即可看到框架
+              增益；想先看看题目长什么样，点运行卡片里的「题目预览」。
             </div>
           </div>
         ) : (
@@ -439,7 +610,7 @@ function ResultsTable({
                 <RunRow
                   key={r.run_id}
                   r={r}
-                  dim={suiteOf(r) === 'attack_kb'}
+                  dim={false}
                   showLlmErr={showLlmErr}
                   onSelect={onSelect}
                 />
@@ -447,7 +618,7 @@ function ResultsTable({
               {legacyRuns.length > 0 && (
                 <tr
                   onClick={() => setShowLegacy((v) => !v)}
-                  className="cursor-pointer border-t border-hairline bg-white/[0.02] text-text-2 transition-colors hover:bg-white/[0.04]"
+                  className="cursor-pointer border-t border-hairline bg-panel-2/60 text-text-2 transition-colors hover:bg-panel-2"
                 >
                   <td colSpan={colSpan} className="py-1.5 pl-5 text-[10px]">
                     {showLegacy ? '▾' : '▸'} 历史实验（{legacyRuns.length}）·
@@ -517,17 +688,25 @@ export function BenchmarkView() {
 
   return (
     <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex min-h-full max-w-[1100px] flex-col gap-4 p-6">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-[17px] font-semibold text-text-1">Benchmark</h1>
-          <span className="text-[11px] text-text-2">
-            框架带来了多少提升 · 裸模型 vs CyberOrion 框架 · CyberGym
-            真实漏洞复现为主基准
+      <div className="mx-auto flex min-h-full max-w-[1100px] flex-col gap-4 px-6 pb-6">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[20px] font-semibold text-fg">
+            基准测试
+          </h1>
+          <span className="text-[13px] text-text-3">
+            框架有效性对比 · 纯 LLM vs CyberOrion 框架 · 同一批题目同一模型 ·
+            CyberSOCEval 知识问答基准
           </span>
         </div>
-        <RunCard onStarted={load} />
-        <CompareCharts runs={merged} />
-        <ResultsTable runs={merged} onSelect={setSelected} />
+        <FadeIn>
+          <RunCard onStarted={load} />
+        </FadeIn>
+        <FadeIn delay={0.08} className="flex flex-col gap-4">
+          <CompareCharts runs={merged} />
+        </FadeIn>
+        <FadeIn delay={0.16} className="flex min-h-0 flex-1 flex-col">
+          <ResultsTable runs={merged} onSelect={setSelected} />
+        </FadeIn>
       </div>
       {selected && (
         <BenchDetailDrawer run={selected} onClose={() => setSelected(null)} />

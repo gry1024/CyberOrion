@@ -31,6 +31,8 @@ def client() -> TestClient:
 @pytest.fixture()
 def fake_bench(monkeypatch, tmp_path):
     """把 run_bench 换成写临时结果文件的 fake。"""
+    created: list[Path] = []
+
     async def fake_run(n=100, mode="base", seed=42, on_progress=None,
                        run_id=None, suite="malware_analysis", **kwargs):
         rid = run_id or f"fake_{mode}_n{n}"
@@ -56,13 +58,14 @@ def fake_bench(monkeypatch, tmp_path):
         import json
         path.write_text(json.dumps(run), encoding="utf-8")
         run["path"] = str(path)
+        created.append(path)
         return run
 
     monkeypatch.setattr(bench_mod, "run_bench", fake_run)
     yield
-    # 清理 fake 运行产生的文件与内存状态
-    for p in bench_mod.DEFAULT_LOG_DIR.glob("fake_*.json"):
-        p.unlink()
+    # 清理 fake 运行产生的文件与内存状态（含时间戳命名的泄漏文件）
+    for p in created:
+        p.unlink(missing_ok=True)
     for rid in [r for r in server_mod._bench_runs if r.startswith("fake_")
                 or "_base_n" in r or "_rag_n" in r]:
         server_mod._bench_runs.pop(rid, None)
@@ -146,4 +149,25 @@ class TestBenchAPI:
                                        fake_bench) -> None:
         r = client.post("/api/bench/run", json={
             "suite": "attack_kb", "mode": "sc", "n": 2})
+        assert r.status_code == 400
+
+    def test_bench_questions_preview(self, client: TestClient) -> None:
+        from cyberorion.bench import cybersoceval as bench_mod
+        if not Path(bench_mod.DEFAULT_QUESTIONS).is_file():
+            pytest.skip("questions.json 不可用")
+        r = client.get(
+            "/api/bench/questions?suite=malware_analysis&n=3&seed=42")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["n"] == 3 and len(data["questions"]) == 3
+        for q in data["questions"]:
+            assert q["question"] and q["options"] and q["correct_options"]
+        # 同 seed 确定性：两次采样同一批题
+        r2 = client.get(
+            "/api/bench/questions?suite=malware_analysis&n=3&seed=42")
+        assert [q["idx"] for q in r2.json()["questions"]] == \
+               [q["idx"] for q in data["questions"]]
+
+    def test_bench_questions_bad_suite(self, client: TestClient) -> None:
+        r = client.get("/api/bench/questions?suite=nope")
         assert r.status_code == 400

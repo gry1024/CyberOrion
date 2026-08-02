@@ -25,7 +25,6 @@ cd /home/groy/cai/cyberorion
 | test_kb_api.py | 8 | KB HTTP API 纯函数层（stats/tactics 树/search） |
 | test_bench.py | 63 | 采样确定性、答案解析、投票、评分、prompt 构造、run 持久化 |
 | test_attack_kb.py | 12 | attack_kb 套件：出题、干扰项、确定性采样 |
-| test_cybergym_bench.py | 12 | CyberGym 套件双臂 harness（vanilla/framework，mock） |
 | test_bench_api.py | 9 | /api/bench/* 端点 |
 | test_server_api.py | 11 | REST 端点 + WS（TestClient） |
 | test_session_detail.py | 7 | 历史会话详情构建器（复盘页数据源，降级路径） |
