@@ -205,8 +205,10 @@ class TestBuildBlueTeam:
         names = {getattr(t, "name", "") for t in agent.tools}
         assert {"dispatch_task", "report_finding", "list_alerts",
                 "search_attack_kb", "lookup_technique"} <= names
-        # 处置/检测工具不下放到指挥官层
-        assert "block_ip" not in names and "query_logs" not in names
+        # 处置工具不下放到指挥官层；query_logs 下放（快速响应：
+        # 指挥官先扫遥测再派子代理，检测从 ~10min 压到秒级）。
+        assert "block_ip" not in names
+        assert "query_logs" in names
         # 四个角色子代理已预构建并缓存
         assert set(bt._role_agents) == {"watcher", "analyst",
                                         "responder", "hunter"}
