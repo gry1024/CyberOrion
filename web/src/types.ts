@@ -298,6 +298,7 @@ export interface SessionInfo {
   has_report: boolean
   has_metrics: boolean
   score: number | null
+  scenario: string
   mtime: number
 }
 

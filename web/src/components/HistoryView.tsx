@@ -15,6 +15,7 @@ import type {
 } from '../types'
 import { MarkdownView } from './MarkdownView'
 import { FadeIn } from './FadeIn'
+import { DuelTimeline } from './DuelTimeline'
 
 function fmtMtime(mtime: number): string {
   const d = new Date(mtime * 1000)
@@ -416,7 +417,7 @@ function TruthTab({ detail }: { detail: SessionDetail }) {
 // session detail (right side)
 // ---------------------------------------------------------------------------
 
-type DetailTab = 'timeline' | 'tools' | 'truth' | 'report'
+type DetailTab = 'duel' | 'timeline' | 'tools' | 'truth' | 'report'
 
 function SessionDetailView({ session }: { session: SessionInfo }) {
   const [detail, setDetail] = useState<SessionDetail | null>(null)
@@ -434,6 +435,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
   }, [session.id])
 
   const tabs: Array<{ key: DetailTab; label: string }> = [
+    { key: 'duel', label: '红蓝对垒' },
     { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
     { key: 'tools', label: `工具调用 ${detail ? detail.tool_calls.length : ''}` },
     { key: 'truth', label: '告警与攻击' },
@@ -467,6 +469,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
               ))}
             </div>
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+              {tab === 'duel' && <DuelTimeline detail={detail} />}
               {tab === 'timeline' && <TimelineTab rows={detail.timeline} />}
               {tab === 'tools' && <ToolCallsTab rows={detail.tool_calls} />}
               {tab === 'truth' && <TruthTab detail={detail} />}
@@ -552,6 +555,9 @@ export function HistoryView() {
                   </span>
                 )}
               </div>
+              <div className="w-full truncate text-[9px] text-text-3">
+                {s.scenario || '默认靶场'}
+              </div>
               <div className="flex w-full items-center gap-2 text-[9px] text-text-2">
                 <span className="font-mono">{fmtMtime(s.mtime)}</span>
                 <span className="ml-auto flex gap-1.5 font-mono">
@@ -578,7 +584,7 @@ export function HistoryView() {
           <div className="text-center">
             <div className="text-[13px] font-medium text-text-3">选择一个会话</div>
             <div className="mt-1 text-[11px] text-text-2">
-              AI 复盘 · 战役统计 · 完整时间线 · 工具调用 · 告警与攻击真值 · 报告
+              AI 复盘 · 战役统计 · 红蓝对垒 · 完整时间线 · 工具调用 · 告警与攻击真值 · 报告
             </div>
           </div>
         </div>

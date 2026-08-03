@@ -516,10 +516,13 @@ def _scan_sessions() -> list[dict[str, Any]]:
             continue
         metrics_file = d / "metrics.json"
         score: Any = None
+        scenario_name: str = ""
         if metrics_file.is_file():
             try:
-                score = json.loads(
-                    metrics_file.read_text(encoding="utf-8")).get("blue_score")
+                m = json.loads(
+                    metrics_file.read_text(encoding="utf-8"))
+                score = m.get("blue_score")
+                scenario_name = str(m.get("scenario") or "")
             except Exception:
                 score = None
         try:
@@ -532,6 +535,7 @@ def _scan_sessions() -> list[dict[str, Any]]:
             "has_report": (d / "report.md").is_file(),
             "has_metrics": metrics_file.is_file(),
             "score": score,
+            "scenario": scenario_name,
             "mtime": mtime,
         })
     out.sort(key=lambda s: s["mtime"], reverse=True)

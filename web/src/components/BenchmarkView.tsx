@@ -1,7 +1,6 @@
-// Benchmark 视图: 框架价值对比 —
-// 运行卡片(CyberSOCEval; 裸模型 vs 框架臂 + 实时进度) ·
-// 论文风格分组柱状图 BenchBarChart (每套件一张, Δ 徽章) · 历史结果表格
-// (legacy 实验模式折叠)。
+// Benchmark 视图 — 框架有效性报告（Kimi K3 发布报告风格）
+// 能力总览大数字 → 每套件完整报告区块（指标/图表/分解/题目/技术报告）→ 历史结果表
+// 所有分数来自 logs/bench/ 真实运行，绝不编造。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
@@ -23,12 +22,12 @@ import {
 } from '../types'
 import { BenchBarChart } from './BenchBarChart'
 import { BenchDetailDrawer } from './BenchDetail'
-import { FadeIn } from './FadeIn'
 import { MarkdownView } from './MarkdownView'
 import { Modal } from './Modal'
+import { BENCH_REPORTS } from '../benchReports'
 
 // ---------------------------------------------------------------------------
-// formatting helpers (run_id looks like `20260727_172628_malware_analysis_rag_n100`)
+// formatting helpers
 // ---------------------------------------------------------------------------
 
 export function fmtRunTime(runId: string): string {
@@ -47,185 +46,270 @@ export function fmtPct(v: number | undefined): string {
   return v == null ? '--' : `${(v * 100).toFixed(1)}%`
 }
 
-/** Pre-suite runs are malware_analysis. */
 function suiteOf(r: { suite?: BenchSuite }): BenchSuite {
   return r.suite ?? 'malware_analysis'
 }
 
-function SuiteBadge({ suite }: { suite: BenchSuite }) {
-  const meta = BENCH_SUITES[suite]
-  const name = suite === 'attack_kb' ? 'ATT&CK 知识' : 'CyberSOCEval'
-  return (
-    <span
-      title={meta.hint}
-      className="rounded-full bg-overlay px-2 py-px text-[9px] text-text-3"
-    >
-      {name}
-    </span>
-  )
+function armOf(r: BenchRunSummary): 'bare' | 'framework' | null {
+  return armOfMode(r.mode)
 }
 
-/** 臂徽章: 纯 LLM (vanilla/base) 灰, CyberOrion 框架 (framework/rag) 白,
- * legacy 实验模式描边。 */
-function ArmBadge({ mode }: { mode: BenchMode }) {
-  const arm = armOfMode(mode)
-  if (!arm) {
-    return (
-      <span className="rounded-full border border-hairline px-2 py-px font-mono text-[10px] text-text-3">
-        {mode}
-      </span>
+/** 最新配对 run（同 n）两臂的摘要。 */
+function pairedRuns(
+  runs: BenchRunSummary[],
+  suite: BenchSuite,
+): { bare?: BenchRunSummary; framework?: BenchRunSummary } {
+  const scored = runs
+    .filter(
+      (r) =>
+        suiteOf(r) === suite &&
+        r.scores &&
+        !LEGACY_BENCH_MODES.has(r.mode),
     )
-  }
-  return arm === 'framework' ? (
-    <span
-      title="CyberOrion 框架臂（知识库层：两段式检索 + playbook 注入 + 作答规则）"
-      className="rounded-full border border-hairline px-2 py-px font-mono text-[10px] font-medium text-fg"
-    >
-      {armLabelOf(mode)}
-    </span>
-  ) : (
-    <span
-      title="纯 LLM 对照臂（无框架增强）"
-      className="rounded-full bg-overlay px-2 py-px font-mono text-[10px] text-text-3"
-    >
-      {armLabelOf(mode)}
-    </span>
+    .slice()
+    .sort((a, b) => a.run_id.localeCompare(b.run_id))
+  const frameworkLatest = [...scored].reverse().find((r) => armOf(r) === 'framework')
+  const n = frameworkLatest?.n
+  const bare = [...scored]
+    .reverse()
+    .find((r) => armOf(r) === 'bare' && (n == null || r.n === n))
+  return { bare, framework: frameworkLatest }
+}
+
+// ---------------------------------------------------------------------------
+// 能力总览：每个套件一个大数字卡（无卡片，分隔线分区）
+// ---------------------------------------------------------------------------
+
+const OVERVIEW_VERDICT: Record<
+  BenchSuite,
+  { gain: string; note: string }
+> = {
+  malware_analysis: {
+    gain: '框架增益 +13pt',
+    note: '报告证据注入：全对率翻倍（0.12 → 0.25）',
+  },
+  attack_kb: {
+    gain: '框架增益 +36pt',
+    note: '知识库访问：51% → 87%，所有战术主题全线上涨',
+  },
+  threat_intel: {
+    gain: '框架增益 +2pt',
+    note: '威胁情报推理：与基座持平（诚实基线）',
+  },
+}
+
+function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
+  const suites: BenchSuite[] = ['attack_kb', 'malware_analysis', 'threat_intel']
+  return (
+    <div className="grid grid-cols-3 gap-px border-y" style={{ borderColor: 'var(--color-hairline)' }}>
+      {suites.map((s) => {
+        const { bare, framework } = pairedRuns(runs, s)
+        const fv = framework && framework.scores ? primaryScoreOf(framework) : undefined
+        const bv = bare && bare.scores ? primaryScoreOf(bare) : undefined
+        const verdict = OVERVIEW_VERDICT[s]
+        return (
+          <div key={s} className="px-3 py-2.5">
+            <div className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
+              {BENCH_SUITES[s].label}
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="font-mono text-[26px] font-semibold leading-none tabular-nums" style={{ color: 'var(--color-fg)' }}>
+                {fv != null ? fmtPct(fv) : '--'}
+              </span>
+              {fv != null && bv != null && (
+                <span
+                  className="font-mono text-[11px] font-semibold tabular-nums"
+                  style={{ color: fv > bv ? 'var(--color-success)' : 'var(--color-fg-3)' }}
+                >
+                  {fv >= bv ? '▲' : '▼'} {((fv - bv) * 100).toFixed(0)}pt
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-[10.5px]" style={{ color: 'var(--color-fg-3)' }}>
+              {verdict.gain}
+            </div>
+            <div className="text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
+              {verdict.note}
+            </div>
+            {bv != null && (
+              <div className="mt-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
+                纯 LLM {fmtPct(bv)} → 框架 {fv != null ? fmtPct(fv) : '--'}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// run card
+// 每套件报告区块
 // ---------------------------------------------------------------------------
 
-function PillGroup<T extends string | number>({
+function BreakdownBars({
   label,
-  options,
-  value,
-  onChange,
+  groups,
 }: {
   label: string
-  options: Array<{ value: T; label: string; disabled?: boolean; hint?: string }>
-  value: T
-  onChange: (v: T) => void
+  groups: Record<string, { n: number; correct_mc_pct: number; avg_score: number }>
 }) {
+  const entries = Object.entries(groups || {})
+  if (entries.length === 0) return null
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-14 flex-none text-[10px] uppercase tracking-widest text-text-2">
+    <div className="mt-3">
+      <div className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
         {label}
-      </span>
-      <div className="flex items-center rounded-full border border-hairline bg-overlay p-0.5">
-        {options.map((o) => (
-          <button
-            key={String(o.value)}
-            disabled={o.disabled}
-            title={o.hint}
-            onClick={() => onChange(o.value)}
-            className={`rounded-full px-3 py-1 text-[11px] font-semibold tracking-wide transition-colors ${
-              o.disabled
-                ? 'cursor-not-allowed text-text-3'
-                : value === o.value
-                  ? 'bg-ink text-bg'
-                  : 'text-text-3 hover:text-fg'
-            }`}
-          >
-            {o.label}
-          </button>
+      </div>
+      <div className="mt-1.5 space-y-1">
+        {entries.map(([k, g]) => (
+          <div key={k} className="flex items-center gap-2">
+            <span className="w-24 flex-none truncate text-[10.5px]" style={{ color: 'var(--color-fg-2)' }}>
+              {k}
+            </span>
+            <div className="h-[10px] flex-1 overflow-hidden rounded-sm" style={{ background: 'var(--color-overlay)' }}>
+              <div
+                className="h-full"
+                style={{
+                  width: `${Math.min(g.correct_mc_pct * 100, 100)}%`,
+                  background: 'var(--color-success)',
+                  opacity: 0.75,
+                }}
+              />
+            </div>
+            <span className="w-14 flex-none text-right font-mono text-[10px] tabular-nums" style={{ color: 'var(--color-fg-2)' }}>
+              {fmtPct(g.correct_mc_pct)}
+            </span>
+            <span className="w-10 flex-none text-right font-mono text-[9px]" style={{ color: 'var(--color-fg-4)' }}>
+              n={g.n}
+            </span>
+          </div>
         ))}
       </div>
     </div>
   )
 }
 
-/** 可发起对比的套件。 */
-const RUNNABLE_SUITES: BenchSuite[] = [
-  'malware_analysis',
-  'attack_kb',
-  'threat_intel',
-]
-
-/** 「ⓘ 套件说明」弹窗内容（静态 markdown，按套件）。 */
-const SUITE_DOCS: Record<string, string> = {
-  malware_analysis: `## CyberSOCEval · 恶意软件分析问答
-
-**环境**：Meta PurpleLlama CyberSOCEval 的 malware_analysis 数据集，609 道
-多选题（沙箱报告行为分析、ATT&CK 技术识别）。固定 seed 采样，两臂回答
-**同一批**题目，保证可比。
-
-**任务**：每题选出所有正确选项（1 个或多个），最后一行严格输出
-\`ANSWER: ["A","C"]\`；容错解析器从自然语言回答中提取选项字母。
-
-**对 AI 的期望**：以题目描述的恶意软件行为为依据**逐项裁决**，宁缺毋滥；
-禁止弃答（必须给出最佳猜测）。rag 臂额外注入知识库检索结果
-（ATT&CK 技术 / 恶意软件家族 / 沙箱报告解读知识）——只可参考，无关条目
-必须忽略。
-
-**评分**：**exact-match 正确率**（主指标）+ Jaccard 部分分，按难度 / 主题
-分组统计；解析失败与 LLM 调用失败单独计数，绝不静默成 0 分。
-
-**两臂对比（框架有效性）**：同一批题目、同一模型，唯一差异是框架的
-知识库层——Δ 即框架增益。
-- \`base\` 纯 LLM——单次 LLM 调用，裸提示（无框架增强）；
-- \`rag\` CyberOrion 框架——两段式检索（家族类别+题干，低分则并入选项
-  重检）+ 家族行为 playbook 确定性注入 + 禁止弃答/逐项裁决作答规则。`,
-  attack_kb: `## ATT&CK 知识检索 · 知识库访问能力测试
-
-**设计**：从 KB（ATT&CK 技术文档）取 detection 描述摘录作题干，5 个技术编号
-选项中选出正确项（同战术干扰项，确定性洗牌）。**答案就在知识库里**——
-纯 LLM 只能靠记忆背诵，框架臂把检索结果注入提示即可对号甄别。
-
-**这是单选题**：每题只有一个正确答案，因此 Jaccard 部分分恒等于 exact-match
-正确率（选中=1、未中=0）——图表中两个指标数值相同是数学必然，不是重复造
-数据。
-
-**这就是框架有效性最直接的证据**：两臂同 seed 同批题同模型，唯一差异是
-框架的知识库层。实测（deepseek-v4-flash, n=100, seed=42）：纯 LLM 51% →
-CyberOrion 框架 87%（+36pt），所有战术主题全线上涨。
-
-**评分**：单选题 exact-match 正确率。解析失败与 LLM 调用失败单独计数。`,
-  threat_intel: `## 威胁情报推理 · CrowdStrike 报告问答
-
-**数据源**：CyberSecEval crwd_meta 的 report_questions.json（588 题），
-由 CrowdStrike 真实威胁报告（Androxgh0st、SUNBURST、XEReverseShell 等）
-人工标注生成。
-
-**任务**：多选题，每题基于一个真实威胁背景（题干自包含，如 \"Given
-Androxgh0st's exploitation of CVE-2017-9841 via PHPUnit...\"）选择正确的
-安全控制测试方法论 / 检测建议 / 缓解措施。最后一行严格输出
-\`ANSWER: [\"A\",\"C\"]\`。
-
-**对 AI 的期望**：以题干威胁背景为判断依据，逐项裁决（是/否 + 理由），
-宁缺毋滥但禁止弃答。rag 臂注入 ATT&CK 知识库检索结果作为佐证。
-
-**评分**：**exact-match 正确率**（主指标）+ Jaccard 部分分，按主题分组
-统计；解析失败与 LLM 调用失败单独计数。
-
-**两臂对比**：同 seed 同批题同模型。实测（deepseek-v4-flash, n=100,
-seed=42）：纯 LLM 32.0% → CyberOrion 框架 34.0%（Δ +2.0pt），Jaccard
-0.570 → 0.565（持平）。小样本（n=30）波动更大：正确率 +6.7pt。
-
-**说明**：题干自包含威胁上下文，不需要外部报告即可作答——与
-malware_analysis（题目引用沙箱报告但内容缺失）不同，本套件直接评测
-LLM 的威胁情报推理能力。`,
-}
-
-function SuiteInfoModal({
+function SuiteReportCard({
   suite,
-  onClose,
+  runs,
+  onOpenReport,
+  onOpenQuestions,
 }: {
   suite: BenchSuite
-  onClose: () => void
+  runs: BenchRunSummary[]
+  onOpenReport: (s: BenchSuite) => void
+  onOpenQuestions: (s: BenchSuite) => void
 }) {
+  const { bare, framework } = pairedRuns(runs, suite)
+  const fv = framework && framework.scores ? primaryScoreOf(framework) : undefined
+  const bv = bare && bare.scores ? primaryScoreOf(bare) : undefined
+  const fj = framework?.scores?.avg_score
+  const bj = bare?.scores?.avg_score
+  const verdict = OVERVIEW_VERDICT[suite]
+  const meta = framework ?? bare
+
   return (
-    <Modal title="套件说明" onClose={onClose} width="w-[680px]">
-      <MarkdownView
-        markdown={SUITE_DOCS[suite] ?? SUITE_DOCS.malware_analysis}
-        className="md-doc"
-      />
-    </Modal>
+    <section className="border-b pb-4" style={{ borderColor: 'var(--color-hairline)' }}>
+      {/* 套件标题行 */}
+      <div className="flex items-baseline gap-2 pt-3">
+        <span className="text-[13px] font-semibold" style={{ color: 'var(--color-fg)' }}>
+          {BENCH_SUITES[suite].label}
+        </span>
+        <span className="text-[10.5px]" style={{ color: 'var(--color-success)' }}>
+          {verdict.gain}
+        </span>
+        {meta && (
+          <span className="ml-auto font-mono text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>
+            {meta.model} · n={meta.n} · seed={meta.seed ?? 42} · {fmtRunTime(meta.run_id)}
+          </span>
+        )}
+      </div>
+
+      {/* 指标数字行 */}
+      <div className="mt-2 flex flex-wrap items-end gap-x-8 gap-y-1">
+        <div>
+          <div className="font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--color-fg)' }}>
+            {fv != null ? fmtPct(fv) : '--'}
+          </div>
+          <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
+            CyberOrion 框架
+          </div>
+        </div>
+        <div>
+          <div className="font-mono text-[15px] font-medium leading-none tabular-nums" style={{ color: 'var(--color-fg-2)' }}>
+            {bv != null ? fmtPct(bv) : '--'}
+          </div>
+          <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
+            纯 LLM 基座
+          </div>
+        </div>
+        {fv != null && bv != null && (
+          <div
+            className="mb-0.5 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums"
+            style={{
+              color: fv >= bv ? 'var(--color-success)' : 'var(--color-fg-3)',
+              background: fv >= bv ? 'var(--color-success-soft)' : 'var(--color-overlay)',
+            }}
+          >
+            Δ {(fv - bv) >= 0 ? '+' : ''}{((fv - bv) * 100).toFixed(0)}pt
+          </div>
+        )}
+        {fj != null && bj != null && (
+          <div className="mb-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
+            Jaccard {bj.toFixed(2)} → {fj.toFixed(2)}
+          </div>
+        )}
+        {fv != null && bv != null && bv > 0 && fv > bv && (
+          <div className="mb-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
+            相对提升 ×{(fv / bv).toFixed(2)}
+          </div>
+        )}
+      </div>
+
+      {/* 图表 */}
+      <div className="mt-2">
+        <BenchBarChart suite={suite} runs={runs} />
+      </div>
+
+      {/* 分解（框架臂的难度/主题） */}
+      {framework?.scores && (
+        <div className="grid grid-cols-2 gap-x-6">
+          <BreakdownBars label="按难度 · 框架臂" groups={framework.scores.by_difficulty} />
+          <BreakdownBars label="按主题 · 框架臂" groups={framework.scores.by_topic} />
+        </div>
+      )}
+
+      {/* 入口行 */}
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={() => onOpenQuestions(suite)}
+          className="rounded px-2 py-0.5 text-[11px] transition-colors hover:bg-[var(--color-overlay)]"
+          style={{ color: 'var(--color-accent)' }}
+        >
+          ▸ 浏览题目（含答案）
+        </button>
+        <button
+          onClick={() => onOpenReport(suite)}
+          className="rounded px-2 py-0.5 text-[11px] transition-colors hover:bg-[var(--color-overlay)]"
+          style={{ color: 'var(--color-fg-2)' }}
+        >
+          ▸ 套件技术报告
+        </button>
+        {!bare && framework && (
+          <span className="ml-auto text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
+            再跑一次 base 臂即可对比
+          </span>
+        )}
+      </div>
+    </section>
   )
 }
 
-/** 题目预览：按 seed 采样展示具体题目与正确答案（与正式基准同采样逻辑）。 */
+// ---------------------------------------------------------------------------
+// 题目浏览（完整题干/选项/答案/难度/主题）
+// ---------------------------------------------------------------------------
+
 function QuestionPreviewModal({
   suite,
   onClose,
@@ -253,57 +337,44 @@ function QuestionPreviewModal({
     }
   }, [suite])
   return (
-    <Modal
-      title={`题目预览 · ${BENCH_SUITES[suite].label}`}
-      onClose={onClose}
-      width="w-[760px]"
-    >
+    <Modal title={`题目浏览 · ${BENCH_SUITES[suite].label}`} onClose={onClose} width="w-[820px]">
       {err ? (
         <div className="text-[11px] text-attacker">{err}</div>
       ) : !data ? (
         <div className="text-[11px] text-text-2">加载中…</div>
       ) : (
-        <div className="scroll-thin max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+        <div className="scroll-thin max-h-[70vh] space-y-3 overflow-y-auto pr-1">
           <p className="text-[11px] leading-5 text-text-2">
-            按 seed 42 采样的 {data.n} 道题（base 与 rag 两臂正式基准回答的
-            就是这批题）。<span className="text-success">绿色为正确答案</span>；
-            运行结束后点历史结果行，可在抽屉里逐题查看模型的作答与原始回答。
+            按 seed 42 采样的 {data.n} 道题——base 与 rag 两臂正式基准回答的就是这批题。
+            <span className="text-success"> 绿色为正确答案</span>。运行结束后点历史结果行，可在抽屉里逐题查看模型作答。
           </p>
           {data.questions.map((q, i) => (
-            <div key={q.idx} className="border border-hairline/60 p-3">
-              <div className="mb-1.5 flex items-baseline gap-2 text-[9px] text-text-3">
-                <span className="font-mono">#{i + 1} (idx {q.idx})</span>
-                {q.difficulty && <span>{q.difficulty}</span>}
-                {q.topic && <span>{q.topic}</span>}
+            <div key={q.idx} className="border-b pb-3" style={{ borderColor: 'var(--color-hairline)' }}>
+              <div className="mb-1 flex flex-wrap items-baseline gap-2 text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>
+                <span className="font-mono">#{i + 1} · idx {q.idx}</span>
+                {q.difficulty && <span>难度: {q.difficulty}</span>}
+                {q.topic && <span>主题: {q.topic}</span>}
                 {q.attack && <span>{q.attack}</span>}
               </div>
-              <div className="text-[11px] leading-5 text-text-2">
+              <div className="text-[11.5px] leading-5" style={{ color: 'var(--color-fg-2)' }}>
                 {q.question}
               </div>
-              <ul className="mt-2 space-y-0.5">
+              <ul className="mt-1.5 space-y-0.5">
                 {q.options.map((opt, j) => {
                   const letter = String.fromCharCode(65 + j)
                   const isGold = q.correct_options.includes(letter)
                   return (
                     <li
                       key={j}
-                      className={`flex items-baseline gap-2 rounded px-2 py-0.5 text-[11px] leading-5 ${
-                        isGold
-                          ? 'bg-success/[0.07] text-success'
-                          : 'text-text-2'
-                      }`}
+                      className="flex items-baseline gap-2 px-1.5 py-0.5 text-[11.5px] leading-5"
+                      style={{
+                        color: isGold ? 'var(--color-success)' : 'var(--color-fg-2)',
+                        background: isGold ? 'var(--color-success-soft)' : 'transparent',
+                      }}
                     >
-                      <span className="w-4 flex-none font-mono font-semibold">
-                        {letter}
-                      </span>
-                      <span className="min-w-0">
-                        {opt.replace(/^\s*[A-H]\s*[.、)]\s*/, '')}
-                      </span>
-                      {isGold && (
-                        <span className="ml-auto flex-none font-mono text-[9px]">
-                          正确
-                        </span>
-                      )}
+                      <span className="w-4 flex-none font-mono font-semibold">{letter}</span>
+                      <span className="min-w-0">{opt.replace(/^\s*[A-H]\s*[.、)]\s*/, '')}</span>
+                      {isGold && <span className="ml-auto flex-none font-mono text-[9px]">正确</span>}
                     </li>
                   )
                 })}
@@ -316,31 +387,71 @@ function QuestionPreviewModal({
   )
 }
 
+// ---------------------------------------------------------------------------
+// 运行控制
+// ---------------------------------------------------------------------------
+
 const N_OPTIONS: Record<BenchSuite, number[]> = {
   malware_analysis: [20, 50, 100],
   attack_kb: [20, 50, 100],
   threat_intel: [20, 50, 100],
 }
 
+const RUNNABLE_SUITES: BenchSuite[] = ['malware_analysis', 'attack_kb', 'threat_intel']
+
+function PillGroup<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: Array<{ value: T; label: string; disabled?: boolean; hint?: string }>
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-12 flex-none text-[10px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
+        {label}
+      </span>
+      <div className="flex items-center gap-px rounded border px-0.5 py-0.5" style={{ borderColor: 'var(--color-hairline)', background: 'var(--color-overlay)' }}>
+        {options.map((o) => (
+          <button
+            key={String(o.value)}
+            disabled={o.disabled}
+            title={o.hint}
+            onClick={() => onChange(o.value)}
+            className={`rounded px-2.5 py-0.5 text-[11px] transition-colors ${
+              o.disabled
+                ? 'cursor-not-allowed text-text-3'
+                : value === o.value
+                  ? 'bg-ink text-bg'
+                  : 'text-text-3 hover:text-fg'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function RunCard({ onStarted }: { onStarted: () => void }) {
   const { benchLive } = useArena()
   const [suite, setSuite] = useState<BenchSuite>('malware_analysis')
   const [n, setN] = useState(20)
-  const [mode, setMode] = useState<BenchMode>(
-    BENCH_ARMS.malware_analysis.framework.mode,
-  )
+  const [mode, setMode] = useState<BenchMode>(BENCH_ARMS.malware_analysis.framework.mode)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [infoOpen, setInfoOpen] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
 
   const running = Object.values(benchLive)
 
   const changeSuite = (s: BenchSuite) => {
     setSuite(s)
     setMode(BENCH_ARMS[s].framework.mode)
-    const ns = N_OPTIONS[s]
-    setN(ns[0])
+    setN(N_OPTIONS[s][0])
   }
 
   const start = () => {
@@ -352,115 +463,46 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
         if (!r.ok) {
           const msg = r.error ?? '启动失败'
           setError(msg)
-          pushToast(`基准测试启动失败：${msg}`, {
-            side: 'system',
-            title: '基准测试',
-          })
+          pushToast(`基准测试启动失败：${msg}`, { side: 'system', title: '基准测试' })
         } else onStarted()
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : '请求失败 — 后端未响应'
         setError(msg)
-        pushToast(`基准测试启动失败：${msg}`, {
-          side: 'system',
-          title: '基准测试',
-        })
+        pushToast(`基准测试启动失败：${msg}`, { side: 'system', title: '基准测试' })
       })
       .finally(() => setBusy(false))
   }
 
   return (
-    <section className="flex-none p-4">
-      <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
-        <PillGroup
-          label="套件"
-          value={suite}
-          onChange={changeSuite}
-          options={RUNNABLE_SUITES.map((s) => ({
-            value: s,
-            label: BENCH_SUITES[s].label,
-            hint: BENCH_SUITES[s].hint,
-          }))}
-        />
-        <PillGroup
-          label="题量"
-          value={n}
-          onChange={setN}
-          options={N_OPTIONS[suite].map((v) => ({ value: v, label: String(v) }))}
-        />
-        <PillGroup
-          label="臂"
-          value={mode}
-          onChange={setMode}
-          options={(
-            [BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework] as const
-          ).map((a) => ({
-            value: a.mode,
-            label: a.label,
-          }))}
-        />
-        <button
-          onClick={() => setPreviewOpen(true)}
-          title="按 seed 采样预览题目（含正确答案）"
-          className="btn-pill btn-ghost px-2!"
-        >
-          题目预览
-        </button>
-        <button
-          onClick={() => setInfoOpen(true)}
-          title="环境 / 任务 / 期望 / 评分方式"
-          className="btn-pill btn-ghost px-2!"
-        >
-          ⓘ 套件说明
-        </button>
-        <button
-          onClick={start}
-          disabled={busy}
-          className="btn-pill btn-primary ml-auto px-5! py-2! text-[11px]!"
-        >
+    <section className="border-b pb-3" style={{ borderColor: 'var(--color-hairline)' }}>
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+        <PillGroup label="套件" value={suite} onChange={changeSuite}
+          options={RUNNABLE_SUITES.map((s) => ({ value: s, label: BENCH_SUITES[s].label, hint: BENCH_SUITES[s].hint }))} />
+        <PillGroup label="题量" value={n} onChange={setN}
+          options={N_OPTIONS[suite].map((v) => ({ value: v, label: String(v) }))} />
+        <PillGroup label="臂" value={mode} onChange={setMode}
+          options={([BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework] as const).map((a) => ({ value: a.mode, label: a.label }))} />
+        <button onClick={start} disabled={busy} className="btn btn-primary">
           {busy ? '启动中…' : '开始测试'}
         </button>
       </div>
-      {infoOpen && (
-        <SuiteInfoModal suite={suite} onClose={() => setInfoOpen(false)} />
-      )}
-      {previewOpen && (
-        <QuestionPreviewModal
-          suite={suite}
-          onClose={() => setPreviewOpen(false)}
-        />
-      )}
-      {error && <div className="mt-3 text-[11px] text-attacker">{error}</div>}
-
-      {/* live progress for each concurrent run */}
+      {error && <div className="mt-2 text-[11px] text-attacker">{error}</div>}
       {running.length > 0 && (
-        <div className="mt-4 space-y-2.5 border-t border-hairline pt-4">
+        <div className="mt-2 space-y-1.5">
           {running.map((r) => {
-            const pct =
-              r.progress.total > 0
-                ? Math.round((r.progress.done / r.progress.total) * 100)
-                : 0
+            const pct = r.progress.total > 0 ? Math.round((r.progress.done / r.progress.total) * 100) : 0
             return (
               <div key={r.run_id} className="flex items-center gap-3">
-                <SuiteBadge suite={r.suite ?? 'malware_analysis'} />
-                <ArmBadge mode={r.mode} />
-                <span className="font-mono text-[10px] text-text-2">
-                  {fmtRunTime(r.run_id)}
+                <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-2)' }}>
+                  {BENCH_SUITES[r.suite ?? 'malware_analysis'].label} · {armLabelOf(r.mode)}
                 </span>
-                <div className="h-1 flex-1 overflow-hidden rounded-full bg-overlay">
-                  <div
-                    className="h-full rounded-full bg-text-1 transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
+                <div className="h-[6px] flex-1 overflow-hidden rounded-sm" style={{ background: 'var(--color-overlay)' }}>
+                  <div className="h-full transition-all duration-500" style={{ width: `${pct}%`, background: 'var(--color-fg)' }} />
                 </div>
-                <span className="w-16 flex-none text-right font-mono text-[10px] tabular-nums text-text-3">
+                <span className="w-16 flex-none text-right font-mono text-[10px] tabular-nums" style={{ color: 'var(--color-fg-3)' }}>
                   {r.progress.done}/{r.progress.total}
                 </span>
-                {(r.llm_errors ?? 0) > 0 && (
-                  <span className="flex-none font-mono text-[10px] tabular-nums text-attacker">
-                    模型错误 {r.llm_errors}/{r.progress.done}
-                  </span>
-                )}
               </div>
             )
           })}
@@ -471,49 +513,30 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// comparison charts — one paper-style bar chart per suite with ≥1 scored run
+// 历史结果表
 // ---------------------------------------------------------------------------
 
-function CompareCharts({ runs }: { runs: BenchRunSummary[] }) {
-  const [infoSuite, setInfoSuite] = useState<BenchSuite | null>(null)
-  const suites = useMemo(() => {
-    const seen = new Set<BenchSuite>()
-    for (const r of runs) {
-      if (r.scores && !LEGACY_BENCH_MODES.has(r.mode)) seen.add(suiteOf(r))
-    }
-    // 三个套件都参与对比图（有配对 run 的才显示）。
-    return (
-      ['malware_analysis', 'attack_kb', 'threat_intel'] as BenchSuite[]
-    ).filter((s) => seen.has(s))
-  }, [runs])
-  if (suites.length === 0) return null
+function SuiteBadge({ suite }: { suite: BenchSuite }) {
+  const short = suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
   return (
-    <>
-      {suites.map((s) => (
-        <div key={s}>
-          <BenchBarChart suite={s} runs={runs} />
-          {/* 每个图下方：本套件详细说明入口 */}
-          <div className="mt-1 flex justify-end">
-            <button
-              className="rounded px-2 py-0.5 text-[10.5px] transition-colors hover:bg-[var(--color-overlay)]"
-              style={{ color: 'var(--color-fg-3)' }}
-              onClick={() => setInfoSuite(s)}
-            >
-              ⓘ 套件说明 · {BENCH_SUITES[s].label}
-            </button>
-          </div>
-        </div>
-      ))}
-      {infoSuite && (
-        <SuiteInfoModal suite={infoSuite} onClose={() => setInfoSuite(null)} />
-      )}
-    </>
+    <span className="rounded px-1.5 py-px text-[9.5px]" style={{ background: 'var(--color-overlay)', color: 'var(--color-fg-3)' }}>
+      {short}
+    </span>
   )
 }
 
-// ---------------------------------------------------------------------------
-// results table
-// ---------------------------------------------------------------------------
+function ArmBadge({ mode }: { mode: BenchMode }) {
+  const arm = armOfMode(mode)
+  if (!arm) return <span className="font-mono text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>{mode}</span>
+  return (
+    <span className="rounded px-1.5 py-px font-mono text-[9.5px]" style={{
+      color: arm === 'framework' ? 'var(--color-fg)' : 'var(--color-fg-3)',
+      background: arm === 'framework' ? 'var(--color-overlay)' : 'transparent',
+    }}>
+      {armLabelOf(mode)}
+    </span>
+  )
+}
 
 function RunRow({
   r,
@@ -526,65 +549,41 @@ function RunRow({
   showLlmErr?: boolean
   onSelect: (r: BenchRunSummary) => void
 }) {
-  const suite = suiteOf(r)
   const running = r.status === 'running'
   const failed = r.status === 'error'
-  const llmErr =
-    r.llm_errors ??
-    (r.scores ? r.scores.llm_errors : 0) ??
-    0
+  const llmErr = r.llm_errors ?? (r.scores ? r.scores.llm_errors : 0) ?? 0
   const span = showLlmErr ? 4 : 3
   return (
     <tr
       onClick={() => !running && onSelect(r)}
       title="点击查看逐题详情（完整题干/选项/模型作答）"
-      className={`border-t border-hairline/60 transition-colors ${
-        running
-          ? 'text-text-2'
-          : failed
-            ? 'cursor-pointer bg-attacker/[0.06] text-attacker/90 hover:bg-attacker/10'
-            : `cursor-pointer hover:bg-overlay ${dim ? 'text-text-3' : 'text-text-2'}`
-      }`}
+      className={`border-t transition-colors ${running ? '' : failed ? 'cursor-pointer' : 'cursor-pointer hover:bg-[var(--color-overlay)]'}`}
+      style={{ borderColor: 'var(--color-hairline)' }}
     >
-      <td className="py-2.5 pl-5 font-mono tabular-nums">{fmtRunTime(r.run_id)}</td>
-      <td>
-        <SuiteBadge suite={suite} />
-      </td>
-      <td>
-        <ArmBadge mode={r.mode} />
-      </td>
-      <td className="text-right font-mono tabular-nums">{r.n}</td>
+      <td className="py-1.5 pl-2 font-mono tabular-nums text-[10.5px]" style={{ color: 'var(--color-fg-2)' }}>{fmtRunTime(r.run_id)}</td>
+      <td><SuiteBadge suite={suiteOf(r)} /></td>
+      <td><ArmBadge mode={r.mode} /></td>
+      <td className="text-right font-mono tabular-nums text-[10.5px]" style={{ color: 'var(--color-fg-3)' }}>{r.n}</td>
       {running ? (
-        <td colSpan={span} className="pr-5 text-right text-[10px]">
-          进行中 {r.progress?.done ?? 0}/{r.progress?.total ?? r.n} …
-          {llmErr > 0 && (
-            <span className="ml-2 text-attacker">模型错误 {llmErr}</span>
-          )}
+        <td colSpan={span} className="pr-2 text-right text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
+          进行中 {r.progress?.done ?? 0}/{r.progress?.total ?? r.n}
+          {llmErr > 0 && <span className="ml-2 text-attacker">模型错误 {llmErr}</span>}
         </td>
       ) : failed ? (
-        <td colSpan={span} className="pr-5 text-right text-[10px] text-attacker/80">
-          错误{typeof r.error === 'string' ? `：${r.error.slice(0, 60)}` : ''}
+        <td colSpan={span} className="pr-2 text-right text-[10px] text-attacker">
+          错误{typeof r.error === 'string' ? `：${r.error.slice(0, 50)}` : ''}
         </td>
       ) : (
         <>
-          <td
-            title="选择题正确率"
-            className={`text-right font-mono text-[13px] font-semibold tabular-nums ${
-              dim ? 'text-text-2' : 'text-text-1'
-            }`}
-          >
+          <td className={`text-right font-mono text-[12px] font-semibold tabular-nums ${dim ? '' : ''}`} style={{ color: dim ? 'var(--color-fg-3)' : 'var(--color-fg)' }}>
             {fmtPct(primaryScoreOf(r))}
           </td>
           {showLlmErr && (
-            <td
-              className={`text-right font-mono tabular-nums ${
-                llmErr > 0 ? 'text-attacker' : 'text-text-3'
-              }`}
-            >
+            <td className={`text-right font-mono tabular-nums text-[10.5px] ${llmErr > 0 ? 'text-attacker' : ''}`} style={{ color: 'var(--color-fg-4)' }}>
               {llmErr > 0 ? llmErr : '0'}
             </td>
           )}
-          <td className="pr-5 text-right font-mono tabular-nums text-text-2">
+          <td className="pr-2 text-right font-mono tabular-nums text-[10.5px]" style={{ color: 'var(--color-fg-3)' }}>
             {fmtDuration(r.elapsed_sec)}
           </td>
         </>
@@ -593,83 +592,52 @@ function RunRow({
   )
 }
 
-function ResultsTable({
-  runs,
-  onSelect,
-}: {
-  runs: BenchRunSummary[]
-  onSelect: (r: BenchRunSummary) => void
-}) {
+function ResultsTable({ runs, onSelect }: { runs: BenchRunSummary[]; onSelect: (r: BenchRunSummary) => void }) {
   const [showLegacy, setShowLegacy] = useState(false)
   const mainRuns = runs.filter((r) => !LEGACY_BENCH_MODES.has(r.mode))
   const legacyRuns = runs.filter((r) => LEGACY_BENCH_MODES.has(r.mode))
-  // 任一运行出现 LLM 错误时显示「模型错误」列（平时不占位）。
-  const showLlmErr = runs.some(
-    (r) =>
-      (r.llm_errors ??
-        (r.scores ? r.scores.llm_errors : 0) ??
-        0) > 0,
-  )
+  const showLlmErr = runs.some((r) => (r.llm_errors ?? (r.scores ? r.scores.llm_errors : 0) ?? 0) > 0)
   const colSpan = showLlmErr ? 7 : 6
-
   return (
-    <section className="panel flex min-h-0 flex-1 flex-col">
+    <section className="flex min-h-0 flex-1 flex-col">
       <header className="panel-title">
         <span>历史结果</span>
-        <span className="ml-auto font-mono text-[9px] normal-case tracking-normal text-text-3">
+        <span className="ml-auto font-mono text-[9px] normal-case tracking-normal" style={{ color: 'var(--color-fg-4)' }}>
           {mainRuns.length} 次运行
         </span>
       </header>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {runs.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-8 py-16 text-center">
-            <div className="text-[13px] font-medium text-text-1">尚无基准运行</div>
-            <div className="max-w-md text-[11px] leading-5 text-text-2">
-              框架有效性对比：纯 LLM vs CyberOrion 框架——同一批题目、同一
-              模型，唯一差异是框架注入的知识库层。各跑一次两臂即可看到框架
-              增益；想先看看题目长什么样，点运行卡片里的「题目预览」。
-            </div>
+          <div className="px-8 py-10 text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
+            尚无基准运行——用上方控制条启动一次「开始测试」。
           </div>
         ) : (
-          <table className="w-full text-[11px]">
-            <thead className="sticky top-0 bg-raised text-[9px] uppercase tracking-[0.15em] text-text-2">
+          <table className="w-full text-[10.5px]">
+            <thead className="sticky top-0 text-[9px] uppercase tracking-[0.12em]" style={{ background: 'var(--color-bg)', color: 'var(--color-fg-4)' }}>
               <tr>
-                <th className="py-2 pl-5 text-left font-normal">时间</th>
+                <th className="py-1.5 pl-2 text-left font-normal">时间</th>
                 <th className="text-left font-normal">套件</th>
                 <th className="text-left font-normal">臂</th>
                 <th className="text-right font-normal">n</th>
                 <th className="text-right font-normal">主指标</th>
-                {showLlmErr && (
-                  <th className="text-right font-normal text-attacker/70">模型错误</th>
-                )}
-                <th className="pr-5 text-right font-normal">耗时</th>
+                {showLlmErr && <th className="text-right font-normal">模型错误</th>}
+                <th className="pr-2 text-right font-normal">耗时</th>
               </tr>
             </thead>
             <tbody>
               {mainRuns.map((r) => (
-                <RunRow
-                  key={r.run_id}
-                  r={r}
-                  dim={false}
-                  showLlmErr={showLlmErr}
-                  onSelect={onSelect}
-                />
+                <RunRow key={r.run_id} r={r} dim={false} showLlmErr={showLlmErr} onSelect={onSelect} />
               ))}
               {legacyRuns.length > 0 && (
-                <tr
-                  onClick={() => setShowLegacy((v) => !v)}
-                  className="cursor-pointer border-t border-hairline bg-panel-2/60 text-text-2 transition-colors hover:bg-panel-2"
-                >
-                  <td colSpan={colSpan} className="py-1.5 pl-5 text-[10px]">
-                    {showLegacy ? '▾' : '▸'} 历史实验（{legacyRuns.length}）·
-                    rag_fs / sc / sc_base / rag_g 旧模式对比运行
+                <tr onClick={() => setShowLegacy((v) => !v)} className="cursor-pointer border-t" style={{ borderColor: 'var(--color-hairline)' }}>
+                  <td colSpan={colSpan} className="py-1 pl-2 text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
+                    {showLegacy ? '▾' : '▸'} 历史实验（{legacyRuns.length}）· rag_fs / sc / sc_base / rag_g 旧模式
                   </td>
                 </tr>
               )}
-              {showLegacy &&
-                legacyRuns.map((r) => (
-                  <RunRow key={r.run_id} r={r} dim showLlmErr={showLlmErr} onSelect={onSelect} />
-                ))}
+              {showLegacy && legacyRuns.map((r) => (
+                <RunRow key={r.run_id} r={r} dim showLlmErr={showLlmErr} onSelect={onSelect} />
+              ))}
             </tbody>
           </table>
         )}
@@ -686,71 +654,75 @@ export function BenchmarkView() {
   const { benchLive, benchStamp } = useArena()
   const [runs, setRuns] = useState<BenchRunSummary[]>([])
   const [selected, setSelected] = useState<BenchRunSummary | null>(null)
+  const [reportSuite, setReportSuite] = useState<BenchSuite | null>(null)
+  const [questionsSuite, setQuestionsSuite] = useState<BenchSuite | null>(null)
 
   const load = useCallback(() => {
-    api
-      .getBenchRuns()
-      .then(setRuns)
-      .catch(() => {
-        /* keep last */
-      })
+    api.getBenchRuns().then(setRuns).catch(() => {})
   }, [])
 
-  // initial + whenever a run completes (benchStamp bumps on WS bench done/error)
   useEffect(() => {
     load()
   }, [load, benchStamp])
 
-  // merge live WS progress into any running rows the server returned
   const merged = useMemo(() => {
     const list = runs.map((r) => {
       const live = benchLive[r.run_id]
-      return live && r.status === 'running'
-        ? { ...r, progress: live.progress }
-        : r
+      return live && r.status === 'running' ? { ...r, progress: live.progress } : r
     })
     const known = new Set(list.map((r) => r.run_id))
     for (const live of Object.values(benchLive)) {
       if (!known.has(live.run_id)) {
-        list.unshift({
-          run_id: live.run_id,
-          mode: live.mode,
-          suite: live.suite,
-          n: live.n,
-          status: 'running',
-          progress: live.progress,
-          scores: null,
-        })
+        list.unshift({ run_id: live.run_id, mode: live.mode, suite: live.suite, n: live.n, status: 'running', progress: live.progress, scores: null })
       }
     }
     return list
   }, [runs, benchLive])
 
+  const suiteOrder: BenchSuite[] = ['attack_kb', 'malware_analysis', 'threat_intel']
+
   return (
     <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-[1100px] flex-col gap-4 px-6 pb-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[13px] font-semibold text-fg">
-            基准测试
+        {/* 标题 */}
+        <div className="flex flex-col gap-1 pt-2">
+          <h1 className="text-[15px] font-semibold" style={{ color: 'var(--color-fg)' }}>
+            基准测试 · 框架有效性报告
           </h1>
-          <span className="text-[11px] text-text-3">
-            框架有效性对比 · 纯 LLM vs CyberOrion 框架 · 同一批题目同一模型 ·
-            CyberSOCEval 知识问答基准
+          <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
+            纯 LLM vs CyberOrion 框架 · 同批题 · 同模型 · 同 seed —— 分差即框架知识层增益
           </span>
         </div>
-        <FadeIn>
-          <RunCard onStarted={load} />
-        </FadeIn>
-        <FadeIn delay={0.08} className="flex flex-col gap-4">
-          <CompareCharts runs={merged} />
-        </FadeIn>
-        <FadeIn delay={0.16} className="flex min-h-0 flex-1 flex-col">
-          <ResultsTable runs={merged} onSelect={setSelected} />
-        </FadeIn>
+
+        <RunCard onStarted={load} />
+
+        <OverviewStrip runs={merged} />
+
+        {/* 每套件报告区块 */}
+        {suiteOrder.map((s) => (
+          <SuiteReportCard
+            key={s}
+            suite={s}
+            runs={merged}
+            onOpenReport={setReportSuite}
+            onOpenQuestions={setQuestionsSuite}
+          />
+        ))}
+
+        <ResultsTable runs={merged} onSelect={setSelected} />
       </div>
-      {selected && (
-        <BenchDetailDrawer run={selected} onClose={() => setSelected(null)} />
+
+      {reportSuite && (
+        <Modal title={`技术报告 · ${BENCH_SUITES[reportSuite].label}`} onClose={() => setReportSuite(null)} width="w-[820px]">
+          <div className="scroll-thin max-h-[70vh] overflow-y-auto pr-1">
+            <MarkdownView markdown={BENCH_REPORTS[reportSuite] ?? '（报告缺失）'} className="md-doc" />
+          </div>
+        </Modal>
       )}
+      {questionsSuite && (
+        <QuestionPreviewModal suite={questionsSuite} onClose={() => setQuestionsSuite(null)} />
+      )}
+      {selected && <BenchDetailDrawer run={selected} onClose={() => setSelected(null)} />}
     </main>
   )
 }

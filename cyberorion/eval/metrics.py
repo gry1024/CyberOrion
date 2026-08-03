@@ -237,6 +237,7 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
 
     return {
         "window_sec": int(window_sec),
+        "scenario": (getattr(scenario, "name", "") or "") if scenario else "",
         "totals": {
             "attacks_total": len(attacks),
             "attacks_verified": n_verified,

@@ -69,9 +69,9 @@
   --color-error:     #f0626f;
   --color-cmd:       #e8a33d;
 
-  /* Cursor 品牌紫：主操作/激活 */
-  --color-accent:    #6e5aff;
-  --color-accent-2:  #8a7bff;
+  /* 强调色：Grok/Cursor 中性化（主操作 = 白/黑，不用紫） */
+  --color-accent:    #e8e8e8;
+  --color-accent-2:  #cfcfcf;
 
   --color-watcher:   #7ab2ff;
   --color-analyst:   #b9a8ff;
@@ -140,8 +140,8 @@
   --color-error:     #d64550;
   --color-cmd:       #b26a00;
 
-  --color-accent:    #6e5aff;
-  --color-accent-2:  #4f3fd8;
+  --color-accent:    #26251e;
+  --color-accent-2:  #3d3b33;
 
   --color-watcher:   #1d6fd1;
   --color-analyst:   #6e5aff;
@@ -221,11 +221,13 @@ body {
 .btn:disabled { cursor: not-allowed; opacity: 0.35; }
 
 .btn-primary {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: transparent;
+  color: #161616;
+  background: #f5f5f5;
+  border-color: #f5f5f5;
 }
-.btn-primary:hover:not(:disabled) { background: var(--color-accent-2); }
+.btn-primary:hover:not(:disabled) { background: #ddd; border-color: #ddd; }
+.light .btn-primary { color: #fff; background: #26251e; border-color: #26251e; }
+.light .btn-primary:hover:not(:disabled) { background: #3d3b33; }
 
 .btn-danger {
   color: var(--color-red);
