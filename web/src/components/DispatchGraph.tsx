@@ -1,5 +1,6 @@
 // DispatchGraph — 蓝方派遣状态条（Cursor 式：一行平铺，无卡片）
-// 指挥官 + 四角色：名称 + 状态点，点击打开 AgentDetailModal。
+// 指挥官 + 四角色：人像头像 + 名称（agent 后缀）+ 状态点，
+// 点击打开 AgentDetailModal —— 每个角色是可随时调用的 sub-agent。
 import { useState } from 'react'
 import { useArena } from '../arena'
 import { BLUE_ROLES } from '../types'
@@ -29,6 +30,21 @@ function statusColor(s: RoleStatus): string {
   return 'var(--color-fg-4)'
 }
 
+/** 人像头像：角色色圆底 + 白色人像剪影。 */
+function Persona({ color, size = 16 }: { color: string; size?: number }) {
+  return (
+    <span
+      className="flex flex-none select-none items-center justify-center rounded-full"
+      style={{ width: size, height: size, background: color }}
+    >
+      <svg viewBox="0 0 24 24" width={size * 0.62} height={size * 0.62} fill="none" aria-hidden>
+        <circle cx="12" cy="8.6" r="3.6" fill="#fff" />
+        <path d="M4.5 21c0-4.2 3.4-6.6 7.5-6.6s7.5 2.4 7.5 6.6z" fill="#fff" />
+      </svg>
+    </span>
+  )
+}
+
 export function DispatchGraph() {
   const { team, status } = useArena()
   const [detail, setDetail] = useState<string | null>(null)
@@ -47,8 +63,8 @@ export function DispatchGraph() {
         className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11.5px] transition-colors hover:bg-[var(--color-overlay)]"
         style={{ color: orchestratorActive ? 'var(--color-amber)' : 'var(--color-fg-2)' }}
       >
-        <span className="dot" style={{ background: orchestratorActive ? 'var(--color-amber)' : 'var(--color-fg-4)' }} />
-        调度指挥
+        <Persona color={orchestratorActive ? 'var(--color-amber)' : 'var(--color-fg-4)'} />
+        调度指挥 agent
       </button>
       {ROLES.map((r) => {
         const st = roleStatus(r.key, team)
@@ -59,8 +75,9 @@ export function DispatchGraph() {
             className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11.5px] transition-colors hover:bg-[var(--color-overlay)]"
             style={{ color: 'var(--color-fg-2)' }}
           >
+            <Persona color={r.color} />
+            {r.label} agent
             <span className="dot" style={{ background: statusColor(st), boxShadow: st === 'running' || st === 'dispatching' ? `0 0 4px ${statusColor(st)}` : 'none' }} />
-            {r.label}
           </button>
         )
       })}

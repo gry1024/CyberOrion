@@ -46,6 +46,22 @@ function metaOf(agent: string | undefined, side: Side): AgentMeta {
   return { label: '调度指挥', color: 'var(--color-blue)' }
 }
 
+/** 人像头像：角色色圆底 + 白色人像剪影（头 + 肩），
+ * 让每个角色看起来是一个可随时调用的 sub-agent。 */
+function AgentAvatar({ color, size = 20 }: { color: string; size?: number }) {
+  return (
+    <span
+      className="flex flex-none select-none items-center justify-center rounded-full"
+      style={{ width: size, height: size, background: color }}
+    >
+      <svg viewBox="0 0 24 24" width={size * 0.62} height={size * 0.62} fill="none" aria-hidden>
+        <circle cx="12" cy="8.6" r="3.6" fill="#fff" />
+        <path d="M4.5 21c0-4.2 3.4-6.6 7.5-6.6s7.5 2.4 7.5 6.6z" fill="#fff" />
+      </svg>
+    </span>
+  )
+}
+
 function ToolCall({ step, side }: { step: ThoughtStep; side: Side }) {
   const [open, setOpen] = useState(false)
   const isRed = side === 'red'
@@ -94,14 +110,16 @@ function Report({ step, side }: { step: ThoughtStep; side: Side }) {
   const [open, setOpen] = useState(false)
   const meta = metaOf(step.role ?? step.agent, side)
   const hasError = step.report?.startsWith('✗')
+  const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
   return (
     <div className="fade-in pl-6">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="text-[11.5px] font-medium transition-opacity hover:opacity-80"
+        className="flex items-center gap-1.5 text-[11.5px] font-medium transition-opacity hover:opacity-80"
         style={{ color: hasError ? 'var(--color-red)' : meta.color }}
       >
-        {open ? '▾' : '▸'} {meta.label} 报告{hasError ? '（异常）' : ''}
+        <AgentAvatar color={meta.color} size={16} />
+        {open ? '▾' : '▸'} {agentName} 报告{hasError ? '（异常）' : ''}
       </button>
       {open && step.report && (
         <div className="mt-1 border-l-2 pl-3" style={{ borderColor: 'var(--color-line)' }}>
@@ -122,15 +140,19 @@ function StepRow({ step, side, isLast }: { step: ThoughtStep; side: Side; isLast
   }
   if (step.kind === 'thinking' && step.text) {
     const meta = metaOf(step.agent, side)
+    const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
     return (
-      <div className="fade-in py-px">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[11px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>
-          <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
-        </div>
-        <div className="stream-thinking whitespace-pre-wrap break-words">
-          {step.text}
-          {isLast && <span className="cursor-blink" />}
+      <div className="fade-in flex gap-2 py-px">
+        <AgentAvatar color={meta.color} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] font-semibold" style={{ color: meta.color }}>{agentName}</span>
+            <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
+          </div>
+          <div className="stream-thinking whitespace-pre-wrap break-words">
+            {step.text}
+            {isLast && <span className="cursor-blink" />}
+          </div>
         </div>
       </div>
     )

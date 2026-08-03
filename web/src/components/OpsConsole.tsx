@@ -1,5 +1,5 @@
 // OpsConsole — 作战台控制条（Cursor 式：平铺一行按钮，无圆角卡）
-// 会话生命周期 + 红蓝启停 + 巡逻 + 场景选择 + 靶场情报入口。
+// 会话生命周期 + 红蓝启停 + 巡逻 + 场景选择 + 靶机信息入口。
 import { useState } from 'react'
 import { useArena } from '../arena'
 import { api } from '../api'
@@ -84,7 +84,7 @@ export function OpsConsole() {
         <option value="">{status.scenario || '默认靶场'}</option>
         {sceneList.map((s) => (<option key={s} value={s}>{s}</option>))}
       </select>
-      <button className="btn btn-ghost" onClick={() => setInfoOpen(true)} title="靶场情报（靶机 / 红蓝期望）">靶场情报</button>
+      <button className="btn btn-ghost" onClick={() => setInfoOpen(true)} title="靶机信息（靶机 / 红蓝期望）">靶机信息</button>
       <span className="ml-auto flex items-center gap-2 font-mono text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
         <span className="dot" style={{ background: connected ? 'var(--color-green)' : 'var(--color-red)' }} />
         {connected ? '在线' : '离线'}
