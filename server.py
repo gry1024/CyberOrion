@@ -542,6 +542,18 @@ def _scan_sessions() -> list[dict[str, Any]]:
     return out
 
 
+@app.get("/api/agents/roles")
+async def agent_roles() -> list[dict[str, Any]]:
+    """蓝队全部角色档案（orchestrator + 4 子代理）：system prompt 原文、
+    工具清单（含完整 docstring）、职责、调用条件、输出规范、通信逻辑。"""
+    try:
+        from cyberorion.agents.blue_team import agents_api
+        return agents_api()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"角色档案加载失败: {exc}"},
+                            status_code=500)
+
+
 @app.get("/api/sessions")
 async def list_sessions() -> list[dict[str, Any]]:
     """History sessions (logs/session_*), newest first."""

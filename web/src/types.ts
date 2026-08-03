@@ -45,6 +45,35 @@ export interface BlueRoleTool {
   desc: string
 }
 
+/** 工具参数（来自 FunctionTool 的 params_json_schema）。 */
+export interface AgentToolParam {
+  name: string
+  type: string
+  default?: unknown
+  desc: string
+}
+
+/** 工具详解（FunctionTool：概述 + 参数级说明）。 */
+export interface AgentToolSpec {
+  name: string
+  description: string
+  params: AgentToolParam[]
+}
+
+/** GET /api/agents/roles — 蓝队角色完整档案（Agent 详情弹窗用）。 */
+export interface AgentRoleSpec {
+  key: string
+  title: string
+  name: string
+  system_prompt: string
+  tools: AgentToolSpec[]
+  duty: string
+  invocation: string
+  output: string
+  comms: string
+  color: string
+}
+
 /** 蓝队角色元信息 — 前端唯一事实源，供 DispatchGraph / BlueStream /
  * AgentDetailModal 共用。name 为具体职责名，colorVar 沿用既有色板。 */
 export interface BlueRole {

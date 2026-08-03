@@ -1,6 +1,7 @@
 // Thin REST client for the CyberOrion backend.
 
 import type {
+  AgentRoleSpec,
   AlertRow,
   BenchMode,
   BenchQuestionPreview,
@@ -109,6 +110,7 @@ export const api = {
 
   getScenarioInfo: () => get('/api/scenario/info') as Promise<ScenarioDetail>,
   getAbout: () => get('/api/about') as Promise<{ markdown: string }>,
+  getAgentRoles: () => get('/api/agents/roles') as Promise<AgentRoleSpec[]>,
 
   sessionStart: () => post('/api/session/start'),
   sessionStop: () => post('/api/session/stop'),
@@ -123,3 +125,5 @@ export const api = {
   bluePatrolStart: () => post('/api/blue/patrol/start'),
   bluePatrolStop: () => post('/api/blue/patrol/stop'),
 }
+
+export type { AgentRoleSpec } from './types'

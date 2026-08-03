@@ -204,6 +204,111 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 角色档案 API：把每个子代理的 system prompt / 工具清单（含完整 docstring）/
+# 职责 / 调用条件 / 输出规范 / 通信逻辑 暴露给前端「Agent 详情」弹窗。
+# ---------------------------------------------------------------------------
+
+# 角色展示常量（中文名 / 色板，前端「Agent 详情」弹窗复用）。
+_ROLE_TITLES: dict[str, str] = {
+    "orchestrator": "调度指挥", "watcher": "遥测巡检",
+    "analyst": "事件研判", "responder": "响应处置", "hunter": "失陷排查",
+}
+_ROLE_COLORS: dict[str, str] = {
+    "orchestrator": "var(--color-cmd)", "watcher": "var(--color-watcher)",
+    "analyst": "var(--color-analyst)", "responder": "var(--color-responder)",
+    "hunter": "var(--color-hunter)",
+}
+
+# 各角色「什么条件下被指挥官调用」「输出规范」「通信逻辑」的结构化说明
+# （prompt 原文已含细节，这里给读者一个速览）。
+_ROLE_META: dict[str, dict[str, str]] = {
+    "orchestrator": {
+        "duty": "组织防御：快扫遥测 → 定性 → 上报 → 派遣处置 → 复查，全程信息隔离（对红方行动一无所知）。",
+        "invocation": "每次防御巡逻（patrol 循环 / 手动启动蓝方）都会运行指挥官：先 query_logs 快扫最近 15 分钟遥测，命中攻击特征即组织团队响应。",
+        "output": "一段中文防御总结：发现（引用具体遥测证据）、上报（report_finding 已调用）、处置（responder 结果）、复查（威胁是否消除）。",
+        "comms": "指挥官是唯一能 dispatch_task 派遣子代理、report_finding 上报评分接口的节点；子代理结论通过 dispatch_task 返回值传回，团队事件经 EventBus 广播给前端（spawn/done + role 标签）。",
+    },
+    "watcher": {
+        "duty": "巡逻检测：对全部主机做日志/网络/进程/文件基线的快速全面巡查，定位攻击痕迹。",
+        "invocation": "指挥官每次巡逻必派（或快扫命中后派）——负责把三台主机的日志/网络/进程/文件基线快速扫一遍。",
+        "output": "结构化结论块：发现/证据/建议/已执行动作；每台主机宽查 1 次、命中才深查，工具调用每台 ≤4 次。",
+        "comms": "只读检测工具，无处置权限；可疑点写进结论交指挥官定夺，绝不越权处置。",
+    },
+    "analyst": {
+        "duty": "线索研判：把可疑事件定性为具体 ATT&CK 技术，定位受害主机、来源 IP 与失陷程度。",
+        "invocation": "指挥官遇到拿不准的线索时派遣（如技术编号不确定、来源 IP 需定位）；简单威胁（爆破+登录、命令注入）指挥官直接定性，不派。",
+        "output": "研判结论：攻击技术编号（ATT&CK）、受害主机、攻击来源 IP、失陷程度（尝试中/已成功/已建立持久化）与处置建议。",
+        "comms": "使用 triage_alert/list_alerts/query_logs 取证 + search_attack_kb/lookup_technique 核对技术；结论只回传指挥官。",
+    },
+    "responder": {
+        "duty": "威胁处置：封禁来源 IP、加固服务、锁定账号、清除后门/webshell/恶意进程。",
+        "invocation": "指挥官确认威胁后派遣（mission 携带受害主机、技术编号、来源 IP、需清除对象）；多处失陷可同回合并行派多个 responder。",
+        "output": "每个处置动作执行后的复查结果 + 一句话说明威胁是否已消除；失败如实报告，绝不谎报成功。",
+        "comms": "只执行处置工具（block_ip/unblock_ip/harden_service/remediate），无检测权限；结果回传指挥官。",
+    },
+    "hunter": {
+        "duty": "失陷排查：深挖文件篡改与可疑进程，确认后现场清理。",
+        "invocation": "指挥官怀疑失陷但需现场取证清理时派遣（文件篡改 + 可疑进程维度）；可与 responder 同回合并行清理。",
+        "output": "结构化结论块：发现的恶意文件/进程（带证据）、已执行的 remediate 动作与复查结果。",
+        "comms": "file_integrity/process_audit 取证 + remediate 清理；只清确有证据的目标，工具自带保护。",
+    },
+}
+
+
+def agents_api() -> list[dict]:
+    """序列化全部蓝队角色档案（orchestrator + 4 子代理），供前端展示。
+
+    每个档案含：key/title/name(中文)/system_prompt(原文)/tools(名称+完整
+    docstring)/duty/invocation/output/comms/color。
+    """
+    specs = dict(_ROLE_SPECS)
+    specs["orchestrator"] = {
+        "title": "指挥",
+        "tools": [
+            dispatch_task, query_logs, report_finding, list_alerts,
+            search_attack_kb, lookup_technique,
+        ],
+        "prompt": _ORCHESTRATOR_TEMPLATE,
+    }
+    out = []
+    for key, spec in specs.items():
+        tools = []
+        for t in spec.get("tools", []):
+            name = getattr(t, "name", None) or getattr(t, "__name__", str(t))
+            # FunctionTool：description = 工具功能概述；params_json_schema
+            # = 参数级说明（名称/类型/描述）。两者组成完整的工具文档。
+            description = str(getattr(t, "description", "") or "").strip()
+            schema = getattr(t, "params_json_schema", None) or {}
+            params = []
+            for pname, pinfo in (schema.get("properties") or {}).items():
+                params.append({
+                    "name": pname,
+                    "type": pinfo.get("type", ""),
+                    "default": pinfo.get("default"),
+                    "desc": pinfo.get("description", ""),
+                })
+            tools.append({
+                "name": name,
+                "description": description,
+                "params": params,
+            })
+        meta = _ROLE_META.get(key, {})
+        out.append({
+            "key": key,
+            "title": spec.get("title", ""),
+            "name": _ROLE_TITLES.get(key, key),
+            "system_prompt": spec["prompt"],
+            "tools": tools,
+            "duty": meta.get("duty", ""),
+            "invocation": meta.get("invocation", ""),
+            "output": meta.get("output", ""),
+            "comms": meta.get("comms", ""),
+            "color": _ROLE_COLORS.get(key, ""),
+        })
+    return out
+
+
 def _build_role_agent(role: str, scenario: "Scenario | None") -> Agent:
     """构建（并缓存）指定角色的子代理。"""
     cached = _role_agents.get(role)
