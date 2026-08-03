@@ -6,6 +6,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { pushToast } from '../toasts'
+import { Modal } from './Modal'
 import type {
   ScoreMetrics,
   SessionDetail,
@@ -52,6 +53,7 @@ function StorylineSection({
   const [md, setMd] = useState<string | null>(initial)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -117,13 +119,22 @@ function StorylineSection({
         <span className="text-text-1">AI 复盘</span>
         <div className="ml-auto flex items-center gap-2">
           {md && (
-            <button
-              onClick={() => generate(true)}
-              disabled={generating}
-              className="rounded bg-overlay px-2 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40"
-            >
-              {generating ? '生成中…' : '重新生成'}
-            </button>
+            <>
+              <button
+                onClick={() => setExpanded(true)}
+                className="rounded bg-overlay px-2 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2"
+                title="全屏展开故事线复盘"
+              >
+                ⛶ 全屏展开
+              </button>
+              <button
+                onClick={() => generate(true)}
+                disabled={generating}
+                className="rounded bg-overlay px-2 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40"
+              >
+                {generating ? '生成中…' : '重新生成'}
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -149,6 +160,21 @@ function StorylineSection({
           </div>
         )}
       </div>
+
+      {/* 全屏展开：大字号完整故事线 */}
+      {expanded && md && (
+        <Modal
+          title="AI 战役复盘 · 全屏"
+          onClose={() => setExpanded(false)}
+          width="w-[1000px]"
+        >
+          <div className="scroll-thin max-h-[82vh] overflow-y-auto pr-2">
+            <div className="text-[14.5px] leading-[1.85]">
+              <MarkdownView markdown={md} className="md-doc" />
+            </div>
+          </div>
+        </Modal>
+      )}
     </section>
   )
 }
