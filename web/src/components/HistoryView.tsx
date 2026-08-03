@@ -119,7 +119,7 @@ function StorylineSection({
             <button
               onClick={() => generate(true)}
               disabled={generating}
-              className="rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40"
+              className="rounded bg-overlay px-2 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40"
             >
               {generating ? '生成中…' : '重新生成'}
             </button>
@@ -138,7 +138,7 @@ function StorylineSection({
           <div className="flex items-center gap-3 py-2">
             <button
               onClick={() => generate(false)}
-              className="rounded-full bg-text-1 px-4 py-1.5 text-[11px] font-medium text-bg transition-colors hover:bg-text-2"
+              className="rounded bg-text-1 px-3 py-1 text-[11px] font-medium text-bg transition-colors hover:bg-text-2"
             >
               生成 AI 复盘
             </button>
@@ -164,7 +164,7 @@ function StatCell({ label, value, tone = 'text-text-1' }: {
   return (
     <div className="px-4 py-2.5">
       <div className="text-[8px] uppercase tracking-[0.15em] text-text-2">{label}</div>
-      <div className={`mt-0.5 font-serif text-xl italic tabular-nums ${tone}`}>
+      <div className={`mt-0.5 text-[13px] font-medium tabular-nums ${tone}`}>
         {value}
       </div>
     </div>
@@ -442,9 +442,9 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-thin pr-1">
-      {error && <div className="panel flex-none p-6 text-[11px] text-attacker">{error}</div>}
+      {error && <div className="panel flex-none p-3 text-[11px] text-attacker">{error}</div>}
       {!error && !detail && (
-        <div className="panel flex-none p-6 text-[11px] text-text-3">加载中…</div>
+        <div className="panel flex-none p-3 text-[11px] text-text-3">加载中…</div>
       )}
       {detail && (
         <>
@@ -456,7 +456,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
-                  className={`rounded-full px-3 py-1 text-[10px] transition-colors ${
+                  className={`rounded px-2.5 py-0.5 text-[10px] transition-colors ${
                     tab === t.key
                       ? 'bg-ink font-medium text-bg'
                       : 'text-text-3 hover:text-fg'
@@ -510,20 +510,20 @@ export function HistoryView() {
   return (
     <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-5 pb-4">
       <div className="flex flex-none items-baseline gap-4 px-1">
-        <h1 className="text-[20px] font-semibold leading-none tracking-normal text-fg">
+        <h1 className="text-[13px] font-semibold leading-none tracking-normal text-fg">
           历史
         </h1>
-        <span className="text-[13px] text-text-3">会话回放</span>
+        <span className="text-[11px] text-text-3">会话回放</span>
       </div>
-      <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* left: session list */}
-      <FadeIn className="flex w-[320px] flex-none flex-col overflow-hidden">
+      <FadeIn className="flex w-[280px] flex-none flex-col overflow-hidden border-r border-hairline">
       <aside className="panel flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <header className="panel-title">
           <span>历史会话</span>
           <button
             onClick={load}
-            className="ml-auto rounded-full bg-overlay px-2.5 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2"
+            className="ml-auto rounded bg-overlay px-2 py-px text-[9px] normal-case tracking-normal text-text-3 transition-colors hover:bg-hover hover:text-text-2"
           >
             刷新
           </button>
@@ -538,16 +538,16 @@ export function HistoryView() {
             <button
               key={s.id}
               onClick={() => setSelected(s)}
-              className={`mb-1.5 flex w-full flex-col gap-1 rounded-xl border px-3 py-2 text-left transition-colors ${
+              className={`mb-1 flex w-full flex-col gap-1 px-3 py-1.5 text-left transition-colors ${
                 selected?.id === s.id
-                  ? 'border-line-3 bg-panel'
-                  : 'border-hairline bg-panel hover:border-line-3'
+                  ? 'bg-panel'
+                  : 'hover:bg-overlay'
               }`}
             >
               <div className="flex w-full items-center gap-2">
                 <span className="truncate font-mono text-[11px] text-text-1">{s.id}</span>
                 {s.score != null && (
-                  <span className="ml-auto flex-none rounded-full border border-success/40 px-1.5 py-px font-mono text-[9px] tabular-nums text-success">
+                  <span className="ml-auto flex-none rounded border border-success/40 px-1 py-px font-mono text-[9px] tabular-nums text-success">
                     {s.score.toFixed(1)}
                   </span>
                 )}
@@ -570,13 +570,13 @@ export function HistoryView() {
       </FadeIn>
 
       {/* right: detail */}
-      <FadeIn delay={0.08} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <FadeIn delay={0.08} className="flex min-h-0 flex-1 flex-col overflow-hidden pl-3 pr-1">
       {selected ? (
         <SessionDetailView key={selected.id} session={selected} />
       ) : (
         <div className="panel flex flex-1 items-center justify-center">
           <div className="text-center">
-            <div className="text-[18px] font-medium text-text-3">选择一个会话</div>
+            <div className="text-[13px] font-medium text-text-3">选择一个会话</div>
             <div className="mt-1 text-[11px] text-text-2">
               AI 复盘 · 战役统计 · 完整时间线 · 工具调用 · 告警与攻击真值 · 报告
             </div>

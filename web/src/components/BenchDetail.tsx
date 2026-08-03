@@ -125,7 +125,7 @@ function QuestionDrill({ q }: { q: BenchResultItem }) {
       </div>
       {/* 模型原始回答（可折叠 markdown） */}
       {q.raw && (
-        <details className="rounded-lg border border-hairline/50 bg-panel-2/60">
+        <details className="border border-hairline/50 bg-panel-2/60">
           <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] text-text-2 transition-colors hover:text-fg">
             模型原始回答（推理过程）
           </summary>
@@ -151,7 +151,7 @@ function QuestionRow({
   const { task, loading } = useTaskDetail(runId, idx, open)
   const full = task ?? item
   return (
-    <div className="rounded-lg border border-hairline/60">
+    <div className="border border-hairline/60">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-overlay"
@@ -265,9 +265,9 @@ export function BenchDetailDrawer({
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/25" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <aside
-        className="liquid-glass-strong scroll-thin m-4 flex w-[680px] flex-none flex-col gap-5 overflow-y-auto rounded-[1.25rem] p-6"
+        className="scroll-thin flex h-full w-[680px] flex-none flex-col gap-4 overflow-y-auto border-l border-hairline p-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
@@ -300,12 +300,12 @@ export function BenchDetailDrawer({
         ) : (
           <>
               {/* headline metrics */}
-              <div className="grid grid-cols-3 divide-x divide-hairline rounded-xl border border-hairline">
+              <div className="grid grid-cols-3 divide-x divide-hairline border-y border-hairline">
                 <div className="px-4 py-3">
                   <div className="text-[9px] uppercase tracking-[0.15em] text-text-2">
                     选择题正确率
                   </div>
-                  <div className="mt-1 font-serif text-3xl italic tabular-nums text-text-1">
+                  <div className="mt-1 text-[15px] font-semibold tabular-nums text-text-1">
                     {fmtPct(qaScores.correct_mc_pct)}
                   </div>
                 </div>
@@ -313,7 +313,7 @@ export function BenchDetailDrawer({
                   <div className="text-[9px] uppercase tracking-[0.15em] text-text-2">
                     平均得分
                   </div>
-                  <div className="mt-1 font-serif text-3xl italic tabular-nums text-text-1">
+                  <div className="mt-1 text-[15px] font-semibold tabular-nums text-text-1">
                     {qaScores.avg_score.toFixed(3)}
                   </div>
                 </div>
@@ -322,7 +322,7 @@ export function BenchDetailDrawer({
                     解析失败
                   </div>
                   <div
-                    className={`mt-1 font-serif text-3xl italic tabular-nums ${
+                    className={`mt-1 text-[15px] font-semibold tabular-nums ${
                       qaScores.parse_fail > 0 ? 'text-warning' : 'text-text-1'
                     }`}
                   >

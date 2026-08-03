@@ -243,7 +243,7 @@ function QuestionPreviewModal({
             运行结束后点历史结果行，可在抽屉里逐题查看模型的作答与原始回答。
           </p>
           {data.questions.map((q, i) => (
-            <div key={q.idx} className="rounded-lg border border-hairline/60 p-3">
+            <div key={q.idx} className="border border-hairline/60 p-3">
               <div className="mb-1.5 flex items-baseline gap-2 text-[9px] text-text-3">
                 <span className="font-mono">#{i + 1} (idx {q.idx})</span>
                 {q.difficulty && <span>{q.difficulty}</span>}
@@ -343,7 +343,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
   }
 
   return (
-    <section className="liquid-glass-strong flex-none rounded-[1.25rem] p-5">
+    <section className="flex-none p-4">
       <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
         <PillGroup
           label="套件"
@@ -372,9 +372,6 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
             label: a.label,
           }))}
         />
-        <span className="text-[10px] text-text-2">
-          {BENCH_SUITES[suite].hint}
-        </span>
         <button
           onClick={() => setPreviewOpen(true)}
           title="按 seed 采样预览题目（含正确答案）"
@@ -690,10 +687,10 @@ export function BenchmarkView() {
     <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-[1100px] flex-col gap-4 px-6 pb-6">
         <div className="flex flex-col gap-1">
-          <h1 className="text-[20px] font-semibold text-fg">
+          <h1 className="text-[13px] font-semibold text-fg">
             基准测试
           </h1>
-          <span className="text-[13px] text-text-3">
+          <span className="text-[11px] text-text-3">
             框架有效性对比 · 纯 LLM vs CyberOrion 框架 · 同一批题目同一模型 ·
             CyberSOCEval 知识问答基准
           </span>

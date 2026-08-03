@@ -141,7 +141,7 @@ export function BenchBarChart({
     const missingArm = bare ? arms.framework : arms.bare
     const firstMetric = have.scores ? metrics[0].get(have.scores) : undefined
     return (
-      <section className="panel flex-none p-5">
+      <section className="panel flex-none p-4">
         <ChartHeader
           suite={suite}
           bare={bare}
@@ -150,7 +150,7 @@ export function BenchBarChart({
           baseModel={baseModel}
           palette={C}
         />
-        <div className="rounded-xl border border-dashed border-hairline px-6 py-10 text-center">
+        <div className="border border-dashed border-hairline px-4 py-8 text-center">
           <div className="text-[12px] text-text-2">
             暂无成对数据——先各跑一次 {arms.bare.mode} 和 {arms.framework.mode}
           </div>
@@ -191,7 +191,7 @@ export function BenchBarChart({
     PAD.l + (plotW * (i + 0.5)) / metrics.length - groupW / 2
 
   return (
-    <section className="panel flex-none p-5">
+    <section className="panel flex-none p-4">
       <ChartHeader
         suite={suite}
         bare={bare}
@@ -209,7 +209,6 @@ export function BenchBarChart({
           fontSize="9.5"
           letterSpacing="0.14em"
           fill={C.tick}
-          fontFamily='"Barlow", "PingFang SC", sans-serif'
         >
           得分（%）
         </text>
@@ -264,8 +263,6 @@ export function BenchBarChart({
                         textAnchor="middle"
                         fontSize="12.5"
                         fill={C.value}
-                        fontFamily='"Instrument Serif", Georgia, serif'
-                        fontStyle="italic"
                       >
                         {fmtPctLabel(b.v)}
                       </text>
@@ -279,7 +276,6 @@ export function BenchBarChart({
                 textAnchor="middle"
                 fontSize="11.5"
                 fill={C.label}
-                fontFamily='"Barlow", "PingFang SC", sans-serif'
               >
                 {m.label}
               </text>

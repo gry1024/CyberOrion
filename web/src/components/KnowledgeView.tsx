@@ -43,7 +43,7 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/25" onClick={onClose}>
       <aside
-        className="liquid-glass-strong scroll-thin m-4 flex w-[560px] flex-none flex-col gap-4 overflow-y-auto rounded-[1.25rem] p-6"
+        className="liquid-glass-strong scroll-thin flex h-full w-[560px] flex-none flex-col gap-4 overflow-y-auto border-l border-hairline p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">
@@ -55,7 +55,7 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
-            className="ml-auto flex-none rounded-full bg-overlay px-3 py-1 text-[10px] text-text-3 transition-colors hover:bg-hover hover:text-text-2"
+            className="ml-auto flex-none rounded bg-overlay px-3 py-1 text-[10px] text-text-3 transition-colors hover:bg-hover hover:text-text-2"
           >
             关闭 ✕
           </button>
@@ -66,13 +66,13 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         {doc && (
           <>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-hairline px-2 py-px text-[10px] text-text-3">
+              <span className="rounded border border-hairline px-2 py-px text-[10px] text-text-3">
                 {typeLabel(doc.type)}
               </span>
               {(doc.tactics ?? []).map((t) => (
                 <span
                   key={t}
-                  className="rounded-full bg-overlay px-2 py-px font-mono text-[10px] text-text-2"
+                  className="rounded bg-overlay px-2 py-px font-mono text-[10px] text-text-2"
                 >
                   {t}
                 </span>
@@ -102,7 +102,7 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               <div className="mb-1.5 text-[10px] uppercase tracking-widest text-text-2">
                 正文
               </div>
-              <div className="whitespace-pre-wrap break-words rounded-xl border border-hairline bg-panel-2 p-4 text-[12px] leading-[1.7] text-fg">
+              <div className="whitespace-pre-wrap break-words text-[12px] leading-[1.7] text-fg">
                 {doc.text}
               </div>
             </section>
@@ -120,15 +120,15 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 function StatsStrip({ stats }: { stats: KbStats | null }) {
   if (!stats) {
     return (
-      <div className="panel flex-none px-5 py-4 text-[11px] text-text-3">
+      <div className="panel flex-none px-4 py-3 text-[11px] text-text-3">
         知识库统计不可用 — 后端 /api/kb/stats 未就绪
       </div>
     )
   }
   return (
-    <div className="panel flex flex-none flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
+    <div className="panel flex flex-none flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
       <div>
-        <div className="font-serif text-4xl italic tabular-nums text-text-1">
+        <div className="text-xl font-semibold tabular-nums text-text-1">
           {stats.total.toLocaleString()}
         </div>
         <div className="text-[9px] uppercase tracking-[0.2em] text-text-2">
@@ -139,7 +139,7 @@ function StatsStrip({ stats }: { stats: KbStats | null }) {
         {Object.entries(stats.by_type).map(([t, n]) => (
           <span
             key={t}
-            className="rounded-full border border-hairline px-2.5 py-0.5 text-[10px] text-text-3"
+            className="rounded border border-hairline px-2.5 py-0.5 text-[10px] text-text-3"
           >
             {typeLabel(t)}{' '}
             <span className="font-mono tabular-nums text-text-1">{n}</span>
@@ -148,7 +148,7 @@ function StatsStrip({ stats }: { stats: KbStats | null }) {
       </div>
       <div className="ml-auto flex items-center gap-2 text-[10px] text-text-2">
         检索模式
-        <span className="rounded-full bg-overlay px-2.5 py-0.5 font-medium text-text-2">
+        <span className="rounded bg-overlay px-2.5 py-0.5 font-medium text-text-2">
           {stats.embedding ? 'embedding 向量' : 'BM25'}
         </span>
       </div>
@@ -196,7 +196,7 @@ function SearchColumn({ onOpen }: { onOpen: (id: string) => void }) {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && run()}
           placeholder="搜索 ATT&CK / 恶意软件 / 组织…"
-          className="min-w-0 flex-1 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-[12px] text-fg outline-none transition-colors placeholder:text-text-3 focus:border-line-3"
+          className="min-w-0 flex-1 rounded border border-hairline bg-panel px-3 py-1.5 text-[12px] text-fg outline-none transition-colors placeholder:text-text-3 focus:border-line-3"
         />
         <button
           onClick={run}
@@ -206,12 +206,12 @@ function SearchColumn({ onOpen }: { onOpen: (id: string) => void }) {
           {busy ? '…' : '检索'}
         </button>
       </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {hits.map((h) => (
           <button
             key={h.id}
             onClick={() => onOpen(h.id)}
-            className="mb-1.5 flex w-full flex-col gap-1 rounded-xl border border-hairline bg-overlay px-3 py-2 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
+            className="flex w-full flex-col gap-1 border-b border-hairline px-3 py-2 text-left transition-colors hover:bg-overlay last:border-b-0"
           >
             <div className="flex w-full items-center gap-2">
               <span className="flex-none rounded border border-hairline px-1.5 py-px text-[9px] text-text-2">
@@ -222,9 +222,9 @@ function SearchColumn({ onOpen }: { onOpen: (id: string) => void }) {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-overlay">
+              <div className="h-0.5 flex-1 overflow-hidden rounded bg-overlay">
                 <div
-                  className="h-full rounded-full bg-text-1"
+                  className="h-full rounded bg-text-1"
                   style={{ width: `${Math.min((h.score / maxScore) * 100, 100)}%` }}
                 />
               </div>
@@ -274,9 +274,9 @@ function Matrix({
       <div className="scroll-thin min-h-0 flex-1 overflow-auto">
       <div className="flex min-w-max gap-2 p-1">
         {tactics.map((t) => (
-          <div key={t.tactic} className="flex w-[168px] flex-none flex-col gap-2">
+          <div key={t.tactic} className="flex w-[168px] flex-none flex-col">
             {/* column header */}
-            <div className="flex-none rounded-xl bg-overlay px-2.5 py-2" title={t.tactic}>
+            <div className="flex-none border-b border-hairline px-2.5 py-2" title={t.tactic}>
               <div className="truncate text-[11px] font-semibold text-text-1">
                 {t.name_cn || t.tactic}
               </div>
@@ -295,7 +295,7 @@ function Matrix({
                 key={tech.id}
                 title={`${tech.id} · ${tech.name}`}
                 onClick={() => onOpen(tech.id)}
-                className="flex flex-col gap-0.5 rounded-xl border border-hairline bg-panel px-2.5 py-1.5 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
+                className="flex flex-col gap-0.5 border-b border-hairline px-2.5 py-1.5 text-left transition-colors hover:bg-overlay"
               >
                 <span className="font-mono text-[9px] text-text-2">{tech.id}</span>
                 <span className="line-clamp-2 text-[10px] leading-[1.35] text-fg">
@@ -334,11 +334,11 @@ export function KnowledgeView() {
   return (
     <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-5 pb-4">
       <div className="flex flex-none items-baseline gap-4 px-1">
-        <h1 className="text-[20px] font-semibold text-fg">
+        <h1 className="text-[13px] font-semibold text-fg">
           知识图谱
         </h1>
         <span className="eyebrow">攻击知识，尽收眼底</span>
-        <span className="text-[13px] text-text-3">
+        <span className="text-[11px] text-text-3">
           蓝方知识底蕴 · ATT&CK + Malpedia + 沙箱指南
         </span>
       </div>
@@ -351,7 +351,7 @@ export function KnowledgeView() {
           <header className="panel-title">
             <span>{mode === 'graph' ? 'ATT&CK 网络' : 'ATT&CK 矩阵'}</span>
             {/* 图谱 / 矩阵 切换 */}
-            <div className="ml-2 flex items-center rounded-full border border-hairline bg-overlay p-0.5 normal-case">
+            <div className="ml-2 flex items-center rounded border border-hairline bg-overlay p-0.5 normal-case">
               {(
                 [
                   ['graph', '图谱'],
@@ -361,7 +361,7 @@ export function KnowledgeView() {
                 <button
                   key={k}
                   onClick={() => setMode(k)}
-                  className={`rounded-full px-3 py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
+                  className={`rounded px-3 py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
                     mode === k
                       ? 'bg-ink text-bg'
                       : 'text-text-3 hover:text-text-1'

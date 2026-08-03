@@ -116,9 +116,11 @@ class Controller:
             try:
                 result = await runner.run(
                     agent, prompt,
-                    # DeepSeek 推理模型单轮可达 1-2 分钟；240s 会把多数
-                    # 红方回合静默截断（timeout 现在会如实发错误事件）。
-                    max_turns=10, timeout=600,
+                    # DeepSeek 推理模型单轮可达 1-2 分钟；10 turns 对
+                    # 多目标场景不够（实测被 MaxTurnsExceeded 截断，
+                    # 红方只扫不利用 → 遥测无痕 → 蓝方无从检测）。
+                    # 30 turns + 900s：允许完整「侦察→利用→横向→申报」。
+                    max_turns=30, timeout=900,
                     pause_event=self._red_paused,
                     stop_event=self._stop_red,
                     task_registry=self._red_stream_tasks,
