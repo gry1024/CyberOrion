@@ -68,6 +68,13 @@ def _host_equiv(attack_target: str, scenario: Any) -> set:
         if attack_target in (t.name, t.container) or \
                 attack_target == getattr(t, "ip", ""):
             names |= {t.name, t.container}
+    # 红方有时用宿主映射 127.0.0.1/localhost 访问 SSH 目标：无法归属到
+    # 具体容器时，展开为全部带 SSH 服务的目标（蓝方告警 host 匹配即可）。
+    if attack_target in ("127.0.0.1", "localhost", "0.0.0.0"):
+        for t in targets.values():
+            svcs = (t.services or {}).values()
+            if any(getattr(s, "proto", "") == "ssh" for s in svcs):
+                names |= {t.name, t.container}
     # "web" 泛化：任何带 http 服务的目标都算命中。
     if attack_target == "web":
         for t in targets.values():
