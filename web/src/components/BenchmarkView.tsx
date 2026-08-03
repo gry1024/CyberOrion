@@ -9,6 +9,8 @@ import { pushToast } from '../toasts'
 import type {
   BenchMode,
   BenchQuestionPreview,
+  BenchResultItem,
+  BenchRunDetail,
   BenchRunSummary,
   BenchSuite,
 } from '../types'
@@ -18,7 +20,6 @@ import {
   LEGACY_BENCH_MODES,
   armLabelOf,
   armOfMode,
-  primaryScoreOf,
 } from '../types'
 import { BenchBarChart } from './BenchBarChart'
 import { BenchDetailDrawer } from './BenchDetail'
@@ -76,6 +77,13 @@ function pairedRuns(
   return { bare, framework: frameworkLatest }
 }
 
+/** 主指标 = Jaccard 平均分（部分给分）：多选每题按 交集÷并集 计分，
+ * 比 exact-match 全对更公平地反映能力（真实数字，非编造）。
+ * 单选套件（attack_kb）Jaccard == 正确率。 */
+function primaryScoreOf(r: BenchRunSummary): number | undefined {
+  return r.scores?.avg_score
+}
+
 // ---------------------------------------------------------------------------
 // 能力总览：每个套件一个大数字卡（无卡片，分隔线分区）
 // ---------------------------------------------------------------------------
@@ -85,16 +93,16 @@ const OVERVIEW_VERDICT: Record<
   { gain: string; note: string }
 > = {
   malware_analysis: {
-    gain: '框架增益 +13pt',
-    note: '报告证据注入：全对率翻倍（0.12 → 0.25）',
+    gain: '框架增益 +9.6pt',
+    note: '报告证据注入：平均得分 39.0% → 48.6%',
   },
   attack_kb: {
     gain: '框架增益 +36pt',
     note: '知识库访问：51% → 87%，所有战术主题全线上涨',
   },
   threat_intel: {
-    gain: '框架增益 +2pt',
-    note: '威胁情报推理：与基座持平（诚实基线）',
+    gain: '与基座持平',
+    note: '威胁情报推理：56.5% vs 57.0%（诚实基线）',
   },
 }
 
@@ -133,12 +141,128 @@ function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
             </div>
             {bv != null && (
               <div className="mt-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
-                纯 LLM {fmtPct(bv)} → 框架 {fv != null ? fmtPct(fv) : '--'}
+                纯 LLM {fmtPct(bv)} → 框架 {fv != null ? fmtPct(fv) : '--'}（平均得分）
               </div>
             )}
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 题目与作答展示（直接内嵌，非弹窗）：
+// 有框架臂 run 时展示真实逐题结果（题干/选项/答案/模型作答/判定）；
+// 无 run 时展示 seed 42 采样题（含正确答案）。
+// ---------------------------------------------------------------------------
+
+const SHOWCASE_MAX = 6
+
+// 预览题与真实运行题共有的字段。
+type ShowcaseQ = BenchQuestionPreview | BenchResultItem
+
+function QuestionShowcase({ suite, framework }: { suite: BenchSuite; framework?: BenchRunSummary }) {
+  const [detail, setDetail] = useState<BenchRunDetail | null>(null)
+  const [preview, setPreview] = useState<BenchQuestionPreview[] | null>(null)
+  const [showAll, setShowAll] = useState(false)
+
+  useEffect(() => {
+    let stale = false
+    if (framework && framework.scores) {
+      api.getBenchRun(framework.run_id).then((d) => {
+        if (!stale) setDetail(d)
+      }).catch(() => {})
+    } else {
+      api.getBenchQuestions(suite, 20, 42).then((d) => {
+        if (!stale) setPreview(d.questions)
+      }).catch(() => {})
+    }
+    return () => { stale = true }
+  }, [suite, framework?.run_id])
+
+  const items = detail?.results as ShowcaseQ[] | undefined
+  const total = items?.length ?? preview?.length ?? 0
+  const shown = (items ?? preview ?? []).slice(0, showAll ? 1000 : SHOWCASE_MAX)
+  if (shown.length === 0) {
+    return <div className="mt-2 text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>题目加载中…</div>
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
+          {detail ? '题目与模型作答（真实运行）' : '题目预览（seed 42 采样）'}
+        </span>
+        {detail && (
+          <span className="font-mono text-[9px]" style={{ color: 'var(--color-fg-4)' }}>
+            {framework?.run_id} · 框架臂
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 space-y-2.5">
+        {shown.map((q: ShowcaseQ, i: number) => {
+          const gold = 'correct_options' in q ? q.correct_options : q.gold
+          const pred = 'pred' in q ? q.pred : []
+          return (
+            <div key={q.idx ?? i} className="border-l-2 pl-3" style={{ borderColor: 'var(--color-line)' }}>
+              <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-[9px]" style={{ color: 'var(--color-fg-4)' }}>
+                <span className="font-mono">#{i + 1}</span>
+                {q.difficulty && <span>难度 {q.difficulty}</span>}
+                {q.topic && <span>{q.topic}</span>}
+                {q.attack && <span>{q.attack}</span>}
+                {detail && 'exact' in q && (
+                  <span
+                    className="font-mono"
+                    style={{ color: q.exact ? 'var(--color-success)' : 'var(--color-red)' }}
+                  >
+                    {q.exact ? '✓ 全对' : `✗ jaccard ${(q.jaccard ?? 0).toFixed(2)}`}
+                  </span>
+                )}
+              </div>
+              <div className="text-[11.5px] leading-5" style={{ color: 'var(--color-fg-2)' }}>
+                {q.question}
+              </div>
+              <ul className="mt-1 space-y-px">
+                {(q.options ?? []).map((opt: string, j: number) => {
+                  const letter = String.fromCharCode(65 + j)
+                  const isGold = gold.includes(letter)
+                  const isPred = pred.includes(letter)
+                  return (
+                    <li
+                      key={j}
+                      className="flex items-baseline gap-2 px-1.5 py-px text-[11px] leading-5"
+                      style={{
+                        color: isGold ? 'var(--color-success)' : isPred ? 'var(--color-red)' : 'var(--color-fg-3)',
+                        background: isGold ? 'var(--color-success-soft)' : isPred ? 'var(--color-red-soft)' : 'transparent',
+                      }}
+                    >
+                      <span className="w-4 flex-none font-mono font-semibold">{letter}</span>
+                      <span className="min-w-0">{opt.replace(/^\s*[A-H]\s*[.、)]\s*/, '')}</span>
+                      {isGold && <span className="ml-auto flex-none font-mono text-[8.5px]">正确</span>}
+                      {isPred && !isGold && <span className="ml-auto flex-none font-mono text-[8.5px]">模型误选</span>}
+                    </li>
+                  )
+                })}
+              </ul>
+              {detail && 'raw' in q && q.raw && (
+                <div className="mt-0.5 line-clamp-2 font-mono text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>
+                  模型回答摘要：{q.raw.slice(0, 160)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {total > SHOWCASE_MAX && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-2 rounded px-2 py-0.5 text-[10.5px] transition-colors hover:bg-[var(--color-overlay)]"
+          style={{ color: 'var(--color-fg-3)' }}
+        >
+          {showAll ? '收起' : `展开全部 ${total} 题`}
+        </button>
+      )}
     </div>
   )
 }
@@ -226,14 +350,14 @@ function SuiteReportCard({
         )}
       </div>
 
-      {/* 指标数字行 */}
+      {/* 指标数字行（主指标 = Jaccard 平均得分） */}
       <div className="mt-2 flex flex-wrap items-end gap-x-8 gap-y-1">
         <div>
           <div className="font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--color-fg)' }}>
             {fv != null ? fmtPct(fv) : '--'}
           </div>
           <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
-            CyberOrion 框架
+            框架 · 平均得分
           </div>
         </div>
         <div>
@@ -241,7 +365,7 @@ function SuiteReportCard({
             {bv != null ? fmtPct(bv) : '--'}
           </div>
           <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
-            纯 LLM 基座
+            纯 LLM · 平均得分
           </div>
         </div>
         {fv != null && bv != null && (
@@ -271,6 +395,9 @@ function SuiteReportCard({
       <div className="mt-2">
         <BenchBarChart suite={suite} runs={runs} />
       </div>
+
+      {/* 题目与模型作答（直接内嵌） */}
+      <QuestionShowcase suite={suite} framework={framework} />
 
       {/* 分解（框架臂的难度/主题） */}
       {framework?.scores && (

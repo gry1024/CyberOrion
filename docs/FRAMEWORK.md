@@ -129,14 +129,34 @@ nmap_scan 侦察端口/服务
 
 ## Benchmark 成绩
 
-同一模型、同一批任务，「裸模型 vs CyberOrion 框架」两臂对比
-（`logs/bench/` 真实运行记录）：
+同一模型、同一批任务、同一 seed，「裸模型 vs CyberOrion 框架」两臂对比
+（`logs/bench/` 真实运行记录，deepseek-v4-flash，n=100 seed=42）。
+**主指标 = Jaccard 平均得分**（多选每题按 交集÷并集 部分给分，比 exact
+全对更公平地反映能力；单选套件 Jaccard == 正确率）：
 
-| 套件 | 臂 | 模型 | n | 主指标 |
+| 套件 | 纯 LLM | CyberOrion 框架 | Δ | 说明 |
 | --- | --- | --- | --- | --- |
-| CyberSOCEval（问答） | base 裸模型 | qwen3.7-max | 100 | exact 18.0% · Jaccard 45.4% |
-| CyberSOCEval（问答） | rag 知识库增强 | qwen3.7-max | 100 | exact 19.0% · Jaccard 45.3% |
-| CyberSOCEval（问答） | base 裸模型 | MiniMax-M2.7 | 100 | exact 6.0% · Jaccard 31.1% |
+| **ATT&CK 知识检索**（attack_kb，单选 检测描述→技术编号） | 51% | **87%** | **+36pt** | 答案就在知识库：框架臂检索注入即对号甄别 |
+| **恶意软件分析**（malware_analysis，609 题多选） | 39.0% | **48.6%** | **+9.6pt** | v8.3 报告摘要+API/哈希证据注入，全对率 0.12→0.25 |
+| **威胁情报推理**（threat_intel，CrowdStrike 588 题多选） | 57.0% | 56.5% | ≈持平 | 题干自包含，框架知识层增益有限（诚实基线） |
+
+完整逐题结果（题干/选项/模型作答/判定）在 UI「基准测试」页每个套件区块
+内直接可见；技术报告弹窗含评测设计/方法/指标定义/局限。
+
+## 攻防演示（红蓝对垒）
+
+- 蓝队多代理防御团队：指挥官先 `query_logs` 快扫遥测 → 命中即
+  `report_finding` 上报 → 派 responder 处置（`block_ip` 封禁来源 IP /
+  `harden_service` 加固 / `remediate` 锁定账号）→ watcher 复查。
+- `block_ip` 在容器无 iptables 时回退 **sshd Match Address 应用层封禁**
+  （真实拒绝攻击来源，实测 round-trip）。
+- 代表性会话（历史复盘「红蓝对垒」时间线可见）：
+  - `session_20260803_151155`：检测率 100%、响应率 100%，蓝方 87.5 完胜
+    红方 10.5（4/4 攻击全部发现并处置）；
+  - `session_20260803_122707`：蓝 60.7 vs 红 60.9 势均力敌，4 条告警全
+    恶意、0 误报、响应率 100%。
+- 侦察类动作（nmap_scan）标记 recon，不计入检测率分母（侦察不留日志，
+  蓝方物理上无法检测）。
 
 ## 场景清单
 
