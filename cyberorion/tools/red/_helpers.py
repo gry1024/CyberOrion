@@ -33,7 +33,8 @@ def _kw(name: str, pos: int, default: Any) -> Callable:
     return pick
 
 
-def _gt_record(technique: Any, target: Any, judge: Callable[[str], bool]):
+def _gt_record(technique: Any, target: Any, judge: Callable[[str], bool],
+               recon: bool = False):
     """装饰器：红方工具运行后记录地面真值。
 
     Args:
@@ -41,6 +42,8 @@ def _gt_record(technique: Any, target: Any, judge: Callable[[str], bool]):
             返回编号（当编号依赖工具参数时）。
         target: 目标名字符串，或同 technique 形式的 callable。
         judge: callable(result: str) -> bool，从工具自身输出判定成功与否。
+        recon: True 表示侦察类动作（nmap_scan 等）——记入攻击表仅供报告
+            展示，不计入检测率分母（侦察不留日志痕迹，蓝方无从检测）。
 
     绑定缺失（无活动会话）绝不能破坏工具，所有异常一律吞掉。
     """
@@ -57,7 +60,7 @@ def _gt_record(technique: Any, target: Any, judge: Callable[[str], bool]):
                     gt.record(
                         target=str(tgt), technique=str(tech),
                         action=fn.__name__, success=bool(judge(result)),
-                        evidence=str(result)[:300],
+                        evidence=str(result)[:300], recon=recon,
                     )
             except Exception:
                 pass

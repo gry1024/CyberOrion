@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS attacks (
     technique TEXT NOT NULL DEFAULT '',
     action TEXT NOT NULL DEFAULT '',
     success INTEGER NOT NULL DEFAULT 0,
-    evidence TEXT NOT NULL DEFAULT ''
+    evidence TEXT NOT NULL DEFAULT '',
+    recon INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,18 +145,22 @@ class TelemetryStore:
         evidence: str = "",
         ts: "float | None" = None,
         session_id: "str | None" = None,
+        recon: bool = False,
     ) -> int:
         """Insert a red ground-truth attack row; returns the row id.
+
+        ``recon``：True 表示侦察类动作（nmap_scan 等），不计入检测率
+        分母（侦察不留日志痕迹，蓝方无从检测）。
 
         Ground truth — must never be shown to the blue agent.
         """
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO attacks (ts, session_id, target, technique,"
-                " action, success, evidence) VALUES (?,?,?,?,?,?,?)",
+                " action, success, evidence, recon) VALUES (?,?,?,?,?,?,?,?)",
                 (ts if ts is not None else time.time(),
                  self._sid(session_id), target, technique, action,
-                 1 if success else 0, evidence),
+                 1 if success else 0, evidence, 1 if recon else 0),
             )
             self._conn.commit()
             return int(cur.lastrowid)

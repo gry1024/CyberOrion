@@ -84,6 +84,79 @@ def _iptables(ip: str, flag: str, container: str) -> "tuple[bool, str]":
     return False, (text or f"docker exec rc={rc}")[:120]
 
 
+# --------------------------------------------------------------------------- #
+# sshd 应用层封禁（容器无 iptables/NET_ADMIN 时的真实阻断机制）
+#
+# 在 /etc/ssh/sshd_config 追加：
+#   Match Address <ip>
+#       DenyUsers *
+# 然后重载 sshd —— 该来源 IP 的全部 SSH 登录被服务端拒绝（连接可见、
+# 爆破必败），是真实生效的封禁，且对弱 SSH 靶机（唯一 SSH 攻击面）
+# 直接压制红方。unblock 时移除对应 Match 块并再次重载。
+# --------------------------------------------------------------------------- #
+_MATCH_RE = re.compile(
+    r"(?ms)^Match Address (\S+)\n[ \t]+DenyUsers \*[ \t]*$")
+
+
+def _sshd_present(container: str) -> bool:
+    rc, out, err = _docker_exec(
+        container, f"test -f {_SSHD_CONFIG} && echo yes", timeout=15)
+    return rc == 0 and "yes" in ((out or "") + (err or ""))
+
+
+def _sshd_reload(container: str) -> "tuple[bool, str]":
+    # sshd 重载：SIGHUP（容器内直接 pkill -HUP sshd）。
+    rc, out, err = _docker_exec(
+        container, "pkill -HUP sshd 2>&1 || kill -HUP $(cat /var/run/sshd.pid) 2>&1",
+        timeout=15,
+    )
+    if rc == 0:
+        return True, "ok"
+    return False, ((out or "") + (err or ""))[:100]
+
+
+def _sshd_block(ip: str, flag: str, container: str) -> "tuple[bool, str]":
+    """sshd Match Address 封禁/解封（-I 封禁 / -D 解封）。"""
+    rc, out, err = _docker_exec(
+        container, f"test -f {_SSHD_CONFIG} && echo yes", timeout=15)
+    if rc != 0:
+        # docker 本身不可达时透传真实错误（如 "Cannot connect to the
+        # Docker daemon"），便于诊断；否则视为无 sshd。
+        text = ((out or "") + (err or "")).strip()
+        if text:
+            return False, text[:120]
+        return False, "容器无 sshd，不支持应用层封禁"
+    rc, out, err = _docker_exec(
+        container, f"cat {_SSHD_CONFIG}", timeout=15)
+    if rc != 0:
+        return False, "读取 sshd_config 失败"
+    conf = (out or "") + (err or "")
+
+    if flag == "-D":
+        # 移除该 IP 的 Match 块（含前导换行，避免留空行）。
+        new = _MATCH_RE.sub("", conf)
+        if new == conf:
+            return False, f"该 IP {ip} 未在 sshd 封禁列表中"
+    else:
+        blocked_ips = [m.group(1) for m in _MATCH_RE.finditer(conf)]
+        if ip in blocked_ips:
+            return False, f"{ip} 已在封禁列表中"
+        block = f"\n# CyberOrion block {ip}\nMatch Address {ip}\n    DenyUsers *\n"
+        new = conf.rstrip() + block
+
+    rc, _out, _err = _docker_exec(
+        container,
+        f"cat > {_SSHD_CONFIG} << 'EOF'\n{new}\nEOF",
+        timeout=15,
+    )
+    if rc != 0:
+        return False, "写入 sshd_config 失败"
+    ok, msg = _sshd_reload(container)
+    if not ok:
+        return False, f"sshd 重载失败: {msg}"
+    return True, "sshd Match Address 封禁已生效" if flag == "-I" else "sshd 封禁已解除"
+
+
 @function_tool
 def block_ip(ip: str, container: str = "", duration_minutes: int = 0) -> str:
     """在目标容器上用 iptables 封禁一个 IP。
@@ -107,6 +180,9 @@ def block_ip(ip: str, container: str = "", duration_minutes: int = 0) -> str:
     ok_any = False
     for c in targets:
         ok, msg = _iptables(ip, "-I", c)
+        if not ok:
+            # 容器无 iptables/NET_ADMIN：回退 sshd 应用层封禁（真实生效）。
+            ok, msg = _sshd_block(ip, "-I", c)
         ok_any = ok_any or ok
         lines.append(f"  {c}: {'已封禁' if ok else '失败 - ' + msg}")
     if ok_any and duration_minutes and duration_minutes > 0:
@@ -128,7 +204,8 @@ def _auto_unblock(ip: str, containers: "list[str]") -> None:
     """duration 到期后的自动解封（后台线程，静默失败）。"""
     for c in containers:
         try:
-            _iptables(ip, "-D", c)
+            if not _iptables(ip, "-D", c)[0]:
+                _sshd_block(ip, "-D", c)
         except Exception:
             pass
 
@@ -154,6 +231,8 @@ def unblock_ip(ip: str, container: str = "") -> str:
     lines = [f"解封 {ip}："]
     for c in targets:
         ok, msg = _iptables(ip, "-D", c)
+        if not ok:
+            ok, msg = _sshd_block(ip, "-D", c)
         lines.append(f"  {c}: {'已解封' if ok else '失败 - ' + msg}")
     return _clip("\n".join(lines))
 

@@ -74,6 +74,7 @@ class TestComputeMetrics:
 
         assert m["totals"] == {
             "attacks_total": 4, "attacks_verified": 3,
+            "attacks_recon": 0,
             "alerts": 4, "alerts_malicious": 3,
         }
         assert m["tp"] == 2 and m["fn"] == 1 and m["fp"] == 1

@@ -61,11 +61,10 @@ if TYPE_CHECKING:
     from ..scenarios import Scenario
 
 # 子代理单次任务的最大轮数与墙钟超时（秒）。DeepSeek 推理模型单轮可达
-# 1-2 分钟，8 轮预算下 420s 是合理上限；超时【必须】产生错误事件
-# （run_with_timeout 保证——SDK 的 stream_events 会吞掉 CancelledError，
-# asyncio.wait_for 因此从不抛 TimeoutError，见 agent_runner 模块注释）。
-_SUBAGENT_MAX_TURNS = 8
-_SUBAGENT_TIMEOUT = 420
+# 1-2 分钟；watcher 要对 3 台主机宽查+取证，8 轮经常不够（实测多场对局
+# watcher 未跑完就超时/截断 → 查不到攻击）。12 轮 + 480s 覆盖完整巡查。
+_SUBAGENT_MAX_TURNS = 12
+_SUBAGENT_TIMEOUT = 480
 # 返回给指挥官的子代理报告最大长度（超出截断）。
 _REPORT_MAX_CHARS = 2500
 
@@ -140,18 +139,17 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
         "tools": [query_logs, network_summary, process_audit,
                   file_integrity, list_alerts],
         "prompt": """你是 CyberOrion 蓝队的【哨兵】，负责巡逻检测。
-对目标清单中的每台主机执行全面巡查：
-  1. query_logs 先宽后窄：先按 host/source 拉最近一段时间的全部事件
-     （如 query_logs(host, since_minutes=60) 或按 source=auth /
-     web_access 拉取），从全景中找 high/critical 事件与攻击特征
-     （爆破失败+成功登录、命令注入元字符、SQLi、webshell 路径）；
-     再对命中点做 1-2 次精确查询取证。
-  2. network_summary 对比监听端口基线，高亮可疑端口；
-  3. process_audit 标记可疑进程（反弹 shell/下载执行/挖矿）；
-  4. file_integrity 对比关键文件基线（新增/修改/删除，webshell
-     常出现在 web 目录）。
-预算纪律：【不要】为每个关键词单独发一次查询 —— 宽查询命中后才有
-必要窄查；每台主机的工具调用控制在 6 次以内，把轮次留给结论。
+对目标清单中的每台主机执行快速全面巡查（时间预算紧张，务必快）：
+  1. query_logs 每台主机【只发一次宽查】：query_logs(host, since_minutes=30)
+     拉最近 30 分钟全部事件，从全景里找 high/critical 与攻击特征
+     （爆破失败+成功登录、命令注入元字符、SQLi、webshell 路径、
+     异常来源 IP）；全景无命中的主机直接跳过，不逐关键词穷举。
+  2. 仅对命中主机做 1-2 次精确查询取证（锁定来源 IP / 时间窗 / 技术）。
+  3. 有命中的话，network_summary / process_audit / file_integrity 三者
+     中最多再选 1 个补充证据（哪条最可能坐实攻击用哪条），不要全做。
+预算纪律：【核心】优先把全部主机快速扫一遍出结论，而不是对一台主机
+深挖到底——指挥官靠你的全景结论决定派谁处置。每台主机工具调用
+不超过 4 次；没有发现就明确说\"未发现异常\"，绝不臆测。
 你没有处置权限：只负责发现和取证，把可疑点写进结论交给指挥官。
 """ + _CONCLUSION_BLOCK,
     },
@@ -416,37 +414,44 @@ _ORCHESTRATOR_TEMPLATE = """你是 CyberOrion 蓝队的【指挥官】，带领�
 你对红队的行动【一无所知】，只能像真实 SOC 一样靠遥测证据发现攻击，
 但你不必事事亲为 —— 你的职责是组织团队：决定派谁、做什么、汇总结论。
 
+== 你的工具 ==
+  query_logs(host, source, since_minutes, text) - 直接检索遥测事件
+    （每次巡逻【第一步】用它扫最近 15 分钟：全部主机、无过滤，
+    从命中里找爆破/登录/注入/webshell 特征 —— 快，一条调用出全景）；
+  list_alerts / report_finding / search_attack_kb / lookup_technique
+  dispatch_task(role, mission) - 派遣子代理（见下）
+
 == 你的团队（用 dispatch_task(role, mission) 派遣） ==
-  watcher   哨兵 — 全面巡逻检测（日志/网络/进程/文件基线）
+  watcher   哨兵 — 巡逻检测（日志/网络/进程/文件基线）
   analyst   研判 — 把可疑线索定性：ATT&CK 技术、受害主机、失陷程度
   responder 处置 — 封禁 IP / 加固服务 / 清除后门与 webshell
   hunter    狩猎 — 失陷排查与现场清理（文件 + 进程维度）
 
 == 指挥 SOP（每次巡逻都执行） ==
-  ① 侦察【并行】：在【同一个回合】里用两次独立的 dispatch_task 调用
-     同时派遣 watcher（日志/网络/进程/文件基线全面巡查）和 hunter
-     （失陷排查：文件篡改 + 可疑进程）——多个 dispatch_task 会并发
-     执行，不必等 watcher 回来才派 hunter；
-  ② 研判：任一子代理报出可疑点后，派 analyst 深挖定性（带上具体
-     发现作为 mission 背景）；简单明了的威胁（如日志里全是爆破
-     失败+成功登录）可跳过 analyst 直接定性；
-  ③ 上报：威胁一确认【立即】亲自 report_finding（host/technique/
-     verdict/confidence/evidence），这是评分接口，绝不能等到处置
-     完成才上报；technique 用 ATT&CK 编号（拿不准先 search_attack_kb /
-     lookup_technique 核对）；
-  ④ 处置【可并行】：派 responder 按建议处置（mission 中明确写出
-     受害主机、技术编号、来源 IP、需清除的对象）；多处失陷痕迹可
-     同回合并行派遣 responder 与 hunter 分头清理；
-  ⑤ 复查：处置后派 watcher 复查受害主机，确认威胁已消除；
-  ⑥ 汇总：最后输出一段中文防御总结。
+  ⓪ 快扫【第一步，必做】：亲自 query_logs(since_minutes=15) 一次
+     拉最近 15 分钟全部遥测。命中 high/critical 或攻击特征
+     （SSH 爆破/登录、命令注入、webshell、异常来源 IP）→ 进入
+     ①；无命中 → 派 watcher 按常规巡逻后结束本轮。
+  ① 定性：简单明了的威胁（日志直接显示爆破+成功登录、命令注入）
+     【不需要派 analyst】，立即按遥测证据定性（T1110/T1078/T1059/
+     T1505.003...）并记录受害主机与来源 IP；拿不准才派 analyst。
+  ② 上报【立即】：威胁一确认马上 report_finding（host/technique/
+     verdict/confidence/evidence），这是评分接口，绝不能等处置完成。
+  ③ 处置【立即，可并行】：直接派 responder 处置（mission 写清
+     受害主机、技术编号、来源 IP、需清除对象：SSH 爆破→封禁来源
+     IP block_ip + harden_service(ssh)；登录→remediate 锁定账号；
+     webshell→清除文件）；多处失陷可同回合并行派 responder 与
+     hunter 分头处理。
+  ④ 复查：处置后派 watcher 复查受害主机，确认威胁已消除。
+  ⑤ 汇总：输出一段中文防御总结。
 
 == 铁律 ==
-  - 检测必须基于遥测证据，禁止臆测；evidence 引用具体事件/差异。
+  - 检测必须基于遥测证据（query_logs 的返回），禁止臆测；evidence
+    引用具体事件文本。
   - confidence 诚实给：证据直接且唯一指向攻击才给 0.8+。
-  - 时间预算有限：一个角色一件事只 dispatch 一次，结论拿到就推进
-    下一步，【禁止】重复派遣同一角色做同一件事；不要在处置细节上
-    反复纠缠，止血成功（加固/锁定生效）即可进入复查。
-  - 处置前必须先有定性结论；处置后必须复查。
+  - 【快】发现威胁后立即上报与处置，不要等子代理跑完一轮完整
+    巡查 —— responder 的封禁/加固比 watcher 的完整取证更能止损。
+  - 处置前必须有定性结论；处置后必须复查。
   - 不知道就说不知道，绝不编造战果。
 
 == 防守目标（仅结构信息，你没有也不应寻找任何凭据/漏洞清单） ==
@@ -470,6 +475,7 @@ def build_blue_team(scenario: "Scenario | None" = None) -> Agent:
 
     tools = [
         dispatch_task,
+        query_logs,
         report_finding, list_alerts,
         search_attack_kb, lookup_technique,
     ] + _scratchpad_tools()

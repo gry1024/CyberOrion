@@ -121,7 +121,10 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
                      key=lambda r: float(r.get("ts") or 0))
     alerts = sorted(store.query_alerts(limit=100000),
                     key=lambda r: float(r.get("ts") or 0))
-    verified = [a for a in attacks if a.get("success")]
+    # 侦察类动作（nmap_scan 等）不留日志痕迹、蓝方无从检测：
+    # 从检测率分母排除，只影响攻击计数展示，不计入 TP/FN。
+    verified = [a for a in attacks
+                if a.get("success") and not a.get("recon")]
 
     detections: list[dict] = []
     missed: list[dict] = []
@@ -195,6 +198,9 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     fp = len(false_positives)
     n_verified = len(verified)
     n_malicious = len(malicious_alerts)
+    # 侦察（recon）与可检测攻击分开统计：侦察不留日志、蓝方无从检测，
+    # 只作展示（红方时间线标注），不进检测率分母。
+    n_recon = sum(1 for a in attacks if a.get("recon"))
 
     detection_rate = tp / n_verified if n_verified else 0.0
     fp_rate = fp / n_malicious if n_malicious else 0.0
@@ -220,13 +226,14 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     blue_score = (50.0 * detection_rate
                   + 25.0 * (1.0 - min(fp_rate, 1.0))
                   + 25.0 * response_rate)
-    red_score = (100.0 * n_verified / len(attacks)) if attacks else 0.0
+    red_score = (100.0 * n_verified / max(len(attacks) - n_recon, 1)) if attacks else 0.0
 
     return {
         "window_sec": int(window_sec),
         "totals": {
             "attacks_total": len(attacks),
             "attacks_verified": n_verified,
+            "attacks_recon": n_recon,
             "alerts": len(alerts),
             "alerts_malicious": n_malicious,
         },

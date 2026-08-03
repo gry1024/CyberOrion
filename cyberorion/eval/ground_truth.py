@@ -44,8 +44,12 @@ class GroundTruth:
         action: str,
         success: bool,
         evidence: str = "",
+        recon: bool = False,
     ) -> int:
         """Record one red attack attempt; returns the attacks row id.
+
+        ``recon``：侦察类动作（nmap_scan 等）——记入攻击表供报告展示，
+        但不计入检测率分母。
 
         Safe to call from sync tool code (worker threads): the store is
         thread-safe and the event bus is published via ``publish_sync``.
@@ -54,12 +58,13 @@ class GroundTruth:
         row_id = self.store.insert_attack(
             target=target, technique=technique, action=action,
             success=success, evidence=evidence, ts=ts,
-            session_id=self.session_id,
+            session_id=self.session_id, recon=recon,
         )
         self._publish({
             "id": row_id, "ts": ts, "session_id": self.session_id,
             "target": target, "technique": technique, "action": action,
             "success": bool(success), "evidence": evidence,
+            "recon": bool(recon),
         })
         return row_id
 

@@ -22,7 +22,8 @@ _FALLBACK_PORTS = (22, 80, 443, 3306, 8080, 8983, 28080)
 
 @function_tool
 @_gt_record("T1046", _kw("target", 0, ""),
-            lambda r: "OPEN PORTS:" in r and "(none found" not in r)
+            lambda r: "OPEN PORTS:" in r and "(none found" not in r,
+            recon=True)
 def nmap_scan(target: str, ports: str = "top100") -> str:
     """红方侦察：对目标主机做 nmap 端口/服务扫描。
 
