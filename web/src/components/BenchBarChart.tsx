@@ -90,12 +90,20 @@ function fmtPctLabel(v: number): string {
   return `${(v * 100).toFixed(1)}%`
 }
 
-/** Latest scored run of one arm (runs already sorted oldest-first). */
+/** Latest scored run of one arm, PAIRED by n: only consider runs whose n
+ * matches the other arm's latest run. Different n = different sampled
+ * questions — pairing them is meaningless (e.g. base n30 vs rag n20). */
 function latestOfArm(
   runs: BenchRunSummary[],
   arm: 'bare' | 'framework',
 ): BenchRunSummary | undefined {
-  return [...runs].reverse().find((r) => armOfMode(r.mode) === arm)
+  // 另一臂的最新 run 决定配对 n（runs 已按 run_id 升序）。
+  const other = arm === 'bare' ? 'framework' : 'bare'
+  const otherLatest = [...runs].reverse().find((r) => armOfMode(r.mode) === other)
+  const n = otherLatest?.n
+  return [...runs]
+    .reverse()
+    .find((r) => armOfMode(r.mode) === arm && (n == null || r.n === n))
 }
 
 /** 基座模型展示名：deepseek-* -> "DeepSeek"，其余取模型短名。 */

@@ -199,9 +199,9 @@ Androxgh0st's exploitation of CVE-2017-9841 via PHPUnit...\"）选择正确的
 **评分**：**exact-match 正确率**（主指标）+ Jaccard 部分分，按主题分组
 统计；解析失败与 LLM 调用失败单独计数。
 
-**两臂对比**：同 seed 同批题同模型。实测（deepseek-v4-flash, n=30,
-seed=42）：纯 LLM 33.3% → CyberOrion 框架 40.0%（Δ +6.7pt），Jaccard
-0.53 → 0.646。
+**两臂对比**：同 seed 同批题同模型。实测（deepseek-v4-flash, n=100,
+seed=42）：纯 LLM 32.0% → CyberOrion 框架 34.0%（Δ +2.0pt），Jaccard
+0.570 → 0.565（持平）。小样本（n=30）波动更大：正确率 +6.7pt。
 
 **说明**：题干自包含威胁上下文，不需要外部报告即可作答——与
 malware_analysis（题目引用沙箱报告但内容缺失）不同，本套件直接评测
