@@ -57,7 +57,19 @@ interface MetricDef {
   get: (scores: BenchScores) => number | undefined
 }
 
-function metricsFor(_suite: BenchSuite): MetricDef[] {
+function metricsFor(suite: BenchSuite): MetricDef[] {
+  if (suite === 'attack_kb') {
+    // 单选套件：Jaccard 恒等于 exact-match（选中=1/未中=0），
+    // 只画一个指标，避免两个必然相同的柱误导。
+    return [
+      {
+        key: 'correct_mc_pct',
+        label: '选择题正确率',
+        desc: '单选题 exact-match（单选 = Jaccard）',
+        get: (s) => s.correct_mc_pct,
+      },
+    ]
+  }
   return [
     {
       key: 'correct_mc_pct',

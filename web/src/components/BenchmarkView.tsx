@@ -173,12 +173,39 @@ const SUITE_DOCS: Record<string, string> = {
 选项中选出正确项（同战术干扰项，确定性洗牌）。**答案就在知识库里**——
 纯 LLM 只能靠记忆背诵，框架臂把检索结果注入提示即可对号甄别。
 
+**这是单选题**：每题只有一个正确答案，因此 Jaccard 部分分恒等于 exact-match
+正确率（选中=1、未中=0）——图表中两个指标数值相同是数学必然，不是重复造
+数据。
+
 **这就是框架有效性最直接的证据**：两臂同 seed 同批题同模型，唯一差异是
 框架的知识库层。实测（deepseek-v4-flash, n=100, seed=42）：纯 LLM 51% →
 CyberOrion 框架 87%（+36pt），所有战术主题全线上涨。
 
-**评分**：单选题 exact-match 正确率（= Jaccard）。解析失败与 LLM 调用
-失败单独计数。`,
+**评分**：单选题 exact-match 正确率。解析失败与 LLM 调用失败单独计数。`,
+  threat_intel: `## 威胁情报推理 · CrowdStrike 报告问答
+
+**数据源**：CyberSecEval crwd_meta 的 report_questions.json（588 题），
+由 CrowdStrike 真实威胁报告（Androxgh0st、SUNBURST、XEReverseShell 等）
+人工标注生成。
+
+**任务**：多选题，每题基于一个真实威胁背景（题干自包含，如 \"Given
+Androxgh0st's exploitation of CVE-2017-9841 via PHPUnit...\"）选择正确的
+安全控制测试方法论 / 检测建议 / 缓解措施。最后一行严格输出
+\`ANSWER: [\"A\",\"C\"]\`。
+
+**对 AI 的期望**：以题干威胁背景为判断依据，逐项裁决（是/否 + 理由），
+宁缺毋滥但禁止弃答。rag 臂注入 ATT&CK 知识库检索结果作为佐证。
+
+**评分**：**exact-match 正确率**（主指标）+ Jaccard 部分分，按主题分组
+统计；解析失败与 LLM 调用失败单独计数。
+
+**两臂对比**：同 seed 同批题同模型。实测（deepseek-v4-flash, n=30,
+seed=42）：纯 LLM 33.3% → CyberOrion 框架 40.0%（Δ +6.7pt），Jaccard
+0.53 → 0.646。
+
+**说明**：题干自包含威胁上下文，不需要外部报告即可作答——与
+malware_analysis（题目引用沙箱报告但内容缺失）不同，本套件直接评测
+LLM 的威胁情报推理能力。`,
 }
 
 function SuiteInfoModal({
@@ -448,22 +475,38 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
 // ---------------------------------------------------------------------------
 
 function CompareCharts({ runs }: { runs: BenchRunSummary[] }) {
+  const [infoSuite, setInfoSuite] = useState<BenchSuite | null>(null)
   const suites = useMemo(() => {
     const seen = new Set<BenchSuite>()
     for (const r of runs) {
       if (r.scores && !LEGACY_BENCH_MODES.has(r.mode)) seen.add(suiteOf(r))
     }
-    // 两套件都参与对比图。
-    return (['malware_analysis', 'attack_kb'] as BenchSuite[]).filter((s) =>
-      seen.has(s),
-    )
+    // 三个套件都参与对比图（有配对 run 的才显示）。
+    return (
+      ['malware_analysis', 'attack_kb', 'threat_intel'] as BenchSuite[]
+    ).filter((s) => seen.has(s))
   }, [runs])
   if (suites.length === 0) return null
   return (
     <>
       {suites.map((s) => (
-        <BenchBarChart key={s} suite={s} runs={runs} />
+        <div key={s}>
+          <BenchBarChart suite={s} runs={runs} />
+          {/* 每个图下方：本套件详细说明入口 */}
+          <div className="mt-1 flex justify-end">
+            <button
+              className="rounded px-2 py-0.5 text-[10.5px] transition-colors hover:bg-[var(--color-overlay)]"
+              style={{ color: 'var(--color-fg-3)' }}
+              onClick={() => setInfoSuite(s)}
+            >
+              ⓘ 套件说明 · {BENCH_SUITES[s].label}
+            </button>
+          </div>
+        </div>
       ))}
+      {infoSuite && (
+        <SuiteInfoModal suite={infoSuite} onClose={() => setInfoSuite(null)} />
+      )}
     </>
   )
 }

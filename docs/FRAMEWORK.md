@@ -14,8 +14,8 @@ CyberOrion 把一次真实 SOC 对抗搬进本地靶场：
 - **裁判**在服务端：红方 `claim_success` 由服务端用 ground truth 客观验证，
   蓝方 `report_finding` 与遥测攻击真值比对计算检测率/MTTD/蓝队分；
 - **Benchmark** 用同一模型对比「裸模型 vs 框架」两臂，量化脚手架的价值：
-  以 CyberSOCEval 知识问答（malware_analysis + attack_kb）为基准。
-  （CyberGym 真实漏洞 PoC 复现套件经实测后因数据/镜像体量过大已废弃移除。）
+  以 CyberSOCEval 知识问答（malware_analysis + attack_kb）与威胁情报推理
+  （threat_intel）为基准。
 
 ## 架构
 
@@ -137,9 +137,6 @@ nmap_scan 侦察端口/服务
 | CyberSOCEval（问答） | base 裸模型 | qwen3.7-max | 100 | exact 18.0% · Jaccard 45.4% |
 | CyberSOCEval（问答） | rag 知识库增强 | qwen3.7-max | 100 | exact 19.0% · Jaccard 45.3% |
 | CyberSOCEval（问答） | base 裸模型 | MiniMax-M2.7 | 100 | exact 6.0% · Jaccard 31.1% |
-
-（CyberGym PoC 复现套件曾实测 vanilla 20% / framework 40%（n=5），后因
-数据/镜像体量过大已废弃移除。）
 
 ## 场景清单
 
