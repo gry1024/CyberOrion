@@ -170,7 +170,7 @@ CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从
 ## Development
 
 ```bash
-/home/groy/cai/cai_env/bin/python -m pytest tests/ -q   # 316 项测试，无 docker/key 也能全绿
+/home/groy/cai/cai_env/bin/python -m pytest tests/ -q   # 317 项测试，无 docker/key 也能全绿
 ```
 
 `run.py` 是 legacy CLI 入口（旧同步回合制 Arena）：**不启动遥测与评分**——完整体验请用 `server.py`。
