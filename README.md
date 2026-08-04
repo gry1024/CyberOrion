@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/python-3.10+-blue">
   <img src="https://img.shields.io/badge/docker-required-blue">
   <img src="https://img.shields.io/badge/cai__framework-0.5.10-blue">
-  <img src="https://img.shields.io/badge/tests-316-green">
+  <img src="https://img.shields.io/badge/tests-317-green">
   <img src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
@@ -26,8 +26,10 @@
 | **真实裁判，不信嘴炮** | 红方"我成功了"必须经服务端裁判客观验证（外部评分器 `/done` > flag 比对 > `uid=` > 目标内部凭据）；红方每次工具调用自动落地面真值 |
 | **信息隔离** | 蓝方代码层面接触不到 attacks 表/ground_truth（静态测试看守）；指标引擎把红方真值与蓝方告警做时间-主机-技术三维对齐 |
 | **知识库 RAG** | 3204 条文档（ATT&CK v18 + Malpedia + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
-| **两大基准套件** | CyberSOCEval malware_analysis（609 题）+ attack_kb 知识访问测试（CyberGym PoC 复现套件经实测后因数据/镜像体量过大已废弃移除） |
-| **SOC 大屏前端** | 作战台（双终端 + 拓扑 + 时间线 + 实时评分）/ Benchmark / 历史复盘（AI 故事线）/ 知识图谱 四视图 |
+| **三大基准套件** | malware_analysis（609 题）+ attack_kb 知识访问（+36pt）+ threat_intel 威胁情报（588 题），Jaccard 平均得分主指标，同 seed 同模型双臂对比 |
+| **SOC 大屏前端** | 作战台（双栏流式 + 子代理人像）/ 基准测试（K3 报告风格 + 内嵌题目）/ 历史复盘（红蓝对垒时间线 + AI 故事线全屏）/ 知识图谱 四视图 |
+
+**完整复现教程见 [docs/REPRODUCE.md](docs/REPRODUCE.md)**（环境 / 靶机 / 对局 / Benchmark / 故障排查逐条验证）。
 
 ---
 
@@ -89,12 +91,16 @@ python server.py             # → http://localhost:8000（API 文档在 /docs�
 
 ### ⑥ 第一次对局（点哪里、看什么）
 
-1. **作战台**标签页：Header 左侧场景选 `web_basic`，点 **开始会话** —— 自动把靶场重置到易受攻击基线、启动遥测采集；
-2. 点 **红方开始** —— 中间红方终端滚动 CoT 思考 + nmap/ssh/http 工具调用，战果经 `claim_success` 裁判验证（✓/✗ 进时间线）；
-3. 点 **蓝方开始**（或 **自动巡逻**）—— 蓝方终端顶部出现**团队条**：指挥官派遣 watcher/analyst/responder/hunter 子代理时角色芯片依次点亮（执行中脉冲、完成绿✓，点击可按角色过滤），子代理报告以卡片形式插回输出流；
-4. 左栏看拓扑与告警，右栏看时间线与**实时评分**；点 **结束会话** 自动产出 `report.md` + `metrics.json`；
-5. 切到 **历史**标签页：选刚才的会话，看战役统计与完整时间线，点 **AI 复盘** 生成中文故事线报告；
-6. 切到 **知识图谱**标签页：浏览蓝队同源的 ATT&CK 知识库。
+1. **作战台**：左侧边栏点 **「＋ 新建会话」**（一键开始：会话→红方→蓝方自动启动）；
+2. **红方**（左栏）：流式 CoT + 工具调用（nmap/爆破/http/ssh_command/claim_success），
+   战果经裁判客观验证；
+3. **蓝方**（右栏）：顶部**子代理状态条**（人像 + 角色名，点击开完整档案：
+   System Prompt / 工具详解 / 调用条件 / 输出规范 / 通信逻辑），输出流逐条
+   标注 agent；检测→上报→处置（封禁/加固/锁定）→复查；
+4. 点 **停止** → 自动产出 `metrics.json`（检测率/响应率/双方分数）+
+   `report.md`；
+5. **历史复盘**：选会话 → **红蓝对垒**时间线 + **AI 复盘**（可全屏展开）；
+6. **基准测试**：三套件报告区（K3 风格）+ 内嵌题目 + 技术报告。
 
 **冒烟验证**（真实 LLM + docker 全链路硬断言；无 API key 自动 SKIP，不算失败）：
 
@@ -105,14 +111,18 @@ python scripts/e2e_fight.py   # 实战对抗：重置→红队打进→蓝队防
 
 ### ⑦ 跑 benchmark
 
-UI：Benchmark 标签页选 base/rag + 题量 n → 实时进度 → 历史对比图 + 逐题详情。CLI：
+UI：基准测试页三套件报告区（能力总览 → 每套件指标/图表/题目内嵌/技术报告）
+→ 运行控制条选套件/题量/臂 → 开始测试 → 实时进度 → 历史结果表。CLI：
 
 ```bash
-python scripts/run_bench.py --n 100 --mode both                            # CyberSOCEval base+rag 对比
-python scripts/run_bench.py --suite attack_kb --n 30 --mode both           # KB 访问能力测试
+python scripts/run_bench.py --n 100 --mode both --suite malware_analysis
+python scripts/run_bench.py --n 100 --mode both --suite attack_kb
+python scripts/run_bench.py --n 100 --mode both --suite threat_intel
 ```
 
-结果落盘 `logs/bench/<run_id>.json`。最新实测（n=100, seed=42, qwen3.7-max）：base 0.180/0.454，rag v6 0.190/0.451——完整结果史与局限见 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
+结果落盘 `logs/bench/<run_id>.json`。当前实测（n=100 seed=42 deepseek-v4-flash，
+Jaccard 平均得分）：attack_kb 51%→87%（+36pt）、malware_analysis 39.0%→48.6%
+（+9.6pt）、threat_intel ≈持平。完整结果史与局限见 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
 
 ---
 
@@ -127,7 +137,7 @@ python scripts/run_bench.py --suite attack_kb --n 30 --mode both           # KB 
 | `cve_log4j` | 仅 Log4Shell Solr（CVE-2021-44228 专项） | `docker compose up -d` |
 | `cve_cve-2024-4323` | CVE-Bench fluent-bit 靶栈 + 外部评分器 | `scripts/cve_target.sh up CVE-2024-4323` |
 
-CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从 CVE 元数据生成；端口约定应用 9090 / 评分器 9091，**同一时间只跑一个 CVE 靶栈**。
+CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从 CVE 元数据生成；端口约定应用 9090 / 评分器 9091，**同一时间只跑一个 CVE 靶栈**。场景切换：UI 控制条下拉 / `POST /api/scenario/select` / 环境变量 `CO_SCENARIO`。
 
 ---
 
