@@ -5,6 +5,7 @@ import { ArenaProvider } from './arena'
 import type { ViewKey } from './types'
 import { Sidebar } from './components/Sidebar'
 import { ArenaView } from './components/ArenaView'
+import { TrafficView } from './components/TrafficView'
 import { BenchmarkView } from './components/BenchmarkView'
 import { HistoryView } from './components/HistoryView'
 import { KnowledgeView } from './components/KnowledgeView'
@@ -19,6 +20,7 @@ export default function App() {
         <Sidebar view={view} onView={setView} />
         <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
           {view === 'arena' && <ArenaView />}
+          {view === 'traffic' && <TrafficView />}
           {view === 'bench' && (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
               <BenchmarkView />

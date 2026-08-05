@@ -319,7 +319,7 @@ FastAPI 单实例：`EventBus` + `SessionState` + `Controller`；启动时加载
 
 ## 12. 配置（环境变量）
 
-`.env` 放 CAI 仓库根（`/home/groy/cai/.env`），`server.py`/`run.py`/e2e 脚本启动时自动加载（`setdefault` 语义）。模板 [.env.example](../.env.example)。
+`.env` 放 CAI 仓库根（`<cai-repo>/.env`），`server.py`/`run.py`/e2e 脚本启动时自动加载（`setdefault` 语义）。模板 [.env.example](../.env.example)。
 
 | 变量 | 读取处 | 说明 |
 | --- | --- | --- |

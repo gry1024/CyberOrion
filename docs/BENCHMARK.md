@@ -8,7 +8,7 @@
 
 ## 1. 套件与题目
 
-- 数据集：`malware_analysis` 多选题（609 题），默认路径 `/home/groy/cai/benchmarks/cybersoceval/PurpleLlama/CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/questions.json`；
+- 数据集：`malware_analysis` 多选题（609 题），默认路径 `<cai-repo>/benchmarks/cybersoceval/PurpleLlama/CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/questions.json`；
 - 题目元数据：`topic` / `difficulty` / `attack`（所引用沙箱报告所属的恶意软件家族/类别，如 infostealers、ransomware、remcos）；
 - 采样：`sample_questions(questions, n, seed)` 固定 seed 确定性采样——**base 与 rag 回答同一批题目**，保证对比公平；
 - 单次 LLM 调用失败不中断整轮：记 `__LLM_ERROR__` 原文入库、该题记 wrong。
@@ -48,7 +48,7 @@
 **CLI**（推荐对比入口）：
 
 ```bash
-cd /home/groy/cai/cyberorion
+cd <cai-repo>/cyberorion
 set -a; source ../.env; set +a
 python scripts/run_bench.py --n 100 --mode both        # 纯 LLM vs 框架 同批题对比
 python scripts/run_bench.py --n 100 --mode both --show-questions   # 顺带打印逐题题干/判定

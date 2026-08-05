@@ -43,9 +43,11 @@ DEFAULT_STIX = _HERE / "data" / "enterprise-attack.json"
 DEFAULT_OUT = _HERE / "data" / "attack_kb.jsonl"
 DEFAULT_MALPEDIA = _HERE / "data" / "malpedia_families.json"
 DEFAULT_SANDBOX = _HERE / "data" / "sandbox_knowledge.json"
+DEFAULT_REGULATIONS = _HERE / "data" / "regulations.json"
+DEFAULT_CVE = _HERE / "data" / "cve_critical.json"
 
 # 构建器版本：v1 = 仅 ATT&CK STIX；v2 = + Malpedia 家族库 + 沙箱解读知识。
-KB_BUILDER_VERSION = 2
+KB_BUILDER_VERSION = 3
 
 # Malpedia 家族入库的 description 最小长度（过滤掉只有一行占位描述的家族）。
 MALPEDIA_MIN_DESC = 100
@@ -293,6 +295,44 @@ def load_sandbox_docs(
     return out
 
 
+def load_regulations_docs(reg_path: "str | Path" = DEFAULT_REGULATIONS) -> list[dict]:
+    """加载行业监管政策知识（type="regulation"）。"""
+    with open(reg_path, "r", encoding="utf-8") as f:
+        docs = json.load(f)
+    if not isinstance(docs, list):
+        raise ValueError("regulations.json 顶层必须是数组")
+    out = []
+    for d in docs:
+        doc = dict(d)
+        doc.setdefault("type", "regulation")
+        for key in ("id", "name", "description", "text"):
+            if not doc.get(key):
+                raise ValueError(f"监管政策文档缺少字段 {key}: {doc.get('id')}")
+        out.append(doc)
+    return out
+
+
+def load_cve_docs(cve_path: "str | Path" = DEFAULT_CVE) -> list[dict]:
+    """加载高危CVE漏洞知识（type="cve"）。"""
+    with open(cve_path, "r", encoding="utf-8") as f:
+        docs = json.load(f)
+    if not isinstance(docs, list):
+        raise ValueError("cve_critical.json 顶层必须是数组")
+    out = []
+    for d in docs:
+        doc = dict(d)
+        doc.setdefault("type", "cve")
+        for key in ("id", "name", "text"):
+            if not doc.get(key):
+                continue  # 跳过不完整记录
+        if not doc.get("text"):
+            continue
+        if not doc.get("description"):
+            doc["description"] = doc["text"][:300]
+        out.append(doc)
+    return out
+
+
 def write_jsonl(docs: list[dict], out_path: "str | Path" = DEFAULT_OUT) -> int:
     """把文档列表写入 JSONL，返回条数。"""
     out_path = Path(out_path)
@@ -317,12 +357,24 @@ def main(argv: "list[str] | None" = None) -> None:
                         help="沙箱报告解读知识 JSON 路径")
     parser.add_argument("--no-sandbox-docs", action="store_true",
                         help="不附加沙箱报告解读知识")
+    parser.add_argument("--regulations", default=str(DEFAULT_REGULATIONS),
+                        help="行业监管政策知识 JSON 路径")
+    parser.add_argument("--no-regulations", action="store_true",
+                        help="不附加监管政策知识")
+    parser.add_argument("--cve", default=str(DEFAULT_CVE),
+                        help="高危CVE漏洞知识 JSON 路径")
+    parser.add_argument("--no-cve", action="store_true",
+                        help="不附加CVE漏洞知识")
     args = parser.parse_args(argv)
     docs = build_docs(args.stix)
     if args.with_malpedia:
         docs += build_malpedia_docs(args.with_malpedia)
     if not args.no_sandbox_docs:
         docs += load_sandbox_docs(args.sandbox_docs)
+    if not args.no_regulations:
+        docs += load_regulations_docs(args.regulations)
+    if not args.no_cve:
+        docs += load_cve_docs(args.cve)
     n = write_jsonl(docs, args.out)
     by_type: dict[str, int] = {}
     for d in docs:

@@ -1,14 +1,14 @@
 # 评审 / 验收指南
 
-本文档回答：**一个评审者如何独立验证 CyberOrion 2.0 的每一条声明**。所有命令在 `/home/groy/cai/cyberorion` 下可直接复制执行（Python 解释器用 `/home/groy/cai/cai_env/bin/python`，或先 `source /home/groy/cai/cai_env/bin/activate`）。
+本文档回答：**一个评审者如何独立验证 CyberOrion 2.0 的每一条声明**。所有命令在 `<cai-repo>/cyberorion` 下可直接复制执行（Python 解释器用 `<cai-repo>/cai_env/bin/python`，或先 `source <cai-repo>/cai_env/bin/activate`）。
 
 ---
 
 ## 1. 单元测试（约 15 秒）
 
 ```bash
-cd /home/groy/cai/cyberorion
-/home/groy/cai/cai_env/bin/python -m pytest tests/ -q
+cd <cai-repo>/cyberorion
+<cai-repo>/cai_env/bin/python -m pytest tests/ -q
 ```
 
 **预期**：`316 passed`（无 docker、无网络、无 API key 也能全绿——外部依赖全部 mock/降级）。
@@ -34,7 +34,7 @@ cd /home/groy/cai/cyberorion
 ## 2. 端到端冒烟（真实 LLM + docker）
 
 ```bash
-cd /home/groy/cai/cyberorion
+cd <cai-repo>/cyberorion
 docker compose up -d          # 确认 web_basic 三靶机在跑
 python scripts/e2e_smoke.py
 ```

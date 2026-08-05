@@ -12,7 +12,7 @@
 **当前状态快照**：
 
 - 代码包 `cyberorion/`，服务入口 `server.py`（FastAPI，:8000），前端 `web/`（React 19 + Vite + Tailwind v4，构建产物 `web/dist` 由 server 托管）；
-- **测试 331 项全绿**（`/home/groy/cai/cai_env/bin/python -m pytest tests/ -q`，约 14s，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
+- **测试 331 项全绿**（`<cai-repo>/cai_env/bin/python -m pytest tests/ -q`，约 14s，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
 - 最近里程碑：① 蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task 派遣 4 角色子代理，`agents/blue_team.py`）；② 基准两套件（CyberSOCEval malware_analysis + attack_kb 知识访问测试，`bench/`；CyberGym 套件经实测后因数据/镜像体量过大已废弃移除）；③ 前端 v3（五视图：作战台 / Benchmark / 历史 / 知识图谱 / 文档；历史页有 AI 复盘 storyline；Benchmark 有「纯 LLM vs CyberOrion 框架」双臂对比、题目预览、逐题/逐任务 drill-down 抽屉与逐题 markdown 报告 `logs/bench/<run_id>.md`）；
 - 文档体系：`docs/ARCHITECTURE.md`（架构与扩展指南）、`docs/BENCHMARK.md`（基准）、`docs/REVIEW.md`（验收）、`docs/CAI_IMPROVEMENTS.md`（CAI 复用 vs 自建）、`docs/FRAMEWORK.md`（框架文档，前端「文档」tab 经 `GET /api/about` 渲染）。
 
@@ -20,12 +20,12 @@
 
 ## 2. 环境事实（先读这一节，能省你两小时）
 
-- **操作系统是 WSL2**（Windows 宿主的 Linux 子系统）。仓库在 `/home/groy/cai/cyberorion`。
-- **Python 环境在仓库外**：`/home/groy/cai/cai_env` 是 Python **3.10.12** venv，`cai-framework 0.5.10` 装在里面。**不要**在仓库里建 venv，**不要**用系统 python 跑项目代码。统一用 `/home/groy/cai/cai_env/bin/python`。
-- **LLM 配置在 `/home/groy/cai/cyberorion/../.env`**（即 `/home/groy/cai/.env`，CAI 仓库根，不在本仓库内）。关键变量：`CAI_MODEL`（带 provider 前缀，如 `openai/MiniMax-M3`）、`OPENAI_API_KEY`、`OPENAI_API_BASE` / `OPENAI_BASE_URL`（BASE 优先）。模板见本仓库 `.env.example`。`server.py` 启动时自动加载该 `.env`（setdefault 语义）。
+- **操作系统是 WSL2**（Windows 宿主的 Linux 子系统）。仓库在 `<cai-repo>/cyberorion`。
+- **Python 环境在仓库外**：`<cai-repo>/cai_env` 是 Python **3.10.12** venv，`cai-framework 0.5.10` 装在里面。**不要**在仓库里建 venv，**不要**用系统 python 跑项目代码。统一用 `<cai-repo>/cai_env/bin/python`。
+- **LLM 配置在 `<cai-repo>/cyberorion/../.env`**（即 `<cai-repo>/.env`，CAI 仓库根，不在本仓库内）。关键变量：`CAI_MODEL`（带 provider 前缀，如 `openai/MiniMax-M3`）、`OPENAI_API_KEY`、`OPENAI_API_BASE` / `OPENAI_BASE_URL`（BASE 优先）。模板见本仓库 `.env.example`。`server.py` 启动时自动加载该 `.env`（setdefault 语义）。
 - **Docker = Windows 上的 Docker Desktop**（`E:\Program Files\Docker\Docker Desktop.exe`，WSL 里路径 `/mnt/e/Program Files/Docker/Docker Desktop.exe`）。WSL 里的 `docker` CLI 只是它的壳。**`docker` 命令挂了一般是 Desktop 没起**——启动 Desktop 后 `/var/run/docker.sock` 才存在。改镜像加速器要改 Windows 侧 `C:\Users\<user>\.docker\daemon.json` 再重启 Desktop。
 - **靶机容器**（`docker compose up -d` 起 3 台）：`cyberorion_dvwa`（172.29.0.10，宿主 28080→80）、`cyberorion_weak_ssh`（.12，22222→22）、`cyberorion_log4j`（.20，8983）。红方攻击一律走 **127.0.0.1 + 宿主端口**（见"已知坑"）。
-- **外部基准在 `/home/groy/cai/benchmarks/`**：
+- **外部基准在 `<cai-repo>/benchmarks/`**：
   - `cybersoceval/`：PurpleLlama 数据集（malware_analysis 609 题 JSON）；
 - 前端：`web/` 下 node 20 + npm 可用；`web/dist` 已随仓库构建好，**只看不改前端就不需要 Node**。
 
@@ -109,7 +109,7 @@ cyberorion/                        # 仓库根
 5. **高内聚低耦合**：每个工具单文件、`@function_tool` + 中文 docstring（Args/Returns）、输出 `_clip` 截断（1200 字符）；会话级资源走 **binding 模式**（`telemetry.binding.set_store` / `eval.ground_truth.set_ground_truth` / `blue_team.set_event_bus`），不穿透工具签名；未绑定时返回解释性字符串。
 6. **模型构造统一走环境变量**：`CAI_MODEL` / `OPENAI_API_KEY` / `OPENAI_API_BASE‖OPENAI_BASE_URL`，参照 `agents/red.py::_model`。
 7. **降级优先**：docker 缺失/LLM 失败/embedding 不可用都不允许让核心链路（指标、报告）无产出——采集器重试、裁判模板兜底、BM25 回退、e2e 无 key 自动 SKIP。
-8. **改完必须跑测试**：`/home/groy/cai/cai_env/bin/python -m pytest tests/ -q`，全绿才算完。
+8. **改完必须跑测试**：`<cai-repo>/cai_env/bin/python -m pytest tests/ -q`，全绿才算完。
 
 ---
 
@@ -130,16 +130,16 @@ cyberorion/                        # 仓库根
 **起服务三部曲**：
 
 ```bash
-source /home/groy/cai/cai_env/bin/activate
-set -a; source /home/groy/cai/.env; set +a    # server.py 也会自动加载，此步可省
-cd /home/groy/cai/cyberorion && python server.py   # → http://localhost:8000
+source <cai-repo>/cai_env/bin/activate
+set -a; source <cai-repo>/.env; set +a    # server.py 也会自动加载，此步可省
+cd <cai-repo>/cyberorion && python server.py   # → http://localhost:8000
 ```
 
 ---
 
 ## 6. 验证清单（交付前逐项过）
 
-- [ ] `cd /home/groy/cai/cyberorion && /home/groy/cai/cai_env/bin/python -m pytest tests/ -q` → **331 passed**（数量随开发增长，关键是无 fail）；
+- [ ] `cd <cai-repo>/cyberorion && <cai-repo>/cai_env/bin/python -m pytest tests/ -q` → **331 passed**（数量随开发增长，关键是无 fail）；
 - [ ] 改了前端 → `cd web && npm run build` 成功；
 - [ ] 改了会话/对抗链路 → `docker compose up -d` 后 `python scripts/e2e_smoke.py`（真实 LLM + docker，无 key 自动 SKIP 不算失败，断言失败才是失败）；
 - [ ] 改了 bench → 跑小 n 真实验证：`python scripts/run_bench.py --n 5 --mode base`；
@@ -149,7 +149,7 @@ cd /home/groy/cai/cyberorion && python server.py   # → http://localhost:8000
 
 ## 7. 已知坑清单（都是踩过的，别重踩）
 
-1. **bench/对抗出现全 0 或全错，先查 LLM 端点，别怀疑代码**。历史教训：DashScope 欠费导致所有调用静默失败、分数全 0。排查顺序：`curl $OPENAI_BASE_URL/models -H "Authorization: Bearer $OPENAI_API_KEY"` → 看 run json 里 `llm_errors` / raw 输出。`/home/groy/cai/.env.bak.*` 是历次端点切换的备份，可对照。
+1. **bench/对抗出现全 0 或全错，先查 LLM 端点，别怀疑代码**。历史教训：DashScope 欠费导致所有调用静默失败、分数全 0。排查顺序：`curl $OPENAI_BASE_URL/models -H "Authorization: Bearer $OPENAI_API_KEY"` → 看 run json 里 `llm_errors` / raw 输出。`<cai-repo>/.env.bak.*` 是历次端点切换的备份，可对照。
 2. **busybox vs procps 的 ps 格式不同**：快照解析 `parse_ps_aux` 必须兼容两种布局（`telemetry/collectors.py:281` 有注释）。weak_ssh 是 busybox——早年只支持 procps 导致其进程快照恒为空。改快照解析时两种都要测。
 3. **容器里没有/用不了 iptables**：`block_ip` 在某些容器上失败是**环境问题**（容器缺 NET_ADMIN，`tools/blue/respond.py:81` 明确返回此提示），不是 bug。工具已如实返回失败，别去"修"它谎报成功。
 4. **靶机状态污染**：上一轮蓝队加固（关 ssh 密码认证、DVWA 调 high、删后门）会让新一轮"没东西可打"。`Controller.start_session` 会自动 `arena_reset.reset_all`，手动用 `scripts/reset_targets.sh`。遇到"红队突然打不进"先想这个。

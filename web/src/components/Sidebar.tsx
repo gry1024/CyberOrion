@@ -10,6 +10,7 @@ import type { ViewKey } from '../types'
 
 const NAV: { key: ViewKey; label: string }[] = [
   { key: 'arena', label: '作战台' },
+  { key: 'traffic', label: '流量分析' },
   { key: 'bench', label: '基准测试' },
   { key: 'history', label: '历史复盘' },
   { key: 'kb', label: '知识库' },

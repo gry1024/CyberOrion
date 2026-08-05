@@ -23,6 +23,7 @@ from .files import file_integrity
 from .alerts import report_finding, triage_alert, list_alerts
 from .respond import block_ip, unblock_ip, harden_service, remediate
 from .kb import search_attack_kb, lookup_technique
+from .traffic import analyze_traffic, query_identity
 
 __all__ = [
     "query_logs",
@@ -38,4 +39,6 @@ __all__ = [
     "remediate",
     "search_attack_kb",
     "lookup_technique",
+    "analyze_traffic",
+    "query_identity",
 ]

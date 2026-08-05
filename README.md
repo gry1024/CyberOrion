@@ -37,10 +37,27 @@
 
 > 以下命令在本项目实际运行环境（WSL2 + Docker Desktop）逐条验证过。路径按实际部署写，照抄即可。
 
+> **目录约定**：本文档中 `<cai-repo>` 指 cyberorion 的**父目录**——即你 `git clone` 的位置。
+> cyberorion 依赖的外部资源（`.env` / `cai_env` / `benchmarks`）都放在这里，与 cyberorion 同级：
+>
+> ```
+> <cai-repo>/                    ← 你 clone 的父目录（任意路径均可）
+> ├── .env                       ← API key 等配置（§③ 创建）
+> ├── cai_env/                   ← Python 虚拟环境（§② 创建）
+> ├── benchmarks/                ← 基准数据集（可选，仅 bench 模块用）
+> └── cyberorion/                ← git clone 出来的本仓库
+>     ├── server.py
+>     ├── .env.example
+>     └── ...
+> ```
+>
+> 默认零配置即可运行；如果你的 venv / benchmarks 在别处，设环境变量覆盖即可（见 [paths.py](cyberorion/paths.py)）：
+> `CAI_VENV` / `CICIDS_DIR` / `PURPLE_LLAMA_DIR` / `CVEBENCH_REPO`
+
 ### ① 前置条件
 
 - **Docker Desktop 已启动**（WSL 里 `docker ps` 能通即 OK；不通就先启动 Windows 侧 Docker Desktop）；
-- **Python 3.10+**（CAI 框架装在仓库外的虚拟环境 `/home/groy/cai/cai_env`，已存在可跳过 ②）；
+- **Python 3.10+**（CAI 框架装在仓库外的虚拟环境 `<cai-repo>/cai_env`，已存在可跳过 ②）；
 - **一个 OpenAI 兼容端点的 API key**（MiniMax / DashScope / OpenAI 官方均可）；
 - Node.js 20+ —— **仅重建前端时需要**，仓库自带构建好的 `web/dist`。
 
@@ -48,7 +65,7 @@
 
 ```bash
 # 已有环境（推荐，本项目实际使用）：
-source /home/groy/cai/cai_env/bin/activate
+source <cai-repo>/cai_env/bin/activate
 
 # 或从零建（仓库没有 requirements.txt，依赖就这几样）：
 python3.10 -m venv ~/cai_env && source ~/cai_env/bin/activate
@@ -57,10 +74,10 @@ pip install "cai-framework==0.5.10" fastapi uvicorn pyyaml numpy
 
 ### ③ 配置 .env
 
-`.env` 放在 **CAI 仓库根**（`/home/groy/cai/.env`，不是 cyberorion/ 内）：
+`.env` 放在 **CAI 仓库根**（`<cai-repo>/.env`，不是 cyberorion/ 内）：
 
 ```bash
-cp /home/groy/cai/cyberorion/.env.example /home/groy/cai/.env
+cp <cai-repo>/cyberorion/.env.example <cai-repo>/.env
 ```
 
 关键变量（每个一行）：
@@ -76,7 +93,7 @@ cp /home/groy/cai/cyberorion/.env.example /home/groy/cai/.env
 ### ④ 起靶场 + 验证
 
 ```bash
-cd /home/groy/cai/cyberorion
+cd <cai-repo>/cyberorion
 docker compose up -d        # web_basic 三靶机：dvwa(28080) / weak_ssh(22222) / log4j(8983)
 docker compose ps           # 三台都是 Up 即就绪
 ```
@@ -84,8 +101,8 @@ docker compose ps           # 三台都是 Up 即就绪
 ### ⑤ 起服务
 
 ```bash
-source /home/groy/cai/cai_env/bin/activate
-set -a; source /home/groy/cai/.env; set +a   # server.py 也会自动加载，此步可省
+source <cai-repo>/cai_env/bin/activate
+set -a; source <cai-repo>/.env; set +a   # server.py 也会自动加载，此步可省
 python server.py             # → http://localhost:8000（API 文档在 /docs）
 ```
 
@@ -170,7 +187,7 @@ CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从
 ## Development
 
 ```bash
-/home/groy/cai/cai_env/bin/python -m pytest tests/ -q   # 317 项测试，无 docker/key 也能全绿
+<cai-repo>/cai_env/bin/python -m pytest tests/ -q   # 317 项测试，无 docker/key 也能全绿
 ```
 
 `run.py` 是 legacy CLI 入口（旧同步回合制 Arena）：**不启动遥测与评分**——完整体验请用 `server.py`。

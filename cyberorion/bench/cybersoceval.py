@@ -39,8 +39,8 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO = _HERE.parent.parent          # cyberorion/ 仓库根
-DEFAULT_QUESTIONS = Path(
-    "/home/groy/cai/benchmarks/cybersoceval/PurpleLlama/"
+from cyberorion.paths import PURPLE_LLAMA_DIR as _PURPLE_LLAMA
+DEFAULT_QUESTIONS = _PURPLE_LLAMA / (
     "CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/"
     "questions.json")
 DEFAULT_LOG_DIR = _REPO / "logs" / "bench"
@@ -49,8 +49,7 @@ DEFAULT_LOG_DIR = _REPO / "logs" / "bench"
 # sha256（无扩展名）。题目带 sha256 字段时，v8 起把对应报告摘要确定性
 # 注入提示——这是“知识访问”能力的正当展示：框架臂能读到题目所指的
 # 真实报告，base 臂只能凭常识猜测。
-HYBRID_ANALYSIS_DIR = Path(
-    "/home/groy/cai/benchmarks/cybersoceval/PurpleLlama/"
+HYBRID_ANALYSIS_DIR = _PURPLE_LLAMA / (
     "CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/"
     "hybrid-analysis")
 

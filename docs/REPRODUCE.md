@@ -53,9 +53,9 @@ git clone https://github.com/gry1024/cyberorion.git && cd cyberorion
 python3.10 -m venv ~/cai_env && source ~/cai_env/bin/activate
 pip install "cai-framework==0.5.10" fastapi uvicorn pyyaml numpy
 
-# ③ 配置 .env（复制模板到仓库根，填 API key）
-cp .env.example /path/to/your/.env      # 或直接用项目根上级目录
-#   编辑 .env：CAI_MODEL / OPENAI_API_KEY / OPENAI_API_BASE（见 §4.3）
+# ③ 配置 .env（复制模板到 cyberorion 父目录，填 API key）
+cp .env.example ../.env                  # .env 与 cyberorion 同级
+#   编辑 ../.env：CAI_MODEL / OPENAI_API_KEY / OPENAI_API_BASE（见 §4.3）
 
 # ④ 起靶机
 docker compose up -d
@@ -63,8 +63,7 @@ docker compose ps                        # dvwa/weak_ssh/log4j 三台 Up 即就�
 
 # ⑤ 起服务（默认 8000 端口）
 source ~/cai_env/bin/activate
-set -a; source /path/to/your/.env; set +a
-python server.py
+python server.py                         # server.py 会自动加载 ../.env
 
 # 浏览器打开 http://localhost:8000
 ```
@@ -161,6 +160,26 @@ docker compose --profile web_plus up -d
 docker compose up -d                      # cve_log4j
 scripts/cve_target.sh up CVE-2024-4323    # CVE-Bench（外部评分器，占 9090/9091）
 ```
+
+### 4.4b 流量分析数据集（可选，仅流量分析模块用）
+
+流量分析模块基于 CICIDS2017 公开数据集。数据集共 **844MB**，不随仓库分发，
+需单独下载到本地：
+
+```bash
+# 下载地址（任选其一）：
+#   官方: https://www.unb.ca/cic/datasets/ids-2017.html
+#   Kaggle: https://www.kaggle.com/datasets/cicdataset/cicids2017
+
+# 解压后把 8 个 CSV 放到这里（目录不存在就建）：
+mkdir -p cyberorion/traffic/data/cicids2017
+cp /path/to/MachineLearningCSV/*.csv cyberorion/traffic/data/cicids2017/
+
+# 验证：服务器启动后访问 /api/traffic/status，csv_files 字段应列出 8 个文件
+```
+
+> 未下载数据集时，流量分析模块仍可用内置 synthetic 合成场景（无需任何数据）。
+> 数据集路径可通过环境变量 `CICIDS_DIR` 覆盖（见 [paths.py](../cyberorion/paths.py)）。
 
 ### 4.5 前端构建（可选，仓库自带 dist）
 

@@ -3,7 +3,7 @@
 export type Side = 'red' | 'blue' | 'system'
 
 /** Top-level view switch in the header. */
-export type ViewKey = 'arena' | 'bench' | 'history' | 'kb' | 'docs'
+export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'kb' | 'docs'
 
 export interface ArenaEvent {
   type: string
@@ -648,4 +648,58 @@ export interface BenchLiveRun {
   progress: { done: number; total: number }
   error?: string
   llm_errors?: number
+}
+// ---------------------------------------------------------------------------
+// 流量分析（流量回放 + 蓝队 agent 分析）
+// ---------------------------------------------------------------------------
+
+/** 一条流量事件（CICIDS/synthetic 回放产生的网络流）。 */
+export interface FlowEvent {
+  ts: number
+  src_ip: string
+  dst_ip: string
+  dst_port: number
+  /** 流量标签：BENIGN / 攻击类型（DDoS / Brute Force / SQLi …）。 */
+  label: string
+  /** ATT&CK 技术编号（无则空串）。 */
+  technique: string
+  /** 攻击大类（告警着色用）。 */
+  attack_type: string
+}
+
+/** 一条检测告警（流量触发的蓝队检测/研判结果）。 */
+export interface FlowAlert {
+  ts: number
+  src_ip: string
+  dst_ip: string
+  /** 告警类型（如 SSH 爆破、SQL 注入）。 */
+  alert_type: string
+  /** ATT&CK 技术。 */
+  technique: string
+  /** 严重级别：critical / high / medium / low。 */
+  severity: string
+  /** 置信度 0..1。 */
+  confidence: number
+  /** 告警描述。 */
+  description: string
+  /** 证据摘要。 */
+  evidence: string
+}
+/** GET /api/traffic/status — 流量回放服务状态。 */
+export interface TrafficStatus {
+  ready: boolean
+  sources: string[]
+  csv_files: string[]
+  replaying: boolean
+}
+
+/** POST /api/traffic/replay — 回放结果。 */
+export interface TrafficReplayResult {
+  ok: boolean
+  events?: FlowEvent[]
+  alerts?: FlowAlert[]
+  source?: string
+  csv_file?: string
+  rows?: number
+  error?: string
 }

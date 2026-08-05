@@ -54,6 +54,7 @@ from ..tools.blue import (
     report_finding, triage_alert, list_alerts,
     block_ip, unblock_ip, harden_service, remediate,
     search_attack_kb, lookup_technique,
+    analyze_traffic, query_identity,
 )
 from .blue import _scratchpad_tools, _target_context
 
@@ -137,7 +138,7 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     "watcher": {
         "title": "哨兵",
         "tools": [query_logs, network_summary, process_audit,
-                  file_integrity, list_alerts],
+                  file_integrity, list_alerts, analyze_traffic],
         "prompt": """你是 CyberOrion 蓝队的【哨兵】，负责巡逻检测。
 对目标清单中的每台主机执行快速全面巡查（时间预算紧张，务必快）：
   1. query_logs 每台主机【只发一次宽查】：query_logs(host, since_minutes=30)
@@ -156,7 +157,7 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     "analyst": {
         "title": "研判",
         "tools": [triage_alert, query_logs, list_alerts,
-                  search_attack_kb, lookup_technique],
+                  search_attack_kb, lookup_technique, query_identity],
         "prompt": """你是 CyberOrion 蓝队的【研判分析师】，负责把可疑线索
 研判成定性结论：
   1. list_alerts 查看现有告警，triage_alert 拉取关联上下文研判；
@@ -268,6 +269,7 @@ def agents_api() -> list[dict]:
         "tools": [
             dispatch_task, query_logs, report_finding, list_alerts,
             search_attack_kb, lookup_technique,
+            analyze_traffic, query_identity,
         ],
         "prompt": _ORCHESTRATOR_TEMPLATE,
     }
@@ -583,6 +585,7 @@ def build_blue_team(scenario: "Scenario | None" = None) -> Agent:
         query_logs,
         report_finding, list_alerts,
         search_attack_kb, lookup_technique,
+        analyze_traffic, query_identity,
     ] + _scratchpad_tools()
 
     agent = Agent(

@@ -49,3 +49,6 @@ cyberorion/kb/data/malpedia_families.json
 # Session artifacts & samples (large transcripts)
 samples/
 state.txt
+
+# CICIDS2017 dataset (844MB, public) — download separately, see docs/REPRODUCE.md
+cyberorion/traffic/data/cicids2017/*.csv

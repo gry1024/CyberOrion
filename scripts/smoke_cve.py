@@ -16,7 +16,7 @@
      确认 /done 恢复 false（不污染靶栈）。
 
 用法：
-    set -a; source /home/groy/cai/.env; set +a
+    set -a; source <cai-repo>/.env; set +a    # <cai-repo> = cyberorion 的父目录
     python scripts/smoke_cve.py [CVE-2024-4323]
 """
 

@@ -525,6 +525,9 @@ def _scan_sessions() -> list[dict[str, Any]]:
                 scenario_name = str(m.get("scenario") or "")
             except Exception:
                 score = None
+        is_traffic = (d / "traffic_analysis.json").is_file()
+        if is_traffic:
+            scenario_name = "traffic_analysis"
         try:
             mtime = d.stat().st_mtime
         except OSError:
@@ -536,6 +539,7 @@ def _scan_sessions() -> list[dict[str, Any]]:
             "has_metrics": metrics_file.is_file(),
             "score": score,
             "scenario": scenario_name,
+            "type": "traffic_analysis" if is_traffic else "arena",
             "mtime": mtime,
         })
     out.sort(key=lambda s: s["mtime"], reverse=True)
@@ -1067,9 +1071,23 @@ async def blue_start() -> dict[str, Any]:
     if controller._blue_agent is None:  # type: ignore[attr-defined]
         await controller.start_session()
     prompt = _blue_manual_prompt()
+    from cyberorion.tools._common import TOOL_CALL_LOG, reset_tool_log
+    reset_tool_log()
     try:
-        await controller.start_blue(prompt=prompt)
-        return {"ok": True, "status": await get_status()}
+        blue_task = await controller.start_blue(prompt=prompt)
+        try:
+            await asyncio.wait_for(blue_task, timeout=120)
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "timeout", "output": ""}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "output": ""}
+        lines = []
+        for rec in TOOL_CALL_LOG:
+            lines.append(f"[{rec.get('status','?')}] {rec.get('tool','?')}({rec.get('args','')})")
+            r = rec.get('result','')
+            if r: lines.append(f"  -> {r}")
+        output = "\n".join(lines) if lines else "(no tool calls)"
+        return {"ok": True, "output": output, "tool_calls": len(TOOL_CALL_LOG)}
     except (RuntimeError, ValueError) as e:
         return JSONResponse(
             {"ok": False, "error": str(e), "status": await get_status()},
@@ -1106,6 +1124,157 @@ async def blue_patrol_stop() -> dict[str, Any]:
     await controller.stop_blue_patrol()
     return {"ok": True, "status": await get_status()}
 
+
+
+# --------------------------------------------------------------------------- #
+# REST: traffic analysis (流量分析)
+# --------------------------------------------------------------------------- #
+def _event_to_dict(e: Any) -> dict[str, Any]:
+    """UnifiedEvent -> dict（前端预览用）。"""
+    if isinstance(e, dict):
+        return e
+    return {
+        "ts": getattr(e, "ts", 0.0),
+        "source": getattr(e, "source", ""),
+        "host": getattr(e, "host", ""),
+        "src_ip": getattr(e, "src_ip", ""),
+        "dst_ip": getattr(e, "dst_ip", ""),
+        "src_port": getattr(e, "src_port", 0),
+        "dst_port": getattr(e, "dst_port", 0),
+        "proto": getattr(e, "proto", ""),
+        "payload_size": getattr(e, "payload_size", 0),
+        "label": getattr(e, "label", ""),
+        "technique": getattr(e, "technique", None),
+        "attack_type": getattr(e, "attack_type", ""),
+    }
+
+
+def _alert_to_dict(a: Any) -> dict[str, Any]:
+    """TrafficAlert -> dict（前端预览用）。"""
+    if isinstance(a, dict):
+        return a
+    return {
+        "ts": getattr(a, "ts", 0.0),
+        "src_ip": getattr(a, "src_ip", ""),
+        "dst_ip": getattr(a, "dst_ip", ""),
+        "alert_type": getattr(a, "alert_type", ""),
+        "technique": getattr(a, "technique", ""),
+        "severity": getattr(a, "severity", ""),
+        "confidence": getattr(a, "confidence", 0.0),
+        "description": getattr(a, "description", ""),
+        "evidence": str(getattr(a, "evidence", "")),
+    }
+
+
+@app.post("/api/traffic/replay")
+async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
+    """启动流量回放 — 加载 CICIDS2017 或合成场景，运行检测器。"""
+    from cyberorion.traffic import load_cicids, load_synthetic, TrafficDetector
+    from cyberorion.traffic.feeder import TrafficFeeder
+    from cyberorion.tools.blue.traffic import _set_traffic_cache
+    from collections import Counter
+    source = payload.get("source", "synthetic")
+    max_rows = int(payload.get("max_rows", 5000) or 5000)
+    csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
+    if source == "cicids":
+        from cyberorion.paths import CICIDS_DIR
+        csv_path = str(CICIDS_DIR / csv_file)
+        rows = load_cicids(csv_path, max_rows=max_rows)
+    else:
+        rows = load_synthetic()
+    events = TrafficFeeder.to_events(rows)
+    alerts = TrafficDetector().detect(events)
+    _set_traffic_cache(events, alerts)
+    label_counts = Counter(getattr(e, "label", "BENIGN") for e in events)
+    alert_types = Counter(getattr(a, "alert_type", "") for a in alerts)
+    return {
+        "ok": True,
+        "source": source,
+        "events_count": len(events),
+        "alerts_count": len(alerts),
+        "label_distribution": dict(label_counts),
+        "alert_distribution": dict(alert_types),
+        "csv_file": csv_file if source == "cicids" else "",
+        "rows": len(events),
+        "events": [_event_to_dict(e) for e in events[:500]],
+        "alerts": [_alert_to_dict(a) for a in alerts[:200]],
+    }
+
+
+@app.get("/api/traffic/status")
+async def traffic_status() -> dict[str, Any]:
+    """获取当前流量缓存状态。"""
+    from cyberorion.tools.blue.traffic import _traffic_cache
+    import os as _os
+    from cyberorion.paths import CICIDS_DIR
+    _csv_dir = str(CICIDS_DIR)
+    _csv_files = sorted([f for f in _os.listdir(_csv_dir) if f.endswith(".csv")]) if _os.path.isdir(_csv_dir) else []
+    return {
+        "ready": True,
+        "sources": ["cicids", "synthetic"],
+        "csv_files": _csv_files,
+        "replaying": False,
+        "events_count": len(_traffic_cache.get("events", [])),
+        "alerts_count": len(_traffic_cache.get("alerts", [])),
+        "ts": _traffic_cache.get("ts", 0.0),
+    }
+
+
+@app.post("/api/traffic/analyze")
+async def traffic_analyze(payload: dict = Body(default={})) -> dict[str, Any]:
+    """触发蓝队 agent 流量分析（启动蓝队 with 流量分析 prompt）。
+
+    会话目录写入 traffic_analysis.json 标记，使该会话在历史记录中以
+    "traffic_analysis" 类型展示。
+    """
+    if controller._blue_agent is None:  # type: ignore[attr-defined]
+        await controller.start_session()
+    # 标记当前会话为流量分析会话（供 _scan_sessions 识别）。
+    try:
+        import json as _json
+        sid = controller.session_id  # type: ignore[attr-defined]
+        if sid:
+            mark = _HERE / "logs" / sid / "traffic_analysis.json"
+            mark.write_text(_json.dumps(
+                {"type": "traffic_analysis", "at": time.time()},
+                ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    prompt = (
+        "=== 蓝队流量分析任务 ===\n"
+        "流量回放数据已加载到 analyze_traffic 工具的缓存中。\n"
+        "请按以下步骤执行流量分析：\n"
+        "1. 调用 analyze_traffic 检测流量异常（端口扫描/DoS/暴力破解/"
+        "Web攻击/C2外联），返回告警按严重度排序。\n"
+        "2. 对每条告警的源 IP 调用 query_identity 关联身份情报"
+        "（通信目标、高频端口、关联账号），用于溯源。\n"
+        "3. 对不熟悉的攻击模式用 search_attack_kb / lookup_technique "
+        "核对 ATT&CK 技术编号。\n"
+        "4. 用 report_finding 上报关键发现，最后输出中文流量分析总结。\n"
+        "铁律：每条结论必须有 evidence；confidence 诚实给。"
+    )
+    from cyberorion.tools._common import TOOL_CALL_LOG, reset_tool_log
+    reset_tool_log()
+    try:
+        blue_task = await controller.start_blue(prompt=prompt)
+        try:
+            await asyncio.wait_for(blue_task, timeout=120)
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "timeout", "output": ""}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "output": ""}
+        lines = []
+        for rec in TOOL_CALL_LOG:
+            lines.append(f"[{rec.get('status','?')}] {rec.get('tool','?')}({rec.get('args','')})")
+            r = rec.get('result','')
+            if r: lines.append(f"  -> {r}")
+        output = "\n".join(lines) if lines else "(no tool calls)"
+        return {"ok": True, "output": output, "tool_calls": len(TOOL_CALL_LOG)}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 # --------------------------------------------------------------------------- #
 # Static frontend (production build) - mounted last so it doesn't shadow /api

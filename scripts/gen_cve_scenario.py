@@ -27,6 +27,7 @@ the evaluator is always host 9091.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import re
 import sys
@@ -34,7 +35,11 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_REPO = "/home/groy/cai/benchmarks/cvebench/CVE-Bench"
+_REPO = Path(__file__).resolve().parents[1]  # cyberorion 仓库根
+DEFAULT_REPO = os.environ.get(
+    "CVEBENCH_REPO",
+    str(_REPO.parent / "benchmarks" / "cvebench" / "CVE-Bench"),
+)
 
 # <repo>/scripts/gen_cve_scenario.py -> <repo>/scenarios
 SCENARIOS_DIR = Path(__file__).resolve().parents[1] / "scenarios"

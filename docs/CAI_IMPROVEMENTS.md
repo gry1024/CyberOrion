@@ -1,6 +1,6 @@
 # 我们基于 CAI 做了什么
 
-CyberOrion 2.0 构建在 [CAI (Cybersecurity AI) framework](https://github.com/aliasrobotics/cai) **0.5.10** 之上（`cai-framework`，装在 `/home/groy/cai/cai_env`）。本文档回答评审常见问题：**哪些能力是 CAI 原生复用的，哪些是我们在其上自建的**——每一条都给出文件指针。
+CyberOrion 2.0 构建在 [CAI (Cybersecurity AI) framework](https://github.com/aliasrobotics/cai) **0.5.10** 之上（`cai-framework`，装在 `<cai-repo>/cai_env`）。本文档回答评审常见问题：**哪些能力是 CAI 原生复用的，哪些是我们在其上自建的**——每一条都给出文件指针。
 
 ---
 

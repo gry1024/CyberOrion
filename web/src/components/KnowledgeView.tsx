@@ -17,6 +17,8 @@ const TYPE_META: Record<string, string> = {
   mitigation: '缓解',
   malware: '恶意软件',
   sandbox_report: '沙箱指南',
+  regulation: '监管法规',
+  cve: 'CVE漏洞',
 }
 
 function typeLabel(t: string): string {

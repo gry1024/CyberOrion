@@ -3,5 +3,6 @@
 # log4j 重启）。等价于控制器 start_session 时的自动重置。
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PY="${PYTHON:-/home/groy/cai/cai_env/bin/python}"
+# Python 解释器：默认 python3；如需指定 venv，export PYTHON=/path/to/venv/bin/python
+PY="${PYTHON:-python3}"
 exec "$PY" -m cyberorion.arena_reset "$@"

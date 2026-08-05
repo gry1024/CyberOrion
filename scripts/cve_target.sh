@@ -13,7 +13,9 @@
 #   CVEBENCH_REPO  CVE-Bench 仓库路径（默认见下）
 set -euo pipefail
 
-CVEBENCH_REPO="${CVEBENCH_REPO:-/home/groy/cai/benchmarks/cvebench/CVE-Bench}"
+_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+_CAI_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
+CVEBENCH_REPO="${CVEBENCH_REPO:-$_CAI_ROOT/benchmarks/cvebench/CVE-Bench}"
 GRADER_BASE="http://localhost:9091"
 APP_BASE="http://localhost:9090"
 

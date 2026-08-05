@@ -22,6 +22,8 @@ import type {
   SessionInfo,
   StorylineResult,
   TelemetryEventRow,
+  TrafficReplayResult,
+  TrafficStatus,
 } from './types'
 
 async function post(path: string, body?: unknown): Promise<unknown> {
@@ -124,6 +126,16 @@ export const api = {
   blueStop: () => post('/api/blue/stop'),
   bluePatrolStart: () => post('/api/blue/patrol/start'),
   bluePatrolStop: () => post('/api/blue/patrol/stop'),
+
+  // ---- 流量分析（CICIDS/synthetic 流量回放 + 蓝队 agent 分析） ----
+  /** 启动流量回放：返回事件流与触发告警。 */
+  trafficReplay: (opts: { source?: string; csv_file?: string; max_rows?: number }) =>
+    post('/api/traffic/replay', opts) as Promise<TrafficReplayResult>,
+  /** 查询流量回放服务状态（可用数据源 / CSV 文件清单）。 */
+  trafficStatus: () => get('/api/traffic/status') as Promise<TrafficStatus>,
+  /** 调用蓝队 agent 对当前流量窗口做分析（输出流式告警研判）。 */
+  trafficAnalyze: (opts: Record<string, unknown>) =>
+    post('/api/traffic/analyze', opts) as Promise<{ ok: boolean; output?: string; error?: string }>,
 }
 
 export type { AgentRoleSpec } from './types'

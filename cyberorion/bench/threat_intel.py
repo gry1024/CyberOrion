@@ -36,8 +36,8 @@ from .cybersoceval import (
 MODES = ("base", "rag")
 
 _HERE = Path(__file__).resolve().parent
-DEFAULT_QUESTIONS = Path(
-    "/home/groy/cai/benchmarks/cybersoceval/PurpleLlama/"
+from cyberorion.paths import PURPLE_LLAMA_DIR as _PURPLE_LLAMA
+DEFAULT_QUESTIONS = _PURPLE_LLAMA / (
     "CybersecurityBenchmarks/datasets/crwd_meta/threat_intel_reasoning/"
     "report_questions.json")
 
