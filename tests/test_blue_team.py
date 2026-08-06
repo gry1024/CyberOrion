@@ -218,10 +218,11 @@ class TestBuildBlueTeam:
     def test_role_tool_subsets(self):
         expected = {
             "watcher": {"query_logs", "network_summary", "process_audit",
-                        "file_integrity", "list_alerts", "load_skill"},
+                        "file_integrity", "list_alerts", "analyze_traffic",
+                        "load_skill"},
             "analyst": {"triage_alert", "query_logs", "list_alerts",
                         "search_attack_kb", "lookup_technique",
-                        "load_skill"},
+                        "query_identity", "load_skill"},
             "responder": {"block_ip", "unblock_ip", "harden_service",
                           "remediate", "load_skill"},
             "hunter": {"file_integrity", "process_audit", "remediate",
