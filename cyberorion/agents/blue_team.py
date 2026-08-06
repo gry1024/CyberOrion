@@ -54,8 +54,9 @@ from ..tools.blue import (
     report_finding, triage_alert, list_alerts,
     block_ip, unblock_ip, harden_service, remediate,
     search_attack_kb, lookup_technique,
-    analyze_traffic, query_identity,
+    analyze_traffic, query_identity, load_skill,
 )
+from ..skills import render_skill_catalog
 from .blue import _scratchpad_tools, _target_context
 
 if TYPE_CHECKING:
@@ -141,7 +142,8 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     "watcher": {
         "title": "哨兵",
         "tools": [query_logs, network_summary, process_audit,
-                  file_integrity, list_alerts, analyze_traffic, search_attack_kb, lookup_technique],
+                  file_integrity, list_alerts, analyze_traffic,
+                  search_attack_kb, lookup_technique, load_skill],
         "prompt": """你是 CyberOrion 蓝队的【哨兵】，负责巡逻检测。
 对目标清单中的每台主机执行快速全面巡查（时间预算紧张，务必快）：
   1. query_logs 每台主机【只发一次宽查】：query_logs(host, since_minutes=30)
@@ -160,7 +162,8 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     "analyst": {
         "title": "研判",
         "tools": [triage_alert, query_logs, list_alerts,
-                  search_attack_kb, lookup_technique, query_identity],
+                  search_attack_kb, lookup_technique, query_identity,
+                  load_skill],
         "prompt": """你是 CyberOrion 蓝队的【研判分析师】，负责把可疑线索
 研判成定性结论：
   1. list_alerts 查看现有告警，triage_alert 拉取关联上下文研判；
@@ -174,7 +177,8 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     },
     "responder": {
         "title": "处置",
-        "tools": [block_ip, unblock_ip, harden_service, remediate, search_attack_kb, lookup_technique],
+        "tools": [block_ip, unblock_ip, harden_service, remediate,
+                  search_attack_kb, lookup_technique, load_skill],
         "prompt": """你是 CyberOrion 蓝队的【处置工程师】，只对指挥官
 确认的威胁执行处置，处置 playbook：
   - SSH 爆破/弱口令登录 -> harden_service(weak_ssh, ssh, apply)
@@ -193,7 +197,8 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     },
     "hunter": {
         "title": "狩猎",
-        "tools": [file_integrity, process_audit, remediate, search_attack_kb, lookup_technique],
+        "tools": [file_integrity, process_audit, remediate,
+                  search_attack_kb, lookup_technique, load_skill],
         "prompt": """你是 CyberOrion 蓝队的【威胁猎人】，负责失陷排查
 与现场清理：
   1. file_integrity 对比关键文件基线，找出新增/被篡改的文件
@@ -326,6 +331,7 @@ def _build_role_agent(role: str, scenario: "Scenario | None") -> Agent:
             spec["prompt"]
             + "\n== 防守目标（仅结构信息） ==\n"
             + _target_context(scenario)
+            + render_skill_catalog("blue")
         ),
         tools=list(spec["tools"]),
         model=_model(),
@@ -530,6 +536,7 @@ _ORCHESTRATOR_TEMPLATE = """你是 CyberOrion 蓝队的【指挥官】，带领�
     从命中里找爆破/登录/注入/webshell 特征 —— 快，一条调用出全景）；
   list_alerts / report_finding / search_attack_kb / lookup_technique
   dispatch_task(role, mission) - 派遣子代理（见下）
+  load_skill(name) - 任务匹配 Skill 描述时按需读取完整专项指南
 
 == 你的团队（用 dispatch_task(role, mission) 派遣） ==
   watcher   哨兵 — 巡逻检测（日志/网络/进程/文件基线）
@@ -588,13 +595,14 @@ def build_blue_team(scenario: "Scenario | None" = None) -> Agent:
         query_logs,
         report_finding, list_alerts,
         search_attack_kb, lookup_technique,
-        analyze_traffic, query_identity,
+        analyze_traffic, query_identity, load_skill,
     ] + _scratchpad_tools()
 
     agent = Agent(
         name="CyberOrion 指挥官",
-        instructions=_ORCHESTRATOR_TEMPLATE.format(
-            targets=_target_context(scenario)),
+        instructions=(_ORCHESTRATOR_TEMPLATE.format(
+            targets=_target_context(scenario))
+            + render_skill_catalog("blue")),
         tools=tools,
         model=_model(),
     )

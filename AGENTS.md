@@ -43,8 +43,8 @@ cyberorion/                        # 仓库根
 ├── cyberorion/                    # 源码包
 │   ├── agents/
 │   │   ├── blue_team.py           蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task + _ROLE_SPECS）
-│   │   ├── blue.py                旧单体蓝队（13 工具，回退路径）
-│   │   └── red.py                 红方渗透者（6 工具 + 草稿板 + CVE 任务指令）
+│   │   ├── blue.py                旧单体蓝队（13 业务工具 + Skill，回退路径）
+│   │   └── red.py                 红方渗透者（6 业务工具 + Skill + 草稿板）
 │   ├── core/
 │   │   ├── controller.py          会话生命周期：重置→遥测→红蓝并发→评分
 │   │   ├── agent_runner.py        Runner.run_streamed 流式运行 + 事件转播
@@ -66,18 +66,20 @@ cyberorion/                        # 仓库根
 │   │   ├── build_kb.py / rag.py   KB 构建器 / 检索器（embedding npz 缓存 + BM25 回退）
 │   │   ├── service.py             KB HTTP API 纯函数层（ATT&CK v18 = 13 战术的树）
 │   │   └── data/                  attack_kb.jsonl(3204) / *_vecs.npz / 原始语料
+│   ├── skills/registry.py         Skill 目录发现、摘要目录与按需全文加载
 │   ├── scenarios/loader.py        YAML → 校验过的 dataclass
 │   ├── session_detail.py          历史会话详情构建器（前端复盘页数据源）
 │   ├── storyline.py               故事线复盘（LLM 渲染 + 模板兜底，缓存 storyline.md）
 │   ├── tools/
 │   │   ├── _common.py             场景常量（CO_* 环境变量覆盖）、docker 辅助
-│   │   ├── blue/                  蓝队 13 工具：query/network/processes/files/alerts/respond/kb
-│   │   ├── red/                   红队 6 工具：recon(nmap)/ssh/web(http)/claim(裁判)
+│   │   ├── blue/                  蓝队 13 业务工具 + load_skill
+│   │   ├── red/                   红队 6 业务工具 + load_skill
 │   │   └── dvwa.py                DVWA 专用工具（旧单体蓝队用）
 │   ├── arena_reset.py             靶场重置（每会话恢复易受攻击基线）
 │   ├── agent.py / arena.py        legacy 兼容层（run.py 用）
 │   └── logs.py / viz.py           legacy 会话日志 / 终端可视化
 ├── web/                           前端（React 19 + Vite + Tailwind v4，见 web/README.md）
+├── skills/{red,blue}/*/SKILL.md   红蓝隔离的渐进式 Skill 内容
 ├── tests/                         pytest 331 项（17 个文件）
 ├── scripts/                       e2e_smoke / e2e_fight / run_bench / gen_cve_scenario /
 │                                  cve_target.sh / reset_targets.sh / smoke_* / run_cyborg
@@ -120,6 +122,8 @@ cyberorion/                        # 仓库根
 **加红队工具**：`tools/red/` 写工具，用 `@_gt_record(technique, target, judge)` 装饰（`tools/red/_helpers.py`，judge 谓词从返回文本判 success）→ `tools/red/__init__.py` 导出 → `agents/red.py` 工具清单 + prompt → 测试参照 `tests/test_red_tools.py`。
 
 **加团队角色**：`_ROLE_SPECS` 加一条（title/tools/prompt + `_CONCLUSION_BLOCK`）→ 指挥官 `_ORCHESTRATOR_TEMPLATE` 团队清单登记 → 测试参照 `tests/test_blue_team.py`。
+
+**加 Agent Skill**：在 `skills/red/<name>/` 或 `skills/blue/<name>/` 新建 `SKILL.md`，frontmatter 必须包含与目录一致的 `name` 和非空 `description`；全文不超过 1200 字符。初始 prompt 只注入摘要，Agent 调用对应阵营的 `load_skill` 后才读取全文；`scripts/` / `references/` 首版只允许在文档中说明能力，不会自动加载或执行。
 
 **加场景**：写 `scenarios/<name>.yaml`（network + targets：container/ip/services/logs/ground_truth）→ `docker-compose.yml` 加服务（重靶机挂 profile）→ UI 下拉框自动列出（`GET /api/scenarios`）。CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 生成。
 

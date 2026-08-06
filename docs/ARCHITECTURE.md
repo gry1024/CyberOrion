@@ -24,7 +24,7 @@
                         │          │              │
              ┌──────────▼───┐  ┌───▼───────────┐  ▼ telemetry/
              │ RED Agent    │  │ BLUE 指挥官    │  TelemetryCollector
-             │ 6 工具 + 草稿 │  │ + dispatch_task│  docker exec tail -F /
+             │ 6 攻击工具+Skill│  │ + dispatch_task│  docker exec tail -F /
              │ 严格 CoT     │  │  └─ 4 角色子代理│  docker logs -f + 30s 快照
              └──────┬───────┘  └───┬───────────┘  └──────┬───────────┘
         @_gt_record │              │ query_logs 等       │ insert_event /
@@ -62,8 +62,8 @@ cyberorion/                          # 仓库根
 ├── cyberorion/                      # 源码包
 │   ├── agents/
 │   │   ├── blue_team.py             蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task）
-│   │   ├── blue.py                  旧单体蓝队（13 工具，兼容/回退路径）
-│   │   └── red.py                   红方自主渗透者（6 工具 + 草稿板，含 CVE 指令）
+│   │   ├── blue.py                  旧单体蓝队（13 业务工具 + Skill，兼容/回退）
+│   │   └── red.py                   红方自主渗透者（6 业务工具 + Skill + 草稿板）
 │   ├── core/
 │   │   ├── controller.py            会话生命周期 + 红蓝控制 + 自动巡逻
 │   │   ├── agent_runner.py          Runner.run_streamed 流式运行 + 事件转播
@@ -87,6 +87,7 @@ cyberorion/                          # 仓库根
 │   │   ├── rag.py                   AttackKB：embedding（npz 缓存）+ BM25 回退
 │   │   ├── service.py               KB HTTP API 纯函数层（stats/tactics 树/search；ATT&CK v18 = 13 战术）
 │   │   └── data/                    attack_kb.jsonl(3204) / *_vecs.npz / 原始语料
+│   ├── skills/registry.py           Skill 目录发现、frontmatter 解析与按需全文加载
 │   ├── scenarios/loader.py          YAML → 校验过的 dataclass（Scenario/Target/...）
 │   ├── tools/
 │   │   ├── _common.py               场景配置常量（CO_* 覆盖）、TOOL_CALL_LOG、docker 辅助
@@ -101,6 +102,7 @@ cyberorion/                          # 仓库根
 │   ├── storyline.py                 故事线复盘（LLM 渲染 + 模板兜底，缓存 storyline.md）
 │   └── viz.py                       终端可视化 + HTML 回放
 ├── web/                             React 19 + Vite + Tailwind v4 前端
+├── skills/{red,blue}/*/SKILL.md     红蓝隔离的渐进式 Skill 内容
 ├── tests/                           pytest 316 项（16 个文件，见 REVIEW.md）
 └── scripts/                         e2e_smoke / e2e_fight / run_bench / gen_cve_scenario /
                                      cve_target.sh / reset_targets.sh / smoke_* / run_cyborg
@@ -114,7 +116,7 @@ cyberorion/                          # 仓库根
 
 2.0 之前蓝队是一个 13 工具的单体 agent（`agents/blue.py`，现保留为回退路径）。实测问题：工具菜单太长 → 模型在巡逻/研判/处置之间摇摆、上下文被单一 SOP 塞满、单个 run 的轮数预算被检测工具耗尽而没时间处置。团队架构的收益：
 
-- **工具最小子集**：每个角色只看到与自己职责相关的 3-5 个工具，选择空间小、决策更聚焦；
+- **工具最小子集**：每个角色只看到与自己职责相关的 4-6 个工具（含 `load_skill`），选择空间小、决策更聚焦；
 - **独立 prompt**：哨兵的"先宽后窄、预算纪律"、处置的 playbook、狩猎的清理边界，各自写成专门指令，互不稀释；
 - **轮次隔离**：子代理在 `dispatch_task` 内部运行（限 8 轮/240s），不消耗指挥官的轮数预算（指挥官 14 轮/900s）；
 - **可观测**：每个角色的思考与工具调用独立标注（`data.agent=<role>`），前端/日志可按角色归因。
@@ -160,13 +162,26 @@ cyberorion/                          # 仓库根
 
 团队架构不改变隔离规则：子代理与蓝队工具一样，绝不接触 ground truth——不 import `cyberorion.eval`、不读场景 `ground_truth` 字段、不查 `attacks` 表（约束写在 `tools/blue/__init__.py` 头注，`tests/test_blue_tools.py` 有对应测试）。`build_blue_team` 与 `_build_role_agent` 都只读取 scenario.targets 的结构信息。
 
+### 3.5 渐进式 Skill
+
+Skill 位于 `skills/red/<name>/SKILL.md` 与 `skills/blue/<name>/SKILL.md`。
+Agent 构建时 `registry.render_skill_catalog` 只把 frontmatter 的 `name` 和
+`description` 放进 instructions；任务与描述匹配时，Agent 主动调用
+`load_skill(name)`，工具才返回完整 Markdown。`references/`、`scripts/`
+不会被扫描、注入或执行。
+
+红蓝分别使用阵营固定的加载工具，模型不能通过参数切换目录。Skill 名称
+只允许小写字母、数字、下划线和连字符，目录名必须与 frontmatter name
+一致；单份 Markdown 上限 1200 字符，超限会整份拒绝，避免截断后执行不完整
+流程。坏 Skill 会在目录发现时跳过，不阻断 Agent 和核心链路。
+
 ---
 
 ## 4. 红队设计（agents/red.py）
 
 - **严格 CoT**：instructions 要求每次行动前写【假设】与【预期证据】，行动后对照；同一失败 payload 最多重试 2 次；
 - **最小信息**：prompt 只有目标结构（名称/IP/服务端口），没有凭据、flag、漏洞清单；`mode == "cve"` 场景切换为 CVE 任务指令（只允许攻击 `base_url`、禁止爆破、窃取物先 `submit_evidence` 上传）；
-- **6 工具 + 草稿板**：`nmap_scan` / `ssh_bruteforce` / `ssh_command` / `http_request`（同名 session cookie 跨调用保留）/ `claim_success` / `submit_evidence`，外加 CAI 的 `write_key_findings` / `read_key_findings` 跨轮次记事；
+- **6 业务工具 + Skill + 草稿板**：`nmap_scan` / `ssh_bruteforce` / `ssh_command` / `http_request`（同名 session cookie 跨调用保留）/ `claim_success` / `submit_evidence`，加按需 `load_skill`，外加 CAI 的 `write_key_findings` / `read_key_findings` 跨轮次记事；
 - **no-docker 规则**：红方仅网络攻击面。唯一例外是 `claim_success` 裁判读容器内 flag 文件做比对——裁判行为，内容绝不返回给 agent（`tools/red/claim.py::_referee_read_flag`）；
 - **地面真值埋点**：每个红方工具用 `@_gt_record(technique, target, judge)` 装饰（`tools/red/_helpers.py`），调用结果自动写 `attacks` 表；judge 谓词从工具返回文本判定 success（如 ssh_bruteforce 输出含 `uid=`）。
 

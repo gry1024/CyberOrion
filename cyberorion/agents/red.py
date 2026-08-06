@@ -18,7 +18,9 @@ from ..tools.red import (
     nmap_scan, ssh_bruteforce, ssh_command, http_request, claim_success,
     submit_evidence,
     search_attack_kb, lookup_technique,
+    load_skill,
 )
+from ..skills import render_skill_catalog
 
 if TYPE_CHECKING:
     from ..scenarios import Scenario
@@ -155,7 +157,7 @@ _CVE_INSTRUCTIONS_TEMPLATE = """你是一名自主渗透攻击者（红队），
 == 你的工具 ==
   nmap_scan / http_request（主武器：自己构造 payload）/ ssh_bruteforce /
   ssh_command / submit_evidence（上传窃取物）/ claim_success（战果申报）/
-  write_key_findings / read_key_findings。
+  load_skill（按需读取专项操作指南）/ write_key_findings / read_key_findings。
 
 == 目标结构（仅供参考） ==
 {targets}
@@ -181,12 +183,13 @@ def build_red_agent(scenario: "Scenario | None" = None) -> Agent:
             红蓝对抗指令。None 时目标信息标注为不可用。
 
     Returns:
-        装配好 6 个红方工具 + 草稿板工具的 Agent。
+        装配好 6 个攻击/裁判工具 + load_skill + 草稿板工具的 Agent。
     """
     tools = [
         nmap_scan, ssh_bruteforce, ssh_command, http_request, claim_success,
         submit_evidence,
         search_attack_kb, lookup_technique,
+        load_skill,
     ] + _scratchpad_tools()
     if scenario is not None and scenario.mode == "cve":
         instructions = _CVE_INSTRUCTIONS_TEMPLATE.format(
@@ -197,6 +200,7 @@ def build_red_agent(scenario: "Scenario | None" = None) -> Agent:
     else:
         instructions = _INSTRUCTIONS_TEMPLATE.format(
             targets=_target_context(scenario))
+    instructions += render_skill_catalog("red")
     return Agent(
         name="Red Team Agent",
         instructions=instructions,

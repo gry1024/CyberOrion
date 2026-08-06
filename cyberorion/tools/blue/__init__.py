@@ -24,6 +24,7 @@ from .alerts import report_finding, triage_alert, list_alerts
 from .respond import block_ip, unblock_ip, harden_service, remediate
 from .kb import search_attack_kb, lookup_technique
 from .traffic import analyze_traffic, query_identity
+from .skills import load_skill
 
 __all__ = [
     "query_logs",
@@ -41,4 +42,5 @@ __all__ = [
     "lookup_technique",
     "analyze_traffic",
     "query_identity",
+    "load_skill",
 ]

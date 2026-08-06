@@ -204,7 +204,8 @@ class TestBuildBlueTeam:
         assert agent.name == "CyberOrion 指挥官"
         names = {getattr(t, "name", "") for t in agent.tools}
         assert {"dispatch_task", "report_finding", "list_alerts",
-                "search_attack_kb", "lookup_technique"} <= names
+                "search_attack_kb", "lookup_technique",
+                "load_skill"} <= names
         # 处置工具不下放到指挥官层；query_logs 下放（快速响应：
         # 指挥官先扫遥测再派子代理，检测从 ~10min 压到秒级）。
         assert "block_ip" not in names
@@ -217,12 +218,14 @@ class TestBuildBlueTeam:
     def test_role_tool_subsets(self):
         expected = {
             "watcher": {"query_logs", "network_summary", "process_audit",
-                        "file_integrity", "list_alerts"},
+                        "file_integrity", "list_alerts", "load_skill"},
             "analyst": {"triage_alert", "query_logs", "list_alerts",
-                        "search_attack_kb", "lookup_technique"},
+                        "search_attack_kb", "lookup_technique",
+                        "load_skill"},
             "responder": {"block_ip", "unblock_ip", "harden_service",
-                          "remediate"},
-            "hunter": {"file_integrity", "process_audit", "remediate"},
+                          "remediate", "load_skill"},
+            "hunter": {"file_integrity", "process_audit", "remediate",
+                       "load_skill"},
         }
         for role, tools in expected.items():
             spec_tools = {getattr(t, "name", "") for t

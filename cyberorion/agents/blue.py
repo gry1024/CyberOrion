@@ -17,8 +17,9 @@ from ..tools.blue import (
     query_logs, network_summary, process_audit, file_integrity,
     report_finding, triage_alert, list_alerts,
     block_ip, unblock_ip, harden_service, remediate,
-    search_attack_kb, lookup_technique,
+    search_attack_kb, lookup_technique, load_skill,
 )
+from ..skills import render_skill_catalog
 
 if TYPE_CHECKING:
     from ..scenarios import Scenario
@@ -95,6 +96,7 @@ _INSTRUCTIONS_TEMPLATE = """你是 CyberOrion，一名自主运行的 SOC（安�
  13. lookup_technique(technique_id) - 按编号（T1110/T1505.003）查完整
      检测要点与缓解措施
 草稿板：write_key_findings / read_key_findings - 跨轮次记录你的调查笔记。
+专项指南：load_skill(name) - 仅在任务匹配 Skill 描述时按需读取完整指南。
 
 == 标准作业流程（SOP，每轮巡逻都执行） ==
   ① 巡逻：对每台目标运行 query_logs / network_summary / process_audit /
@@ -134,18 +136,19 @@ def build_blue_agent(scenario: "Scenario | None" = None) -> Agent:
             ground_truth）。None 时 instructions 中目标信息标注为不可用。
 
     Returns:
-        装配好 13 个蓝队工具 + 草稿板工具的 Agent。
+        装配好 13 个检测/处置工具 + load_skill + 草稿板工具的 Agent。
     """
     tools = [
         query_logs, network_summary, process_audit, file_integrity,
         report_finding, triage_alert, list_alerts,
         block_ip, unblock_ip, harden_service, remediate,
-        search_attack_kb, lookup_technique,
+        search_attack_kb, lookup_technique, load_skill,
     ] + _scratchpad_tools()
     return Agent(
         name="CyberOrion",
-        instructions=_INSTRUCTIONS_TEMPLATE.format(
-            targets=_target_context(scenario)),
+        instructions=(_INSTRUCTIONS_TEMPLATE.format(
+            targets=_target_context(scenario))
+            + render_skill_catalog("blue")),
         tools=tools,
         model=_model(),
     )

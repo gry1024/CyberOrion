@@ -22,6 +22,7 @@ from .ssh import ssh_bruteforce, ssh_command
 from .web import http_request
 from .claim import claim_success, submit_evidence
 from ..blue.kb import search_attack_kb, lookup_technique
+from .skills import load_skill
 
 __all__ = [
     "nmap_scan",
@@ -32,4 +33,5 @@ __all__ = [
     "submit_evidence",
     "search_attack_kb",
     "lookup_technique",
+    "load_skill",
 ]
