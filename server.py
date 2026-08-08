@@ -212,6 +212,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CyberOrion Arena", version="1.0.0", lifespan=lifespan)
 
+# CORS：生产环境前端（nginx 静态托管）与后端（同源反代）同源，但仍放行以便灵活部署
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # --------------------------------------------------------------------------- #
 # WebSocket: real-time event stream
@@ -1361,12 +1371,12 @@ else:
 
 def main() -> None:
     """Run the server with uvicorn. Host 0.0.0.0 so the Windows host can
-    reach it (WSL2 port forwarding)."""
+    reach it (WSL2 port forwarding). PORT env var overrides for server deploy."""
     import uvicorn
     uvicorn.run(
         "server:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.environ.get("PORT", "8000")),
         reload=False,
         log_level="info",
     )

@@ -688,7 +688,7 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
       if (closed) return
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
       try {
-        ws = new WebSocket(`${proto}://${window.location.host}/ws`)
+        ws = new WebSocket(`${proto}://${window.location.host}${import.meta.env.BASE_URL}ws`)
       } catch {
         schedule()
         return

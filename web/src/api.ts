@@ -27,10 +27,17 @@ import type {
   TrafficStatus,
 } from './types'
 
+// 生产部署到 /cyberorion/ 子目录时，所有 API 路径需加前缀；
+// 开发环境 VITE_BASE=/ → BASE_URL 为 '/'，前缀自然消除。
+const BASE = import.meta.env.BASE_URL
+function url(path: string): string {
+  return BASE + path.replace(/^\//, '')
+}
+
 async function post(path: string, body?: unknown): Promise<unknown> {
   let r: Response
   try {
-    r = await fetch(path, {
+    r = await fetch(url(path), {
       method: 'POST',
       headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
       body: body === undefined ? null : JSON.stringify(body),
@@ -48,7 +55,7 @@ async function post(path: string, body?: unknown): Promise<unknown> {
 }
 
 async function get(path: string): Promise<unknown> {
-  const r = await fetch(path)
+  const r = await fetch(url(path))
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`)
   return r.json()
 }
@@ -160,7 +167,7 @@ export const api = {
 
   trafficAnalyzeStream: (opts: Record<string, unknown>, onEvent: (ev: { type: string; side: string; data: Record<string, unknown>; timestamp: number }) => void, onError?: (e: Error) => void): AbortController => {
     const c = new AbortController()
-    fetch('/api/traffic/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts), signal: c.signal }).then(async (r: Response) => {
+    fetch(url('/api/traffic/analyze'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts), signal: c.signal }).then(async (r: Response) => {
       if (!r.ok || !r.body) { onError?.(new Error(`HTTP ${r.status}`)); return }
       const rd = r.body.getReader(), dec = new TextDecoder()
       let buf = ''

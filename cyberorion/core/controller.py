@@ -442,17 +442,27 @@ class Controller:
         # 蓝队在战斗中才发现"暂无快照/容器已停止"。best-effort，不阻断。
         try:
             if _sc:
-                import subprocess
+                import subprocess, shutil, socket
                 down = []
+                use_docker = shutil.which("docker") is not None
                 for _t in _sc.targets.values():
                     if not _t.container:
                         continue
-                    r = subprocess.run(
-                        ["docker", "inspect", "-f", "{{.State.Running}}",
-                         _t.container],
-                        capture_output=True, text=True, timeout=10)
-                    if r.stdout.strip() != "true":
-                        down.append((_t.name, _t.container))
+                    if use_docker:
+                        r = subprocess.run(
+                            ["docker", "inspect", "-f", "{{.State.Running}}",
+                             _t.container],
+                            capture_output=True, text=True, timeout=10)
+                        if r.stdout.strip() != "true":
+                            down.append((_t.name, _t.container))
+                    elif hasattr(_t, "host_port") and _t.host_port:
+                        # Cloud Run / 无 Docker 环境：TCP 端口检测
+                        try:
+                            with socket.create_connection(
+                                ("127.0.0.1", _t.host_port), timeout=3):
+                                pass
+                        except Exception:
+                            down.append((_t.name, _t.container))
                 if down:
                     names = "、".join(f"{n}({c})" for n, c in down)
                     hint = ("CVE 场景请先运行 scripts/cve_target.sh up <CVE-ID>；"
