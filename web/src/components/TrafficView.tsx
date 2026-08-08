@@ -490,6 +490,7 @@ export function TrafficView() {
             accent="blue"
             emptyTitle="多 agent 流量研判"
             emptyDesc="点击「开始分析」启动 4 阶段流水线：规则检测 → 语义分析 → 攻击链重建 → 报告生成"
+            autoExpandReports
           />
         </div>
       </div>

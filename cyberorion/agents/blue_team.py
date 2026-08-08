@@ -132,13 +132,16 @@ _CONCLUSION_BLOCK = """
   【证据】引用具体事件/快照差异/命令输出，禁止臆测
   【建议】下一步该由哪个角色做什么
   【已执行动作】列出你实际调用过的工具与结果（没有就写"无"）
+== 知识库 RAG ==
+  遇到不熟悉的攻击手法或需确认 ATT&CK 技术编号时，可用 search_attack_kb(query)
+  检索知识库、lookup_technique(id) 查技术详情；调用后前端会高亮标注。
 """
 
 _ROLE_SPECS: dict[str, dict[str, Any]] = {
     "watcher": {
         "title": "哨兵",
         "tools": [query_logs, network_summary, process_audit,
-                  file_integrity, list_alerts, analyze_traffic],
+                  file_integrity, list_alerts, analyze_traffic, search_attack_kb, lookup_technique],
         "prompt": """你是 CyberOrion 蓝队的【哨兵】，负责巡逻检测。
 对目标清单中的每台主机执行快速全面巡查（时间预算紧张，务必快）：
   1. query_logs 每台主机【只发一次宽查】：query_logs(host, since_minutes=30)
@@ -171,7 +174,7 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     },
     "responder": {
         "title": "处置",
-        "tools": [block_ip, unblock_ip, harden_service, remediate],
+        "tools": [block_ip, unblock_ip, harden_service, remediate, search_attack_kb, lookup_technique],
         "prompt": """你是 CyberOrion 蓝队的【处置工程师】，只对指挥官
 确认的威胁执行处置，处置 playbook：
   - SSH 爆破/弱口令登录 -> harden_service(weak_ssh, ssh, apply)
@@ -190,7 +193,7 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
     },
     "hunter": {
         "title": "狩猎",
-        "tools": [file_integrity, process_audit, remediate],
+        "tools": [file_integrity, process_audit, remediate, search_attack_kb, lookup_technique],
         "prompt": """你是 CyberOrion 蓝队的【威胁猎人】，负责失陷排查
 与现场清理：
   1. file_integrity 对比关键文件基线，找出新增/被篡改的文件

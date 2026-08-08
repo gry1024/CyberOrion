@@ -17,6 +17,7 @@ from openai import AsyncOpenAI
 from ..tools.red import (
     nmap_scan, ssh_bruteforce, ssh_command, http_request, claim_success,
     submit_evidence,
+    search_attack_kb, lookup_technique,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +84,8 @@ flag 位置或漏洞清单 —— 一切都要靠你自己侦察、假设、验�
   6. submit_evidence(key, secret, target) - 证据上传（仅外部评分器场景）：
      把窃取的 secret 以单键 JSON 上传给评分器，然后再 claim_success
 草稿板：write_key_findings / read_key_findings - 跨轮次记录侦察结果、
+   7. search_attack_kb(query, k) - 检索 ATT&CK 知识库（攻击手法描述），中英文均可，返回技术编号 + 战术 + 检测要点。
+   8. lookup_technique(technique_id) - 按编号（T1110/T1059）查完整检测要点与缓解措施。
      已拿到的凭据、已验证的战果。
 
 == 攻击阶段 SOP ==
@@ -183,6 +186,7 @@ def build_red_agent(scenario: "Scenario | None" = None) -> Agent:
     tools = [
         nmap_scan, ssh_bruteforce, ssh_command, http_request, claim_success,
         submit_evidence,
+        search_attack_kb, lookup_technique,
     ] + _scratchpad_tools()
     if scenario is not None and scenario.mode == "cve":
         instructions = _CVE_INSTRUCTIONS_TEMPLATE.format(

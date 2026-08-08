@@ -61,11 +61,20 @@ class AttackKB:
                  vec_cache: "str | Path | None" = None):
         self.kb_path = Path(kb_path)
         self.docs: list[dict] = []
+        _skipped = 0
         with open(self.kb_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     self.docs.append(json.loads(line))
+                except (json.JSONDecodeError, ValueError):
+                    _skipped += 1
+        if _skipped:
+            import logging
+            logging.getLogger("cyberorion.kb").warning(
+                "KB load: skipped %d malformed lines", _skipped)
         self._by_id = {d["id"].upper(): d for d in self.docs}
         self._vec_cache = Path(vec_cache) if vec_cache else \
             self.kb_path.with_name("attack_kb_vecs.npz")

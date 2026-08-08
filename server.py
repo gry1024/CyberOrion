@@ -57,6 +57,7 @@ import json
 import os
 import re
 import time
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,8 @@ def _load_env() -> None:
 
 
 _load_env()
+
+logger = logging.getLogger("cyberorion.server")
 
 from cyberorion.core.event_bus import EventBus, Event
 from cyberorion.core.session_state import SessionState
@@ -176,10 +179,31 @@ def _blue_manual_prompt() -> str:
 # --------------------------------------------------------------------------- #
 # App lifespan: ensure controller tasks are cleaned up on shutdown
 # --------------------------------------------------------------------------- #
+# 知识库自动更新状态（供API查询）
+_kb_update_status: dict[str, Any] = {"last_run": None, "history": []}
+_kb_update_stop: asyncio.Event | None = None
+_kb_update_task: asyncio.Task | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """应用生命周期：启动 KB 自动更新守护进程 + 关闭时清理。"""
+    global _kb_update_stop, _kb_update_task
+    _kb_update_stop = asyncio.Event()
+    try:
+        from cyberorion.kb.auto_update import auto_update_loop
+        _kb_update_task = asyncio.create_task(auto_update_loop(_kb_update_stop))
+        logger.info("KB auto-update daemon started")
+    except Exception as e:
+        logger.warning("KB auto-update daemon failed to start: %s", e)
     yield
-    # On shutdown: stop everything cleanly.
+    if _kb_update_stop:
+        _kb_update_stop.set()
+    if _kb_update_task:
+        try:
+            await asyncio.wait_for(_kb_update_task, timeout=5)
+        except Exception:
+            pass
     try:
         await asyncio.wait_for(controller.stop_session(), timeout=10)
     except Exception:
@@ -727,6 +751,35 @@ async def kb_doc(doc_id: str) -> Any:
                             status_code=404)
     return doc
 
+@app.get("/api/kb/list")
+async def kb_list(doc_type: str = "", offset: int = 0,
+                  limit: int = 50, q: str = "") -> dict:
+    """按类型分页列出 KB 文档（FastGPT 风格文档列表）。"""
+    return await asyncio.to_thread(
+        kb_service.kb_list, get_kb(), doc_type, offset, limit, q)
+
+
+
+@app.post("/api/kb/auto-update")
+async def kb_trigger_update() -> Any:
+    """手动触发一次知识库自动更新（拉取最新 CVE + 监管政策）。"""
+    from cyberorion.kb.auto_update import run_auto_update
+    result = await asyncio.to_thread(run_auto_update)
+    _kb_update_status["last_run"] = result
+    _kb_update_status["history"].append(result)
+    if len(_kb_update_status["history"]) > 20:
+        _kb_update_status["history"] = _kb_update_status["history"][-20:]
+    return {"ok": True, "result": result}
+
+
+@app.get("/api/kb/auto-update/status")
+async def kb_update_status_api() -> Any:
+    """查询知识库自动更新守护进程状态与历史。"""
+    return {
+        "daemon_running": _kb_update_task is not None and not _kb_update_task.done(),
+        "last_run": _kb_update_status.get("last_run"),
+        "history": _kb_update_status.get("history", []),
+    }
 
 
 # --------------------------------------------------------------------------- #

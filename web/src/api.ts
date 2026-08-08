@@ -14,6 +14,7 @@ import type {
   KbSearchHit,
   KbStats,
   KbTactic,
+  KbListResponse,
   ScenarioDetail,
   ScenarioInfo,
   ScenarioList,
@@ -86,6 +87,26 @@ export const api = {
     >,
   getKbDoc: (id: string) =>
     get(`/api/kb/doc/${encodeURIComponent(id)}`) as Promise<KbDoc>,
+  getKbList: (params: { type?: string; offset?: number; limit?: number; q?: string }) =>
+    get(`/api/kb/list?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k === 'type' ? 'doc_type' : k, String(v)]) as [string, string][]).toString()}`) as Promise<KbListResponse>,
+  getKbAutoUpdateStatus: () =>
+    get('/api/kb/auto-update/status') as Promise<{
+      daemon_running: boolean
+      last_run: {
+        started_at: string
+        cve_fetched: number
+        regulation_fetched: number
+        added: number
+        elapsed_sec: number
+        errors: string[]
+      } | null
+      history: Array<Record<string, unknown>>
+    }>,
+  triggerKbUpdate: () =>
+    post('/api/kb/auto-update', {}) as Promise<{
+      ok: boolean
+      result: Record<string, unknown>
+    }>,
 
   startBenchRun: (n: number, mode: BenchMode, suite: BenchSuite) =>
     post('/api/bench/run', { n, mode, suite }) as Promise<{

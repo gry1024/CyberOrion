@@ -103,3 +103,49 @@ def kb_doc(kb, doc_id: str) -> "dict | None":
     if doc is None:
         return None
     return dict(doc)
+
+
+def kb_list(kb, doc_type: str = "", offset: int = 0, limit: int = 50,
+            q: str = "") -> dict:
+    """GET /api/kb/list -> 按类型分页列出文档（FastGPT 风格文档列表）。
+
+    返回 {"total", "offset", "limit", "items": [{id, type, name, source,
+    updated, published, text_preview, ...}]}。
+    """
+    docs = kb.docs
+    # 按类型过滤
+    if doc_type and doc_type != "all":
+        docs = [d for d in docs if d.get("type") == doc_type]
+    # 关键词过滤（简单子串匹配 name/id/text）
+    if q:
+        ql = q.lower()
+        docs = [d for d in docs
+                if ql in (d.get("name") or "").lower()
+                or ql in (d.get("id") or "").lower()
+                or ql in (d.get("text") or "").lower()]
+    total = len(docs)
+    # 分页
+    start = max(0, int(offset))
+    end = start + max(1, min(int(limit), 200))
+    page = docs[start:end]
+    items = []
+    for d in page:
+        text = d.get("text") or d.get("description") or ""
+        items.append({
+            "id": d.get("id") or "",
+            "type": d.get("type") or "",
+            "name": d.get("name") or "",
+            "source": d.get("_source") or "",
+            "updated": d.get("_updated") or "",
+            "published": d.get("published") or "",
+            "cvss": d.get("cvss"),
+            "text_preview": _clip(text, 200),
+            "tactics": d.get("tactics") or [],
+            "category": d.get("category") or "",
+            "attack_vector": d.get("attack_vector") or "",
+            "cwe": d.get("cwe") or [],
+            "affected_products": d.get("affected_products") or [],
+            "url": d.get("url") or "",
+        })
+    return {"total": total, "offset": start, "limit": end - start,
+            "type": doc_type or "all", "items": items}

@@ -32,7 +32,12 @@ const TOOL_ZH: Record<string, string> = {
   persist: '植入持久化',
   attack: '发起攻击',
   collect: '信息收集',
+  search_attack_kb: 'RAG检索知识库',
+  lookup_technique: 'RAG技术查询',
 }
+
+/** RAG 工具集合 —— 用紫色高亮，与普通工具调用区分 */
+const RAG_TOOLS = new Set(['search_attack_kb', 'lookup_technique'])
 
 interface AgentMeta {
   label: string
@@ -65,12 +70,18 @@ function AgentAvatar({ color, size = 20 }: { color: string; size?: number }) {
 function ToolCall({ step, side }: { step: ThoughtStep; side: Side }) {
   const [open, setOpen] = useState(false)
   const isRed = side === 'red'
+  const isRag = RAG_TOOLS.has(step.tool ?? '')
   const zh = TOOL_ZH[step.tool ?? '']
+  const toolStyle = isRag
+    ? { color: 'var(--color-purple)', background: 'var(--color-purple-soft)' }
+    : isRed
+      ? { color: 'var(--color-red)', background: 'var(--color-red-soft)' }
+      : { color: 'var(--color-tool)', background: 'var(--color-cyan-soft)' }
   return (
     <div className="fade-in flex flex-wrap items-center gap-1.5 py-px">
       <span className="flex-none font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
-      <span className="kimi-toolcard" style={isRed ? { color: 'var(--color-red)', background: 'var(--color-red-soft)' } : { color: 'var(--color-tool)', background: 'var(--color-cyan-soft)' }}>
-        {isRed ? '⚔' : '⚙'} {zh || step.tool}
+      <span className="kimi-toolcard" style={toolStyle}>
+        {isRag ? '📚' : isRed ? '⚔' : '⚙'} {zh || step.tool}
       </span>
       {step.args && (
         <button className="kimi-toolcard" onClick={() => setOpen((v) => !v)}>
@@ -95,8 +106,8 @@ function ToolOutput({ step }: { step: ThoughtStep }) {
         className="text-[10.5px] transition-colors hover:text-[var(--color-fg)]"
         style={{ color: 'var(--color-fg-3)' }}
       >
-        {open ? '▾' : '▸'} {step.tool} 结果
-      </button>
+        {open ? '▾' : '▸'} {RAG_TOOLS.has(step.tool ?? '') ? `📚 ${step.tool} 检索结果` : `${step.tool} 结果`}
+</button>
       {open && (
         <pre className="scroll-thin overflow-x-auto whitespace-pre-wrap break-words border-l-2 py-0.5 pl-3 font-mono text-[11px] leading-relaxed" style={{ borderColor: 'var(--color-line)', color: 'var(--color-output)' }}>
           {step.output}
@@ -106,8 +117,8 @@ function ToolOutput({ step }: { step: ThoughtStep }) {
   )
 }
 
-function Report({ step, side }: { step: ThoughtStep; side: Side }) {
-  const [open, setOpen] = useState(false)
+function Report({ step, side, defaultOpen = false }: { step: ThoughtStep; side: Side; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const meta = metaOf(step.role ?? step.agent, side)
   const hasError = step.report?.startsWith('✗')
   const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
@@ -130,7 +141,7 @@ function Report({ step, side }: { step: ThoughtStep; side: Side }) {
   )
 }
 
-function StepRow({ step, side, isLast }: { step: ThoughtStep; side: Side; isLast: boolean }) {
+function StepRow({ step, side, isLast, defaultReportOpen = false }: { step: ThoughtStep; side: Side; isLast: boolean; defaultReportOpen?: boolean }) {
   if (step.kind === 'system') {
     return (
       <div className="fade-in py-px text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
@@ -149,8 +160,8 @@ function StepRow({ step, side, isLast }: { step: ThoughtStep; side: Side; isLast
             <span className="text-[11px] font-semibold" style={{ color: meta.color }}>{agentName}</span>
             <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
           </div>
-          <div className="stream-thinking whitespace-pre-wrap break-words">
-            {step.text}
+          <div className="stream-thinking">
+            <MarkdownView markdown={step.text} className="md-inline" />
             {isLast && <span className="cursor-blink" />}
           </div>
         </div>
@@ -159,7 +170,7 @@ function StepRow({ step, side, isLast }: { step: ThoughtStep; side: Side; isLast
   }
   if (step.kind === 'tool_call') return <ToolCall step={step} side={side} />
   if (step.kind === 'tool_output' && step.output) return <ToolOutput step={step} />
-  if (step.kind === 'report') return <Report step={step} side={side} />
+  if (step.kind === 'report') return <Report step={step} side={side} defaultOpen={defaultReportOpen} />
   return null
 }
 
@@ -170,6 +181,7 @@ export function ChatStream({
   accent,
   emptyTitle,
   emptyDesc,
+  autoExpandReports = false,
 }: {
   side: Side
   steps: ThoughtStep[]
@@ -177,6 +189,7 @@ export function ChatStream({
   accent: 'red' | 'blue'
   emptyTitle: string
   emptyDesc: string
+  autoExpandReports?: boolean
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -215,7 +228,7 @@ export function ChatStream({
           </div>
         ) : (
           steps.map((s, i) => (
-            <StepRow key={s.id} step={s} side={side} isLast={i === steps.length - 1 && s.kind === 'thinking' && running} />
+            <StepRow key={s.id} step={s} side={side} isLast={i === steps.length - 1 && s.kind === 'thinking' && running} defaultReportOpen={autoExpandReports} />
           ))
         )}
         <div ref={bottomRef} />

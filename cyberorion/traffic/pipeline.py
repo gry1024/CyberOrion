@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from collections import Counter
 from typing import Any, AsyncIterator
@@ -205,6 +206,34 @@ async def _stage_semantic_analysis(
     agent = "sem_analyst"
     yield _ev_thinking(agent, "接收规则引擎告警摘要，开始语义研判：映射 ATT&CK 技术、评估威胁严重度、识别攻击意图。", delta=False)
 
+    # ---- RAG: 检索知识库，注入 ATT&CK 技术详情 ----
+    kb_context = ""
+    try:
+        from cyberorion.kb.rag import get_kb
+        kb = get_kb()
+        techniques = list(stats.get("techniques", {}).keys())
+        kb_results = []
+        seen_ids = set()
+        for tid in techniques[:5]:
+            doc = kb.lookup(tid)
+            if doc and doc["id"] not in seen_ids:
+                seen_ids.add(doc["id"])
+                det = (doc.get("detection") or doc.get("description") or "")[:200]
+                kb_results.append(f"- {doc['id']} {doc.get('name','')}: {det}")
+        search_q = " ".join(techniques[:3]) if techniques else re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff\s]", " ", summary)[:120]
+        for d in kb.search(search_q, k=3):
+            if d["id"] not in seen_ids:
+                seen_ids.add(d["id"])
+                det = (d.get("detection") or d.get("description") or "")[:200]
+                kb_results.append(f"- {d['id']} {d.get('name','')}: {det}")
+        if kb_results:
+            kb_context = "\n\n== 知识库 RAG 检索结果（ATT&CK 技术详情）==\n" + "\n".join(kb_results)
+            yield _ev_tool_call(agent, "search_attack_kb", f"techniques={techniques[:5]}")
+            yield _ev_tool_output(agent, "search_attack_kb", "\n".join(kb_results[:6]))
+    except Exception:
+        pass  # KB 不可用时不阻断流程
+
+
     system = (
         "你是资深网络安全分析师。基于规则引擎产出的告警摘要（已压缩，不含原始流量），"
         "做深度语义研判：\n"
@@ -219,6 +248,7 @@ async def _stage_semantic_analysis(
         f"标签分布 {stats['labels']}\n\n"
         f"告警摘要：\n{summary}\n\n"
         f"请输出语义研判结论。"
+        f"{kb_context}"
     )
 
     async for ev in _stream_llm(client, model, system, user, agent, max_tokens=1200):

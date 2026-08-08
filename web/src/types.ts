@@ -460,6 +460,34 @@ export interface KbDoc {
   mitigations?: Array<{ id: string; name: string }>
 }
 
+
+/** GET /api/kb/list — one item in the paginated document list. */
+export interface KbListItem {
+  id: string
+  type: string
+  name: string
+  source: string
+  updated: string
+  published: string
+  cvss: number | null
+  text_preview: string
+  tactics: string[]
+  category: string
+  attack_vector: string
+  cwe: string[]
+  affected_products: string[]
+  url: string
+}
+
+/** GET /api/kb/list — paginated response. */
+export interface KbListResponse {
+  total: number
+  offset: number
+  limit: number
+  type: string
+  items: KbListItem[]
+}
+
 // ---------------------------------------------------------------------------
 // Timeline
 // ---------------------------------------------------------------------------
