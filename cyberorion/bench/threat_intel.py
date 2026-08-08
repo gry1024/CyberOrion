@@ -27,6 +27,7 @@ from .cybersoceval import (
     MODES as _CYBERSOCEVAL_MODES,
     _ANSWER_INSTRUCTION,
     compute_scores,
+    grade,
     make_llm,
     parse_answers,
     sample_questions,
@@ -175,7 +176,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                 q, mode, kb_docs=kb.search(f"{q['question']}", 3))
         raw = await _call(system, user)
         pred = parse_answers(raw)
-        exact, jaccard = _grade(pred, q["correct_options"])
+        exact, jaccard = grade(pred, q["correct_options"])
         if raw.startswith("__LLM_ERROR__"):
             err_questions += 1
         rows[i] = {
@@ -226,13 +227,6 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     run["report"] = write_report(run, questions, log_dir / f"{run_id}.md")
     return run
 
-
-def _grade(pred: list[str], gold: list[str]) -> tuple[bool, float]:
-    p, g = set(pred), set(gold)
-    if not g or not p:
-        return False, 0.0
-    jaccard = len(p & g) / len(p | g)
-    return p == g, jaccard
 
 
 def _model_name() -> str:
