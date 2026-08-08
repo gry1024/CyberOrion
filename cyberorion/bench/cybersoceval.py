@@ -58,7 +58,7 @@ CONCURRENCY = 10
 LLM_TIMEOUT = 120.0
 # 推理型模型（如 deepseek-v4-flash / MiniMax-M 系列）会把 max_tokens 烧在
 # 思考上导致答案行被截断 → parse_fail 飙升（AGENTS.md 已知坑 7），给足 4096。
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192
 
 _SYSTEM_BASE = (
     "你是一名资深恶意软件分析专家，熟悉 MITRE ATT&CK 框架与沙箱"
@@ -77,9 +77,9 @@ _SYSTEM_RAG = _SYSTEM_BASE + (
 RETRIEVAL_MIN_SCORE = 0.45
 
 _ANSWER_INSTRUCTION = (
-    "这是多选题（可能有 1 个或多个正确选项）。请先简要推理，然后在"
-    "【最后一行】严格输出：ANSWER: [\"A\",\"C\"]（只包含你最终选定的"
-    "选项字母，JSON 数组格式）。"
+    "请先简要推理（不超过3句话），然后在【最后一行】严格输出："
+    "ANSWER: [\"A\"]（只包含你选定的选项字母，JSON 数组格式）。"
+    "选择你认为最正确的选项；如果多个选项都合理，选择最有把握的一个。"
 )
 
 # RAG 提示迭代版本号（记录进 run dict，便于对比不同提示的效果）。
@@ -135,24 +135,16 @@ SUITES = ("malware_analysis", "attack_kb", "threat_intel")
 
 # rag_g 模式追加的作答规则（接在 rag v2 的 3 条要求之后）。
 _GUESS_RULES = (
-    "4. 【禁止弃答】不允许输出空答案 ANSWER: []；每题必须选出你认为"
-    "最可能的选项。\n"
-    "5. 当题目引用的沙箱报告内容未随题提供、无法获得时，基于恶意软件"
-    "的典型行为、MITRE ATT&CK 知识和选项间的相对合理性给出最佳猜测，"
-    "不得弃答。\n"
-    "6. 仍保持“宁缺毋滥”的精神（不要把所有沾边选项都选上），但绝不"
-    "弃答。\n\n"
+    "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案。\n"
+    "5. 当题目引用的沙箱报告内容未随题提供时，基于 MITRE ATT&CK 知识"
+    "和选项间的相对合理性给出最佳猜测。\n\n"
 )
 
 # rag v7（默认）同款规则，编号接在知识使用指引/逐项裁决之后。
 _GUESS_RULES_V5 = (
-    "6. 【禁止弃答】不允许输出空答案 ANSWER: []；每题必须选出你认为"
-    "最可能的选项。\n"
-    "7. 当题目引用的沙箱报告内容未随题提供、无法获得时，基于恶意软件"
-    "的典型行为、检索到的家族/类别行为资料和选项间的相对合理性给出"
-    "最佳猜测，不得弃答。\n"
-    "8. 仍保持“宁缺毋滥”的精神（不要把所有沾边选项都选上），但绝不"
-    "弃答。\n\n"
+    "6. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案。\n"
+    "7. 当题目引用的沙箱报告内容未随题提供时，基于检索到的家族/类别"
+    "行为资料和选项间的相对合理性给出最佳猜测。\n\n"
 )
 
 # 沙箱报告摘要的生成上限：MITRE 映射最多取前 _REPORT_MITRE_CAP 条、
@@ -368,7 +360,8 @@ def load_questions(path: "str | Path" = DEFAULT_QUESTIONS,
             gold = q.get("correct_options")
             if not isinstance(gold, list) or not gold:
                 raise ValueError(f"第 {i} 题 correct_options 必须是非空数组")
-            gold_letters = sorted({str(a).strip().upper() for a in gold})
+            # 单选模式：只取第一个正确选项作为标准答案
+            gold_letters = sorted({str(gold[0]).strip().upper()})
             valid = {chr(ord("A") + k) for k in range(len(options))}
             if any(a not in valid for a in gold_letters):
                 raise ValueError(f"第 {i} 题 correct_options 超出选项范围")
@@ -462,12 +455,19 @@ def majority_vote(sample_preds: list[list[str]], k: int) -> list[str]:
 # 评分
 # ----------------------------------------------------------------------- #
 def grade(pred: list[str], gold: list[str]) -> tuple[bool, float]:
-    """返回 (exact_match, jaccard)。pred 为空时 (False, 0.0)。"""
+    """返回 (exact_match, jaccard)。pred 为空时 (False, 0.0)。
+
+    单选模式：只比较第一个选项。多选模式：Jaccard 部分得分。
+    """
     p, g = set(pred), set(gold)
     if not g:
         return False, 0.0
     if not p:
         return False, 0.0
+    # 单选题（gold 只有1个选项）：exact match 判断第一个选项是否正确
+    if len(g) == 1:
+        match = len(p & g) > 0
+        return match, 1.0 if match else 0.0
     jaccard = len(p & g) / len(p | g)
     return p == g, jaccard
 
@@ -729,10 +729,9 @@ def build_prompt(q: dict, mode: str = "base",
         rules = (
             "作答要求：\n"
             "1. 以题目描述的恶意软件行为本身为判断依据；知识条目只在"
-            "与题目明确相关时作为佐证，绝不因为某个知识条目被检索到就"
-            "把对应选项选上。\n"
-            "2. 宁缺毋滥：只选有充分依据的选项，不要把所有沾边的选项"
-            "都选上——多选错误选项与漏选同样扣分。\n"
+            "与题目明确相关时作为佐证。\n"
+            "2. 选择你认为最正确的选项。如果有多个选项看起来合理，"
+            "选择与题目描述最直接匹配的那一个。\n"
             "3. 若知识条目与题目无关，完全忽略它们，依据你自身的恶意"
             "软件分析知识作答。\n"
         )
@@ -767,7 +766,7 @@ def build_prompt(q: dict, mode: str = "base",
         )
         if mode == "rag_fs":
             user = (
-                "先阅读下面 2 个作答示例（学习“依据题目行为、宁缺毋滥”"
+                "先阅读下面 2 个作答示例（学习“依据题目行为、选择最正确选项”"
                 "的答题方式），然后回答【待答题目】。\n\n"
                 f"{_FEWSHOT_EXAMPLES}\n\n"
                 "————————————————————\n\n"
@@ -793,7 +792,9 @@ def _model_name() -> str:
 # 长提示（rag 注入知识后 ~4k 字符）会把全部 max_tokens 烧在
 # reasoning_tokens 上，答案行为空 -> parse_fail 飙升（AGENTS.md 坑 7）。
 # 其他 endpoint 不认识该参数时可不设此变量（保持历史行为）。
-_THINKING = os.getenv("CO_BENCH_THINKING") or None
+# 强制禁用推理模型思维链：推理 token 会烧光 max_tokens 导致空回答。
+# 默认 disabled；如需开启可设 CO_BENCH_THINKING=enabled。
+_THINKING = "disabled" if os.getenv("CO_BENCH_THINKING", "disabled") != "enabled" else None
 
 
 def make_llm(timeout: float = LLM_TIMEOUT,

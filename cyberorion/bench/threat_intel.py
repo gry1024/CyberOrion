@@ -64,7 +64,9 @@ def load_questions(path: "str | Path" = DEFAULT_QUESTIONS) -> list[dict]:
             gold = q.get("correct_answer")
             if not text or not isinstance(options, list) or len(options) < 2:
                 continue
-            gold_letters = sorted({str(a).strip().upper() for a in (gold or [])})
+            # 单选模式：只取第一个正确选项作为标准答案
+            gold_list = [str(a).strip().upper() for a in (gold or [])]
+            gold_letters = sorted({gold_list[0]}) if gold_list else []
             valid = {chr(ord("A") + k) for k in range(len(options))}
             if not gold_letters or any(a not in valid for a in gold_letters):
                 continue
@@ -116,9 +118,9 @@ def build_prompt(q: dict, mode: str = "base",
             f"{excerpt or '（无相关条目）'}\n\n"
             "作答要求：\n"
             "1. 以题干给出的威胁背景为判断依据；知识条目只在与题目明确"
-            "相关时作为佐证，绝不因为条目被检索到就把对应选项选上。\n"
-            "2. 逐项裁决：先对每个选项给出“是/否”与一句话理由，再汇总"
-            "最终答案；宁缺毋滥，但禁止空答案。\n"
+            "相关时作为佐证。\n"
+            "2. 选择你认为最正确的选项。如果多个选项看起来合理，"
+            "选择与题目描述最直接匹配的那一个。\n"
             "3. 若知识条目与题目无关，完全忽略它们，依据自身威胁情报"
             "知识作答。\n\n"
             f"{_ANSWER_INSTRUCTION}"
