@@ -9,8 +9,12 @@
 </p>
 
 <p align="center">
+  <strong>🚀 在线体验：</strong><a href="https://corleone.xin/cyberorion/">https://corleone.xin/cyberorion/</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue">
-  <img src="https://img.shields.io/badge/docker-required-blue">
+  <img src="https://img.shields.io/badge/docker-optional-blue">
   <img src="https://img.shields.io/badge/cai__framework-0.5.10-blue">
   <img src="https://img.shields.io/badge/tests-317-green">
   <img src="https://img.shields.io/badge/license-MIT-green">
@@ -25,7 +29,7 @@
 | **SUPER-AGENT 蓝队** | 指挥官 + `dispatch_task` 动态派遣 4 角色子代理（哨兵/研判/处置/狩猎），各角色独立 prompt + 最小工具子集，作战过程实时可见 |
 | **真实裁判，不信嘴炮** | 红方"我成功了"必须经服务端裁判客观验证（外部评分器 `/done` > flag 比对 > `uid=` > 目标内部凭据）；红方每次工具调用自动落地面真值 |
 | **信息隔离** | 蓝方代码层面接触不到 attacks 表/ground_truth（静态测试看守）；指标引擎把红方真值与蓝方告警做时间-主机-技术三维对齐 |
-| **知识库 RAG** | 3204 条文档（ATT&CK v18 + Malpedia + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
+| **知识库 RAG** | 7030 条文档（ATT&CK v18 + Malpedia + CVE + 法规 + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
 | **三大基准套件** | malware_analysis（609 题）+ attack_kb 知识访问（+36pt）+ threat_intel 威胁情报（588 题），Jaccard 平均得分主指标，同 seed 同模型双臂对比 |
 | **SOC 大屏前端** | 作战台（双栏流式 + 子代理人像）/ 基准测试（K3 报告风格 + 内嵌题目）/ 历史复盘（红蓝对垒时间线 + AI 故事线全屏）/ 知识图谱 四视图 |
 
@@ -56,7 +60,7 @@
 
 ### ① 前置条件
 
-- **Docker Desktop 已启动**（WSL 里 `docker ps` 能通即 OK；不通就先启动 Windows 侧 Docker Desktop）；
+- **Docker Desktop 已启动**（仅本地靶场对抗需要；纯线上体验或流量分析无需 Docker）；
 - **Python 3.10+**（CAI 框架装在仓库外的虚拟环境 `<cai-repo>/cai_env`，已存在可跳过 ②）；
 - **一个 OpenAI 兼容端点的 API key**（MiniMax / DashScope / OpenAI 官方均可）；
 - Node.js 20+ —— **仅重建前端时需要**，仓库自带构建好的 `web/dist`。
