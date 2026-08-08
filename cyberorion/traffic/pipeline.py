@@ -265,35 +265,134 @@ async def _stage_report(
     alerts: list[TrafficAlert],
     sem_result: str,
     chain_result: str,
+    client: Any,
+    model: str,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Stage 4：报告生成 agent —— 汇总产物生成结构化 Markdown 报告。"""
+    """Stage 4：报告生成 agent —— LLM 流式生成面向安全人员的精细化分析报告。
+
+    报告结构（面向 SOC 分析师 / 应急响应人员）：
+      1. 执行摘要 — 威胁概览 + 整体风险评级 + 关键发现
+      2. IoC 指标列表 — 恶意 IP / 端口 / ATT&CK 技术编号表格
+      3. 攻击时间线 — 按时间排序的关键攻击事件表格
+      4. 详细分析 — 每类攻击的技术细节、利用手法、影响评估
+      5. 处置建议 — 可操作的防御措施（封禁 / 加固 / 监控）
+      6. 附录 — 告警统计与检测覆盖
+    """
     agent = "report_writer"
-    yield _ev_thinking(agent, "汇总规则检测、语义研判、攻击链重建的产物，生成最终分析报告。", delta=False)
+    yield _ev_thinking(agent, "汇总全部分析产物，调用 LLM 生成面向安全人员的精细化报告。", delta=False)
+
+    # 构造告警明细表（供 LLM 参考，不再只是摘要）
+    sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    sorted_alerts = sorted(alerts, key=lambda a: (sev_order.get(a.severity, 9), -a.confidence))
+    alert_lines = []
+    for i, a in enumerate(sorted_alerts, 1):
+        ev_str = ""
+        if isinstance(a.evidence, dict):
+            ev_str = " ".join(f"{k}={v}" for k, v in list(a.evidence.items())[:3])
+        alert_lines.append(
+            f"| {i} | {a.severity} | {a.alert_type} | {a.technique} | "
+            f"{a.src_ip} | {a.dst_ip} | {a.confidence:.0%} | {a.description} | {ev_str} |"
+        )
+    alert_table = "\n".join(alert_lines) if alert_lines else "（无告警）"
 
     sev_counts = Counter(a.severity for a in alerts)
-    report = (
-        "# 流量分析报告\n\n"
-        f"> 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  \n"
-        f"> 数据规模：{stats['total']} 事件 / {len(alerts)} 告警\n\n"
-        "## 一、执行摘要\n\n"
-        f"本次分析共回放 **{stats['total']}** 条流量事件，其中攻击事件 "
-        f"**{stats['attack_count']}** 条，规则引擎触发 **{len(alerts)}** 条告警"
-        f"（critical {sev_counts.get('critical', 0)} / high {sev_counts.get('high', 0)} "
-        f"/ medium {sev_counts.get('medium', 0)} / low {sev_counts.get('low', 0)}）。\n\n"
-        "## 二、流量统计\n\n"
-        f"- 标签分布：{stats['labels']}\n"
-        f"- Top 源 IP：{stats['top_src']}\n"
-        f"- Top 目标端口：{stats['top_ports']}\n\n"
-        "## 三、语义研判\n\n"
-        f"{sem_result or '（语义分析阶段无输出）'}\n\n"
-        "## 四、攻击链重建\n\n"
-        f"{chain_result or '（攻击链重建阶段无输出）'}\n\n"
-        "## 五、检测覆盖\n\n"
-        f"- 规则引擎触发告警类型：{_alerts_by_type(alerts)}\n"
-        f"- ATT&CK 技术分布：{stats['techniques']}\n\n"
-        "---\n*本报告由 CyberOrion 多 agent 流量分析流水线自动生成。*"
+    # 提取唯一 IoC（恶意源 IP + 目标端口 + ATT&CK 技术）
+    mal_ips = sorted({a.src_ip for a in alerts if a.severity in ("critical", "high")})
+    techniques = sorted({a.technique for a in alerts if a.technique})
+    attack_ports = sorted({str(e.dst_port) for e in []})  # 从 stats 取
+    top_ports_str = ", ".join(f"{p}({c})" for p, c in stats.get("top_ports", [])[:8])
+
+    system = (
+        "你是高级安全分析师，擅长撰写面向 SOC 团队和应急响应人员的精细化威胁分析报告。\n"
+        "基于上游 agent 的分析产物（规则检测统计、告警明细、语义研判、攻击链重建），"
+        "生成一份结构完整、可直接交付安全团队的 Markdown 报告。\n\n"
+        "报告必须包含以下章节（用 ## 二级标题）：\n"
+        "1. **执行摘要** — 2-3 段概述：威胁规模、整体风险评级（Critical/High/Medium/Low 并说明依据）、"
+        "最关键的 2-3 个发现。\n"
+        "2. **IoC 指标列表** — Markdown 表格：类型(IP/端口/技术)、值、关联告警、置信度。"
+        f"已知恶意源 IP：{mal_ips}；ATT&CK 技术：{techniques}；高频目标端口：{top_ports_str}。\n"
+        "3. **攻击时间线** — Markdown 表格：时间、源IP、事件类型、ATT&CK技术、描述。"
+        "按告警时间排序，标注关键转折点。\n"
+        "4. **详细分析** — 对每类攻击（端口扫描/暴力破解/DoS/Web攻击/C2等）：\n"
+        "   - 攻击手法与技术细节\n"
+        "   - 利用漏洞或弱点\n"
+        "   - 影响评估（受影响资产、潜在损失）\n"
+        "   - ATT&CK 战术映射\n"
+        "5. **处置建议** — 可操作的行动清单（用 checkbox 格式）：\n"
+        "   - 立即处置：封禁 IP、阻断端口、隔离主机\n"
+        "   - 短期加固：补丁、配置加固、规则更新\n"
+        "   - 长期监控：建议持续监控的指标与告警规则\n"
+        "6. **附录：检测覆盖** — 告警类型分布、ATT&CK 技术覆盖、规则引擎统计。\n\n"
+        "要求：\n"
+        "- 所有结论必须有数据支撑（引用告警编号或统计数字）\n"
+        "- 风险评级要诚实，证据不足时标注「推断」\n"
+        "- 处置建议要具体可执行，不泛泛而谈\n"
+        "- 使用标准 Markdown，表格对齐，加粗关键数据\n"
+        "- 全中文输出"
     )
-    yield _ev_report(agent, report)
+    user = (
+        f"== 流量统计 ==\n"
+        f"事件总数：{stats['total']}（攻击 {stats['attack_count']} / 正常 {stats['benign_count']}）\n"
+        f"标签分布：{stats['labels']}\n"
+        f"告警总数：{len(alerts)}（critical {sev_counts.get('critical',0)} / "
+        f"high {sev_counts.get('high',0)} / medium {sev_counts.get('medium',0)} / "
+        f"low {sev_counts.get('low',0)}）\n"
+        f"告警类型分布：{_alerts_by_type(alerts)}\n"
+        f"Top 源 IP：{stats['top_src']}\n"
+        f"Top 目标端口：{stats['top_ports']}\n\n"
+        f"== 告警明细表 ==\n"
+        f"| # | 严重度 | 类型 | ATT&CK | 源IP | 目标IP | 置信度 | 描述 | 证据 |\n"
+        f"|---|--------|------|--------|------|--------|--------|------|------|\n"
+        f"{alert_table}\n\n"
+        f"== 语义研判结论 ==\n{sem_result or '（无）'}\n\n"
+        f"== 攻击链重建 ==\n{chain_result or '（无）'}\n\n"
+        f"请生成完整的精细化分析报告。"
+    )
+
+    async for ev in _stream_llm(client, model, system, user, agent, max_tokens=4000):
+        yield ev
+
+    # 取 LLM 全文，补充报告头（时间 + 数据规模）后作为最终报告输出
+    llm_report = getattr(_stream_llm, "full", "")
+    if llm_report.strip():
+        header = (
+            f"> 📅 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  \n"
+            f"> 📊 数据规模：{stats['total']} 事件 / {len(alerts)} 告警  \n"
+            f"> 🤖 分析模型：{model}\n\n---\n\n"
+        )
+        yield _ev_report(agent, header + llm_report)
+    else:
+        # LLM 失败降级：纯模板报告
+        yield _ev_thinking(agent, "LLM 生成失败，降级为模板报告。", delta=False)
+        fallback = (
+            "# 流量分析报告\n\n"
+            f"> 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  \n"
+            f"> 数据规模：{stats['total']} 事件 / {len(alerts)} 告警\n\n"
+            "## 一、执行摘要\n\n"
+            f"本次分析共回放 **{stats['total']}** 条流量事件，其中攻击事件 "
+            f"**{stats['attack_count']}** 条，规则引擎触发 **{len(alerts)}** 条告警"
+            f"（critical {sev_counts.get('critical', 0)} / high {sev_counts.get('high', 0)} "
+            f"/ medium {sev_counts.get('medium', 0)} / low {sev_counts.get('low', 0)}）。\n\n"
+            "## 二、IoC 指标列表\n\n"
+            f"| 类型 | 值 | 关联告警 |\n|------|----|---------|\n"
+            f"| 恶意IP | {', '.join(mal_ips) or '无'} | {len(alerts)} 条告警 |\n"
+            f"| ATT&CK技术 | {', '.join(techniques) or '无'} | — |\n"
+            f"| 高频端口 | {top_ports_str} | — |\n\n"
+            "## 三、攻击时间线\n\n"
+            f"| # | 严重度 | 类型 | 源IP | 目标IP | 置信度 | 描述 |\n"
+            f"|---|--------|------|------|--------|--------|------|\n"
+            f"{alert_table}\n\n"
+            "## 四、语义研判\n\n"
+            f"{sem_result or '（无）'}\n\n"
+            "## 五、攻击链重建\n\n"
+            f"{chain_result or '（无）'}\n\n"
+            "## 六、处置建议\n\n"
+            f"- [ ] 封禁恶意源 IP：{', '.join(mal_ips) or '无'}\n"
+            f"- [ ] 加固高频攻击目标端口服务\n"
+            f"- [ ] 部署 ATT&CK 技术 {', '.join(techniques) or 'N/A'} 的检测规则\n\n"
+            "---\n*本报告由 CyberOrion 多 agent 流量分析流水线自动生成。*"
+        )
+        yield _ev_report(agent, fallback)
 
 
 # --------------------------------------------------------------------------- #
@@ -350,8 +449,12 @@ async def run_traffic_analysis_pipeline(
         sem_result = "（LLM 不可用，跳过语义分析）"
         chain_result = "（LLM 不可用，跳过攻击链重建）"
 
-    # Stage 4：报告生成
-    async for ev in _stage_report(stats, alerts, sem_result, chain_result):
-        yield ev
+    # Stage 4：报告生成（LLM 流式生成精细化报告，LLM 不可用时降级为模板）
+    if llm_ok:
+        async for ev in _stage_report(stats, alerts, sem_result, chain_result, client, model):
+            yield ev
+    else:
+        async for ev in _stage_report(stats, alerts, sem_result, chain_result, client=None, model=""):
+            yield ev
 
     yield _ev_system("═══ 流量分析完成 ═══")
