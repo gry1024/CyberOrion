@@ -30,7 +30,7 @@ TACTICS: list[tuple[str, str]] = [
     ("impact", "影响"),
 ]
 
-_EXCERPT_CLIP = 300
+_EXCERPT_CLIP = 400
 
 
 def _clip(text: Any, limit: int = _EXCERPT_CLIP) -> str:
@@ -139,7 +139,7 @@ def kb_list(kb, doc_type: str = "", offset: int = 0, limit: int = 50,
             "updated": d.get("_updated") or "",
             "published": d.get("published") or "",
             "cvss": d.get("cvss"),
-            "text_preview": _clip(text, 200),
+            "text_preview": _clip(text, 300),
             "tactics": d.get("tactics") or [],
             "category": d.get("category") or "",
             "attack_vector": d.get("attack_vector") or "",

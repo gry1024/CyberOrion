@@ -457,7 +457,32 @@ export interface KbDoc {
   name: string
   tactics: string[]
   text: string
-  mitigations?: Array<{ id: string; name: string }>
+  // technique fields
+  description?: string
+  detection?: string
+  mitigations?: string[] | Array<{ id: string; name: string }>
+  platforms?: string[]
+  data_sources?: string[]
+  permissions_required?: string[]
+  defense_bypassed?: string[]
+  is_subtechnique?: boolean
+  // cve fields
+  cvss?: number | null
+  attack_vector?: string
+  cwe?: string[]
+  affected_products?: string[]
+  published?: string
+  // software fields
+  software_types?: string[]
+  // regulation fields
+  category?: string
+  issuer?: string
+  effective_date?: string
+  key_articles?: string
+  url?: string
+  // auto-update metadata
+  _source?: string
+  _updated?: string
 }
 
 

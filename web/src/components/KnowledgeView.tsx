@@ -117,29 +117,54 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       .catch(() => setError('文档读取失败 — 后端可能尚未实现 /api/kb/doc'))
   }, [id])
 
-  // 将 doc 的所有字段渲染为可读文本
+  // 将 doc 的所有字段渲染为可读文本（动态覆盖所有类型字段）
+  // 将 doc 的所有字段渲染为可读文本（动态覆盖所有类型字段）
   const renderDocContent = (doc: any) => {
-    const sections: Array<{ title: string; content: string }> = []
-    if (doc.description) sections.push({ title: '描述', content: String(doc.description) })
-    if (doc.detection) sections.push({ title: '检测要点', content: String(doc.detection) })
-    if (doc.mitigations && (doc.mitigations as Array<{ id: string; name: string }>).length > 0) {
-      sections.push({
-        title: '缓解措施',
-        content: (doc.mitigations as Array<{ id: string; name: string }>).map((m) => `- ${m.name} (${m.id})`).join('\n'),
-      })
+    const sections: Array<{ title: string; content: string; raw?: boolean }> = []
+    const add = (title: string, val: any, raw = false) => {
+      if (val == null || val === "" || val === false) return
+      if (Array.isArray(val) && val.length === 0) return
+      if (Array.isArray(val)) {
+        sections.push({ title, content: val.map((x) => typeof x === "string" ? x : (x.name || x.id || String(x))).join("、 "), raw })
+      } else if (typeof val === "string") {
+        sections.push({ title, content: val, raw })
+      } else if (typeof val === "number") {
+        sections.push({ title, content: String(val), raw })
+      }
     }
-    if (doc.cvss) sections.push({ title: 'CVSS 评分', content: String(doc.cvss) })
-    if (doc.attack_vector) sections.push({ title: '攻击向量', content: String(doc.attack_vector) })
-    if (doc.cwe && (doc.cwe as string[]).length > 0) sections.push({ title: 'CWE', content: (doc.cwe as string[]).join(', ') })
-    if (doc.affected_products && (doc.affected_products as string[]).length > 0) {
-      sections.push({ title: '受影响产品', content: (doc.affected_products as string[]).join(', ') })
+    add("描述", doc.description, true)
+    add("检测要点", doc.detection, true)
+    add("相关战术", doc.tactics)
+    add("平台", doc.platforms)
+    add("数据来源", doc.data_sources)
+    add("所需权限", doc.permissions_required)
+    add("绕过防御", doc.defense_bypassed)
+    if (doc.mitigations) {
+      const mits = Array.isArray(doc.mitigations) ? doc.mitigations : []
+      if (mits.length > 0) {
+        const isObj = typeof mits[0] === "object"
+        sections.push({
+          title: "缓解措施",
+          content: isObj
+            ? mits.map((m: any) => "- " + (m.name || m.id)).join("\n")
+            : mits.map((m: string) => "- " + m).join("\n"),
+          raw: true,
+        })
+      }
     }
-    if (doc.key_articles) sections.push({ title: '关键条款', content: String(doc.key_articles) })
-    if (doc.issuer) sections.push({ title: '颁布机构', content: String(doc.issuer) })
-    if (doc.effective_date) sections.push({ title: '生效日期', content: String(doc.effective_date) })
-    if (doc.url) sections.push({ title: '来源链接', content: String(doc.url) })
-    if (doc.text) sections.push({ title: '完整文本', content: String(doc.text) })
-
+    if (doc.cvss != null) add("CVSS 评分", doc.cvss)
+    add("攻击向量", doc.attack_vector)
+    add("CWE", doc.cwe)
+    add("受影响产品", doc.affected_products)
+    add("发布日期", doc.published)
+    add("软件类型", doc.software_types)
+    add("分类", doc.category)
+    add("颁布机构", doc.issuer)
+    add("生效日期", doc.effective_date)
+    add("关键条款", doc.key_articles, true)
+    add("来源链接", doc.url)
+    add("数据来源", doc._source)
+    if (doc.text) add("完整文本", doc.text, true)
     return sections
   }
 
@@ -189,13 +214,11 @@ function DocDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-3">
                   {s.title}
                 </div>
-                {s.title === '完整文本' || s.title === '关键条款' || s.title === '描述' ? (
-                  <div className="whitespace-pre-wrap break-words text-[12px] leading-[1.75] text-fg">
-                    {s.content}
-                  </div>
-                ) : (
-                  <div className="text-[12px] leading-[1.7] text-text-2">{s.content}</div>
-                )}
+                <div className={s.raw
+                  ? "whitespace-pre-wrap break-words text-[12px] leading-[1.75] text-fg"
+                  : "text-[12px] leading-[1.7] text-text-2"}>
+                  {s.content}
+                </div>
               </section>
             ))}
           </>
