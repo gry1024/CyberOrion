@@ -157,9 +157,48 @@ export const BLUE_ROLES: BlueRole[] = [
   },
 ]
 
-/** 按 key 查角色元信息（未知 key 返回 undefined）。 */
+/** 流量分析多 agent 流水线角色（与蓝队竞技场角色独立，共用 ChatStream 渲染）。
+ *  key 与 pipeline.py 中 SSE 事件的 agent 字段一致。 */
+export const TRAFFIC_ROLES: BlueRole[] = [
+  {
+    key: 'rule_engine' as BlueAgentRole,
+    name: '规则引擎',
+    duty: '纯规则阈值检测：端口扫描/DoS/暴力破解/Web攻击/C2外联，处理全量事件生成告警摘要',
+    scope: '全量流量事件',
+    colorVar: 'var(--color-rule-engine)',
+    tools: [],
+  },
+  {
+    key: 'sem_analyst' as BlueAgentRole,
+    name: '语义分析',
+    duty: 'LLM 语义研判：对告警摘要做 ATT&CK 映射、威胁定性、严重度评估',
+    scope: '告警摘要',
+    colorVar: 'var(--color-sem-analyst)',
+    tools: [],
+  },
+  {
+    key: 'chain_recon' as BlueAgentRole,
+    name: '攻击链重建',
+    duty: 'LLM 聚合告警重建攻击者时间线，讲好攻击故事',
+    scope: '告警 + 语义分析',
+    colorVar: 'var(--color-chain-recon)',
+    tools: [],
+  },
+  {
+    key: 'report_writer' as BlueAgentRole,
+    name: '报告生成',
+    duty: '汇总全部分析生成结构化 Markdown 分析报告',
+    scope: '全部分析产物',
+    colorVar: 'var(--color-report-writer)',
+    tools: [],
+  },
+]
+
+/** 按 key 查角色元信息（未知 key 返回 undefined）。
+ *  先查蓝队竞技场角色，再查流量分析角色，供 ChatStream 统一渲染。 */
 export function blueRoleOf(key: string): BlueRole | undefined {
   return BLUE_ROLES.find((r) => r.key === key)
+    ?? TRAFFIC_ROLES.find((r) => r.key === key)
 }
 
 /** WS {"type":"team","side":"blue","data":{...}} payload. */

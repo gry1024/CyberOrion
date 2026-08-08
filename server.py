@@ -62,7 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Allow `python server.py` to be run from the cyberorion/ directory.
@@ -1129,6 +1129,12 @@ async def blue_patrol_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # REST: traffic analysis (流量分析)
 # --------------------------------------------------------------------------- #
+def _evidence_str(ev):
+    if isinstance(ev, dict):
+        return " ".join(f"{k}={v}" for k, v in list(ev.items())[:4])
+    return str(ev) if ev else ""
+
+
 def _event_to_dict(e: Any) -> dict[str, Any]:
     """UnifiedEvent -> dict（前端预览用）。"""
     if isinstance(e, dict):
@@ -1162,7 +1168,7 @@ def _alert_to_dict(a: Any) -> dict[str, Any]:
         "severity": getattr(a, "severity", ""),
         "confidence": getattr(a, "confidence", 0.0),
         "description": getattr(a, "description", ""),
-        "evidence": str(getattr(a, "evidence", "")),
+        "evidence": _evidence_str(getattr(a, "evidence", "")),
     }
 
 
@@ -1221,60 +1227,66 @@ async def traffic_status() -> dict[str, Any]:
 
 
 @app.post("/api/traffic/analyze")
-async def traffic_analyze(payload: dict = Body(default={})) -> dict[str, Any]:
-    """触发蓝队 agent 流量分析（启动蓝队 with 流量分析 prompt）。
+async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse:
+    """多 agent 分层流量分析（SSE 流式输出）。
 
-    会话目录写入 traffic_analysis.json 标记，使该会话在历史记录中以
-    "traffic_analysis" 类型展示。
+    合并「回放 + 分析」为单端点：加载数据 → 规则检测 → LLM 语义分析 →
+    攻击链重建 → 报告生成，全程 SSE 推送思考链/工具调用/报告事件。
+    事件格式与 ArenaView WS 一致：{type, side, data, timestamp}。
     """
-    if controller._blue_agent is None:  # type: ignore[attr-defined]
-        await controller.start_session()
-    # 标记当前会话为流量分析会话（供 _scan_sessions 识别）。
-    try:
-        import json as _json
-        sid = controller.session_id  # type: ignore[attr-defined]
-        if sid:
-            mark = _HERE / "logs" / sid / "traffic_analysis.json"
-            mark.write_text(_json.dumps(
-                {"type": "traffic_analysis", "at": time.time()},
-                ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
-    prompt = (
-        "=== 蓝队流量分析任务 ===\n"
-        "流量回放数据已加载到 analyze_traffic 工具的缓存中。\n"
-        "请按以下步骤执行流量分析：\n"
-        "1. 调用 analyze_traffic 检测流量异常（端口扫描/DoS/暴力破解/"
-        "Web攻击/C2外联），返回告警按严重度排序。\n"
-        "2. 对每条告警的源 IP 调用 query_identity 关联身份情报"
-        "（通信目标、高频端口、关联账号），用于溯源。\n"
-        "3. 对不熟悉的攻击模式用 search_attack_kb / lookup_technique "
-        "核对 ATT&CK 技术编号。\n"
-        "4. 用 report_finding 上报关键发现，最后输出中文流量分析总结。\n"
-        "铁律：每条结论必须有 evidence；confidence 诚实给。"
-    )
-    from cyberorion.tools._common import TOOL_CALL_LOG, reset_tool_log
-    reset_tool_log()
-    try:
-        blue_task = await controller.start_blue(prompt=prompt)
+    from cyberorion.traffic import load_cicids, load_synthetic
+    from cyberorion.traffic.feeder import TrafficFeeder
+    from cyberorion.traffic.pipeline import run_traffic_analysis_pipeline
+    from cyberorion.tools.blue.traffic import _set_traffic_cache
+
+    source = payload.get("source", "synthetic")
+    max_rows = int(payload.get("max_rows", 2000) or 2000)
+    csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
+
+    async def event_stream():
+        # ---- 阶段 0：流量回放（加载数据 + 缓存，供蓝队工具复用） ----
         try:
-            await asyncio.wait_for(blue_task, timeout=120)
-        except asyncio.TimeoutError:
-            return {"ok": False, "error": "timeout", "output": ""}
+            yield _sse({"type": "system", "side": "system",
+                        "data": {"text": f"加载流量数据：source={source} csv={csv_file} max_rows={max_rows}"},
+                        "timestamp": time.time()})
+            if source == "cicids":
+                from cyberorion.paths import CICIDS_DIR
+                csv_path = str(CICIDS_DIR / csv_file)
+                rows = load_cicids(csv_path, max_rows=max_rows)
+            else:
+                rows = load_synthetic()
+            events = TrafficFeeder.to_events(rows)
+            from cyberorion.traffic import TrafficDetector
+            detector = TrafficDetector()
+            alerts = detector.detect(events)
+            _set_traffic_cache(events, alerts)
         except Exception as e:
-            return {"ok": False, "error": str(e), "output": ""}
-        lines = []
-        for rec in TOOL_CALL_LOG:
-            lines.append(f"[{rec.get('status','?')}] {rec.get('tool','?')}({rec.get('args','')})")
-            r = rec.get('result','')
-            if r: lines.append(f"  -> {r}")
-        output = "\n".join(lines) if lines else "(no tool calls)"
-        return {"ok": True, "output": output, "tool_calls": len(TOOL_CALL_LOG)}
-    except (RuntimeError, ValueError) as e:
-        return JSONResponse(
-            {"ok": False, "error": str(e), "status": await get_status()},
-            status_code=409,
-        )
+            yield _sse({"type": "error", "side": "system",
+                        "data": {"message": f"流量加载失败：{e}"},
+                        "timestamp": time.time()})
+            return
+
+        # push replay_data event: left panel renders events + alerts
+        yield _sse({
+            "type": "replay_data", "side": "system", "timestamp": time.time(),
+            "data": {
+                "events": [_event_to_dict(e) for e in events[:500]],
+                "events_total": len(events),
+                "alerts": [_alert_to_dict(a) for a in alerts],
+                "source": source, "csv_file": csv_file, "max_rows": max_rows,
+            },
+        })
+
+        # ---- 阶段 1-4：多 agent 分层分析流水线（流式） ----
+        async for ev in run_traffic_analysis_pipeline(events):
+            yield _sse(ev)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _sse(ev: dict) -> str:
+    """把事件 dict 序列化为一行 SSE data 帧。"""
+    return f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
 
 # --------------------------------------------------------------------------- #
 # Static frontend (production build) - mounted last so it doesn't shadow /api

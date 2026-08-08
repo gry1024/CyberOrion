@@ -78,6 +78,12 @@
   --color-responder: #ff9c5b;
   --color-hunter:    #5ec06e;
 
+  /* 流量分析 agent 角色（多 agent 分层流水线） */
+  --color-rule-engine:   #5eead4;
+  --color-sem-analyst:   #7ab2ff;
+  --color-chain-recon:   #f5b14a;
+  --color-report-writer: #b9a8ff;
+
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei",
     "Noto Sans CJK SC", sans-serif;
@@ -147,6 +153,12 @@
   --color-analyst:   #6e5aff;
   --color-responder: #c2410c;
   --color-hunter:    #1a7f4e;
+
+  /* 流量分析 agent 角色（浅色） */
+  --color-rule-engine:   #0f766e;
+  --color-sem-analyst:   #1d6fd1;
+  --color-chain-recon:   #8f5400;
+  --color-report-writer: #6e5aff;
 }
 
 html, body, #root {
