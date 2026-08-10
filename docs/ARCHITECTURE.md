@@ -175,6 +175,22 @@ Agent 构建时 `registry.render_skill_catalog` 只把 frontmatter 的 `name` �
 一致；单份 Markdown 上限 1200 字符，超限会整份拒绝，避免截断后执行不完整
 流程。坏 Skill 会在目录发现时跳过，不阻断 Agent 和核心链路。
 
+当前内置 Skill 均只编排已经授权给 Agent 的工具，不携带脚本或额外执行
+权限：
+
+| 阵营 | Skill | 作用 |
+| --- | --- | --- |
+| 红 | `service-recon` / `web_exploitation` / `web-auth-testing` | 服务侦察、Web 利用与认证会话测试 |
+| 红 | `ssh-intrusion` / `ssh-post-exploitation` / `evidence-submission` | SSH 访问、最小副作用取证与战果申报 |
+| 蓝 | `alert_triage` / `credential-attack-response` / `web-attack-response` | 告警、凭据攻击与 Web 攻击研判处置 |
+| 蓝 | `webshell-hunt` / `suspicious-process-hunt` / `service-hardening` | 落地物、异常进程狩猎与服务加固 |
+
+Skill 只描述“何时调用、调用顺序、证据与停止条件”，不会扩大角色的工具
+集合。当前角色没有某项工具时，应把证据和建议交回指挥官派遣对应角色；
+所有网络、容器和处置副作用仍必须经过现有 `@function_tool`，不得由 Skill
+旁路执行。若未来引入 `scripts/`，仅允许无网络、无容器、无任意文件写入
+的纯计算辅助逻辑，且必须由受审计的 Tool 包装后使用。
+
 ---
 
 ## 4. 红队设计（agents/red.py）

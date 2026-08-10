@@ -100,3 +100,29 @@ def test_red_and_blue_tools_are_honest_and_fixed_to_their_side(skill_root):
     assert "RED_ONLY" in _call(load_red_skill, "shared")
     assert "BLUE_ONLY" in _call(load_blue_skill, "shared")
     assert "加载失败" in _call(load_blue_skill, "missing")
+
+
+@pytest.mark.parametrize(
+    ("side", "expected"),
+    [
+        ("red", {
+            "evidence-submission", "service-recon", "ssh-intrusion",
+            "ssh-post-exploitation", "web-auth-testing", "web_exploitation",
+        }),
+        ("blue", {
+            "alert_triage", "credential-attack-response", "service-hardening",
+            "suspicious-process-hunt", "web-attack-response", "webshell-hunt",
+        }),
+    ],
+)
+def test_builtin_skill_catalog_is_complete_and_loadable(side, expected):
+    """内置作战 Skill 必须全部可发现、可完整加载且不夹带执行脚本。"""
+    discovered = {item.name for item in discover_skills(side)}
+    assert discovered == expected
+
+    for name in discovered:
+        document = load_skill_document(side, name)
+        assert len(document) <= registry.MAX_SKILL_CHARS
+        skill_dir = registry.SKILLS_DIR / side / name
+        assert not (skill_dir / "scripts").exists()
+        assert not (skill_dir / "references").exists()
