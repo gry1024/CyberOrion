@@ -12,7 +12,7 @@
 **当前状态快照**：
 
 - 代码包 `cyberorion/`，服务入口 `server.py`（FastAPI，:8000），前端 `web/`（React 19 + Vite + Tailwind v4，构建产物 `web/dist` 由 server 托管）；
-- **测试 331 项全绿**（`<cai-repo>/cai_env/bin/python -m pytest tests/ -q`，约 14s，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
+- **测试全绿**（`~/cai_env/bin/python -m pytest tests/ -q`；2026-08-10 实测 322 passed、1 skipped，无 docker/网络/key 也能跑——外部依赖全 mock/降级）；
 - 最近里程碑：① 蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task 派遣 4 角色子代理，`agents/blue_team.py`）；② 基准两套件（CyberSOCEval malware_analysis + attack_kb 知识访问测试，`bench/`；CyberGym 套件经实测后因数据/镜像体量过大已废弃移除）；③ 前端 v3（五视图：作战台 / Benchmark / 历史 / 知识图谱 / 文档；历史页有 AI 复盘 storyline；Benchmark 有「纯 LLM vs CyberOrion 框架」双臂对比、题目预览、逐题/逐任务 drill-down 抽屉与逐题 markdown 报告 `logs/bench/<run_id>.md`）；
 - 文档体系：`docs/ARCHITECTURE.md`（架构与扩展指南）、`docs/BENCHMARK.md`（基准）、`docs/REVIEW.md`（验收）、`docs/CAI_IMPROVEMENTS.md`（CAI 复用 vs 自建）、`docs/FRAMEWORK.md`（框架文档，前端「文档」tab 经 `GET /api/about` 渲染）。
 
@@ -21,7 +21,7 @@
 ## 2. 环境事实（先读这一节，能省你两小时）
 
 - **操作系统是 WSL2**（Windows 宿主的 Linux 子系统）。仓库在 `<cai-repo>/cyberorion`。
-- **Python 环境在仓库外**：`<cai-repo>/cai_env` 是 Python **3.10.12** venv，`cai-framework 0.5.10` 装在里面。**不要**在仓库里建 venv，**不要**用系统 python 跑项目代码。统一用 `<cai-repo>/cai_env/bin/python`。
+- **Python 环境在仓库外**：`~/cai_env` 是 Python **3.12.3** venv，`cai-framework 0.5.10` 装在里面。**不要**在仓库里建 venv，**不要**用系统 python 跑项目代码。统一用 `~/cai_env/bin/python`。
 - **LLM 配置在 `<cai-repo>/cyberorion/../.env`**（即 `<cai-repo>/.env`，CAI 仓库根，不在本仓库内）。关键变量：`CAI_MODEL`（带 provider 前缀，如 `openai/MiniMax-M3`）、`OPENAI_API_KEY`、`OPENAI_API_BASE` / `OPENAI_BASE_URL`（BASE 优先）。模板见本仓库 `.env.example`。`server.py` 启动时自动加载该 `.env`（setdefault 语义）。
 - **Docker = Windows 上的 Docker Desktop**（`E:\Program Files\Docker\Docker Desktop.exe`，WSL 里路径 `/mnt/e/Program Files/Docker/Docker Desktop.exe`）。WSL 里的 `docker` CLI 只是它的壳。**`docker` 命令挂了一般是 Desktop 没起**——启动 Desktop 后 `/var/run/docker.sock` 才存在。改镜像加速器要改 Windows 侧 `C:\Users\<user>\.docker\daemon.json` 再重启 Desktop。
 - **靶机容器**（`docker compose up -d` 起 3 台）：`cyberorion_dvwa`（172.29.0.10，宿主 28080→80）、`cyberorion_weak_ssh`（.12，22222→22）、`cyberorion_log4j`（.20，8983）。红方攻击一律走 **127.0.0.1 + 宿主端口**（见"已知坑"）。
@@ -80,7 +80,7 @@ cyberorion/                        # 仓库根
 │   └── logs.py / viz.py           legacy 会话日志 / 终端可视化
 ├── web/                           前端（React 19 + Vite + Tailwind v4，见 web/README.md）
 ├── skills/{red,blue}/*/SKILL.md   红蓝隔离的渐进式 Skill 内容
-├── tests/                         pytest 331 项（17 个文件）
+├── tests/                         pytest 323 项（2026-08-10 实测：322 passed、1 skipped）
 ├── scripts/                       e2e_smoke / e2e_fight / run_bench / gen_cve_scenario /
 │                                  cve_target.sh / reset_targets.sh / smoke_* / run_cyborg
 ├── docs/                          ARCHITECTURE / BENCHMARK / REVIEW / CAI_IMPROVEMENTS / FRAMEWORK
@@ -111,7 +111,7 @@ cyberorion/                        # 仓库根
 5. **高内聚低耦合**：每个工具单文件、`@function_tool` + 中文 docstring（Args/Returns）、输出 `_clip` 截断（1200 字符）；会话级资源走 **binding 模式**（`telemetry.binding.set_store` / `eval.ground_truth.set_ground_truth` / `blue_team.set_event_bus`），不穿透工具签名；未绑定时返回解释性字符串。
 6. **模型构造统一走环境变量**：`CAI_MODEL` / `OPENAI_API_KEY` / `OPENAI_API_BASE‖OPENAI_BASE_URL`，参照 `agents/red.py::_model`。
 7. **降级优先**：docker 缺失/LLM 失败/embedding 不可用都不允许让核心链路（指标、报告）无产出——采集器重试、裁判模板兜底、BM25 回退、e2e 无 key 自动 SKIP。
-8. **改完必须跑测试**：`<cai-repo>/cai_env/bin/python -m pytest tests/ -q`，全绿才算完。
+8. **改完必须跑测试**：`~/cai_env/bin/python -m pytest tests/ -q`，全绿才算完。
 
 ---
 
@@ -134,7 +134,7 @@ cyberorion/                        # 仓库根
 **起服务三部曲**：
 
 ```bash
-source <cai-repo>/cai_env/bin/activate
+source ~/cai_env/bin/activate
 set -a; source <cai-repo>/.env; set +a    # server.py 也会自动加载，此步可省
 cd <cai-repo>/cyberorion && python server.py   # → http://localhost:8000
 ```
@@ -143,7 +143,7 @@ cd <cai-repo>/cyberorion && python server.py   # → http://localhost:8000
 
 ## 6. 验证清单（交付前逐项过）
 
-- [ ] `cd <cai-repo>/cyberorion && <cai-repo>/cai_env/bin/python -m pytest tests/ -q` → **331 passed**（数量随开发增长，关键是无 fail）；
+- [ ] `cd <cai-repo>/cyberorion && ~/cai_env/bin/python -m pytest tests/ -q` → 全绿（数量随开发增长，关键是无 fail）；
 - [ ] 改了前端 → `cd web && npm run build` 成功；
 - [ ] 改了会话/对抗链路 → `docker compose up -d` 后 `python scripts/e2e_smoke.py`（真实 LLM + docker，无 key 自动 SKIP 不算失败，断言失败才是失败）；
 - [ ] 改了 bench → 跑小 n 真实验证：`python scripts/run_bench.py --n 5 --mode base`；

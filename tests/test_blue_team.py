@@ -219,13 +219,16 @@ class TestBuildBlueTeam:
         expected = {
             "watcher": {"query_logs", "network_summary", "process_audit",
                         "file_integrity", "list_alerts", "analyze_traffic",
+                        "search_attack_kb", "lookup_technique",
                         "load_skill"},
             "analyst": {"triage_alert", "query_logs", "list_alerts",
                         "search_attack_kb", "lookup_technique",
                         "query_identity", "load_skill"},
             "responder": {"block_ip", "unblock_ip", "harden_service",
-                          "remediate", "load_skill"},
+                          "remediate", "search_attack_kb",
+                          "lookup_technique", "load_skill"},
             "hunter": {"file_integrity", "process_audit", "remediate",
+                       "search_attack_kb", "lookup_technique",
                        "load_skill"},
         }
         for role, tools in expected.items():

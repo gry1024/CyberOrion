@@ -2,7 +2,7 @@
 
   - 题目加载与确定性采样；
   - 容错答案解析（markdown 围栏 / 中文“答案是” / 裸字母 / 垃圾输出）；
-  - 评分（exact-match 与 Jaccard）；
+  - 单选化加载与评分；
   - run_bench 端到端（mock LLM + 注入 KB）与结果持久化。
 """
 
@@ -38,7 +38,8 @@ class TestLoader:
         qs = bench.load_questions(questions_path)
         assert len(qs) == 20
         q = qs[0]
-        assert q["correct_options"] == ["A", "B"]
+        # harness 将上游多选题统一转换为单选，只取首个标准答案。
+        assert q["correct_options"] == ["A"]
         assert q["difficulty"] == "easy"
         assert q["topic"] == "Risk Assessment"
 
@@ -327,9 +328,9 @@ class TestGuessForced:
         system, user = bench.build_prompt(q, "rag_g", [])
         assert system == bench._SYSTEM_RAG
         assert "禁止弃答" in user
-        assert "ANSWER: []" in user          # 明确点名禁止空答案
+        assert 'ANSWER: ["A"]' in user       # 明确要求单选输出
         assert "最佳猜测" in user
-        assert "宁缺毋滥" in user            # 保持 v2 精神
+        assert "最有把握的一个" in user
         assert "【待答题目】" in user
 
     def test_rag_g_legacy_has_no_knowledge_guidance(self):
@@ -361,7 +362,7 @@ class TestRagV5:
         assert system == bench._SYSTEM_RAG
         assert "禁止弃答" in user             # 并入原 rag_g v4 规则
         assert "最佳猜测" in user
-        assert "宁缺毋滥" in user
+        assert "最有把握的一个" in user
         assert "知识用法" in user             # v5 新增知识使用指引
         assert "逐项裁决" in user             # v6 新增逐项裁决
         assert "【检索到的恶意软件知识】" in user

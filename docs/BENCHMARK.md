@@ -37,9 +37,9 @@
 
 ## 3. 评分
 
-- **答案解析**：要求最后一行输出 `ANSWER: ["A","C"]`；容错解析器依次尝试 ANSWER 行 → 中文"答案是 AC" → 方括号字母列表 → 裸字母行。解析失败返回空列表 → 记 wrong + `parse_fail`；
-- **逐题评分**（`grade`）：`exact`（选项集合精确相等）+ `jaccard`（|pred∩gold| / |pred∪gold| 部分分）；
-- **汇总指标**（`compute_scores`）：`correct_mc_pct`（全对率）、`avg_score`（Jaccard 均值）、`parse_fail`，并按 `difficulty` / `topic` 分组统计；
+- **答案解析**：题目加载时只取上游 `correct_options` 的首项作为标准答案，要求最后一行输出单选 `ANSWER: ["A"]`；容错解析器依次尝试 ANSWER 行 → 中文"答案是 A" → 方括号字母列表 → 裸字母行。解析失败返回空列表 → 记 wrong + `parse_fail`；
+- **逐题评分**（`grade`）：预测选项包含该唯一标准答案即命中，否则为 0 分；解析器仍兼容模型误输出多个字母；
+- **汇总指标**（`compute_scores`）：`correct_mc_pct`（命中率）、`avg_score`（单选模式下与命中率一致）、`parse_fail`，并按 `difficulty` / `topic` 分组统计；
 - run dict 还记录 `arm`（对比臂）/`mode/n/seed/model/rag_top_k/prompt_version/elapsed_sec` 与逐题 `results`（含 raw 输出前 800 字符），完整可审计；
 - 每次运行自动在 JSON 旁生成**逐题 markdown 报告** `logs/bench/<run_id>.md`（`run["report"]`）：完整题干、全部选项（标注正确项与模型所选）、gold vs pred 判定、每题的模型原始回答——"看分数"之外先看题目本身。
 

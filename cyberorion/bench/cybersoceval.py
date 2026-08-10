@@ -3,7 +3,7 @@
 与官方 runner 的区别（也是之前 23/100 INVALID 的教训）：
   - 【不】使用 response_format=json_object —— 该 endpoint 的模型会把
     json schema 提示原样复读而不是作答；
-  - 纯文本提示，要求最后一行输出 ``ANSWER: ["A","C"]``；
+  - 纯文本提示，要求最后一行输出单选答案 ``ANSWER: ["A"]``；
   - 容错解析器从自然语言回答中提取选项字母；解析失败记 wrong 并单独
     统计 parse_fail。
 
@@ -23,7 +23,7 @@
             指引与两段式检索，用于新旧对比）。
 
 采样用固定 seed（base 与 rag 回答【同一批】题目，保证可比）。
-评分：exact-match（correct_mc_pct）+ Jaccard 部分分（avg_score），
+评分：单选命中率（correct_mc_pct / avg_score），
 并按 difficulty / topic 分组统计。每次运行持久化到 logs/bench/。
 """
 
