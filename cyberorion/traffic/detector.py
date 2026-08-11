@@ -26,6 +26,11 @@ class TrafficAlert:
     confidence: float
     description: str
     evidence: dict = field(default_factory=dict)
+    technique_id: str = ""  # ATT&CK技术ID（与technique同义，新规则优先使用）
+
+    def __post_init__(self):
+        if not self.technique_id:
+            self.technique_id = self.technique
 
 
 def _bucket(ts: float, window: int = 60) -> int:
@@ -65,6 +70,11 @@ class TrafficDetector:
             (self._rule_brute_force, "暴力破解检测"),
             (self._rule_web_exploit, "Web应用攻击检测"),
             (self._rule_anomalous_egress, "异常外联检测"),
+            (self._detect_kerberoasting, "Kerberoasting检测"),
+            (self._detect_asrep_roasting, "AS-REP roasting检测"),
+            (self._detect_dcsync, "DCSync检测"),
+            (self._detect_ntlm_relay, "NTLM中继检测"),
+            (self._detect_adcs_attack, "ADCS攻击检测"),
         ]
 
     def detect(self, events):
@@ -185,4 +195,101 @@ class TrafficDetector:
                     severity=_severity_from_conf(conf), confidence=conf,
                     description=f"src={src} dst={dst}:{port} conns={cnt}",
                     evidence={"port": port, "conns": cnt, "c2": wl}))
+        return alerts
+
+    def _detect_kerberoasting(self, events):
+        """检测Kerberoasting: 大量TGS-REQ到88端口，且SPN模式异常"""
+        alerts = []
+        kerb_events = defaultdict(list)
+        for e in events:
+            hint = getattr(e, "payload_hint", "") or ""
+            if e.dst_port == 88 and ("Kerberoasting" in hint or "TGS-REQ for" in hint) and "Golden Ticket" not in hint:
+                key = (e.src_ip, e.dst_ip, _bucket(e.ts))
+                kerb_events[key].append(e)
+        for (src, dst, b), evs in kerb_events.items():
+            if len(evs) >= 3:
+                conf = min(0.95, 0.6 + len(evs) * 0.08)
+                spns = [e.payload_hint for e in evs[:5]]
+                alerts.append(TrafficAlert(
+                    ts=b * 60, src_ip=src, dst_ip=dst,
+                    alert_type="Kerberoasting", technique="T1558.003",
+                    technique_id="T1558.003",
+                    severity=_severity_from_conf(conf), confidence=conf,
+                    description=f"src={src} dst={dst}:88 TGS-REQ count={len(evs)} (SPN requests)",
+                    evidence={"port": 88, "tgs_count": len(evs), "sample_spns": spns}))
+        return alerts
+
+    def _detect_asrep_roasting(self, events):
+        """检测AS-REP roasting: AS-REQ无预认证到88端口"""
+        alerts = []
+        asrep_events = defaultdict(list)
+        for e in events:
+            hint = getattr(e, "payload_hint", "") or ""
+            if e.dst_port == 88 and ("AS-REP" in hint or "no-preauth" in hint):
+                key = (e.src_ip, e.dst_ip, _bucket(e.ts))
+                asrep_events[key].append(e)
+        for (src, dst, b), evs in asrep_events.items():
+            if len(evs) >= 2:
+                conf = min(0.92, 0.55 + len(evs) * 0.1)
+                users = [e.payload_hint for e in evs[:5]]
+                alerts.append(TrafficAlert(
+                    ts=b * 60, src_ip=src, dst_ip=dst,
+                    alert_type="AS-REP Roasting", technique="T1558.004",
+                    technique_id="T1558.004",
+                    severity=_severity_from_conf(conf), confidence=conf,
+                    description=f"src={src} dst={dst}:88 AS-REQ no-preauth count={len(evs)}",
+                    evidence={"port": 88, "asrep_count": len(evs), "sample_users": users}))
+        return alerts
+
+    def _detect_dcsync(self, events):
+        """检测DCSync: LDAP复制请求(DRsuAPI)到389/445端口"""
+        alerts = []
+        for e in events:
+            hint = getattr(e, "payload_hint", "") or ""
+            if e.dst_port in (389, 445) and ("DCSync" in hint or "DsGetNCChanges" in hint or "DRSUAPI" in hint):
+                conf = 0.95
+                alerts.append(TrafficAlert(
+                    ts=e.ts, src_ip=e.src_ip, dst_ip=e.dst_ip,
+                    alert_type="DCSync", technique="T1003.006",
+                    technique_id="T1003.006",
+                    severity="critical", confidence=conf,
+                    description=f"src={e.src_ip} dst={e.dst_ip}:{e.dst_port} DCSync replication request",
+                    evidence={"port": e.dst_port, "hint": hint[:80]}))
+        return alerts
+
+    def _detect_ntlm_relay(self, events):
+        """检测NTLM中继: 异常SMB认证模式"""
+        alerts = []
+        smb_events = defaultdict(list)
+        for e in events:
+            hint = getattr(e, "payload_hint", "") or ""
+            if e.dst_port == 445 and ("NTLM" in hint or "relay" in hint or "PsExec" in hint or "SMB exec" in hint or "WMI exec" in hint):
+                key = (e.src_ip, e.dst_ip, _bucket(e.ts))
+                smb_events[key].append(e)
+        for (src, dst, b), evs in smb_events.items():
+            if len(evs) >= 2:
+                conf = min(0.90, 0.55 + len(evs) * 0.1)
+                alerts.append(TrafficAlert(
+                    ts=b * 60, src_ip=src, dst_ip=dst,
+                    alert_type="NTLM Relay / SMB Lateral", technique="T1557.001",
+                    technique_id="T1557.001",
+                    severity=_severity_from_conf(conf), confidence=conf,
+                    description=f"src={src} dst={dst}:445 SMB auth/exec count={len(evs)}",
+                    evidence={"port": 445, "smb_count": len(evs), "sample": [e.payload_hint[:60] for e in evs[:3]]}))
+        return alerts
+
+    def _detect_adcs_attack(self, events):
+        """检测ADCS攻击: 证书服务请求(ICPR 445/135)异常"""
+        alerts = []
+        for e in events:
+            hint = getattr(e, "payload_hint", "") or ""
+            if e.dst_port in (445, 135) and ("ADCS" in hint or "ICPR" in hint or "certificate" in hint.lower()):
+                conf = 0.88
+                alerts.append(TrafficAlert(
+                    ts=e.ts, src_ip=e.src_ip, dst_ip=e.dst_ip,
+                    alert_type="ADCS Attack", technique="T1649",
+                    technique_id="T1649",
+                    severity="high", confidence=conf,
+                    description=f"src={e.src_ip} dst={e.dst_ip}:{e.dst_port} ADCS cert request",
+                    evidence={"port": e.dst_port, "hint": hint[:80]}))
         return alerts

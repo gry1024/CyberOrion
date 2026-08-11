@@ -795,3 +795,171 @@ export interface TrafficReplayResult {
   rows?: number
   error?: string
 }
+
+// ---------------------------------------------------------------------------
+// v2 multi-role architecture (red 7 workers + 1 orchestrator / blue 4 workers + 1 orchestrator)
+// Corresponds to backend cyberorion/agents/v2/{red,blue}_workers.py and controller_v2.py.
+// ---------------------------------------------------------------------------
+
+/** v2 role interface: tools is a string array, with ATT&CK technique mapping. */
+export interface V2Role {
+  /** Role unique key (matches backend AgentRole enum). */
+  key: string
+  /** Chinese display name. */
+  name: string
+  /** Duty summary. */
+  duty: string
+  /** CSS color variable name (e.g. '--color-recon', wrapped via v2RoleColor as var(...)). */
+  colorVar: string
+  /** Tool list (English names, may include wildcards like 'dispatch_*'). */
+  tools: string[]
+  /** ATT&CK technique mapping (ID + name). */
+  techniques: string[]
+  /** Side. */
+  side: 'red' | 'blue'
+}
+
+/** Red team v2 worker roles (7) + orchestrator.
+ *  Order matches backend AgentRole enum: recon -> credential_access -> cracker ->
+ *  acl -> privesc -> lateral -> coercion -> orchestrator. */
+export const RED_V2_ROLES: V2Role[] = [
+  {
+    key: 'recon',
+    name: '侦察',
+    duty: '网络扫描/枚举/BloodHound',
+    colorVar: '--color-recon',
+    tools: ['nmap', 'netexec', 'bloodhound', 'ldapsearch'],
+    techniques: ['T1595 Active Scanning', 'T1018 Remote System Discovery', 'T1087 Account Discovery'],
+    side: 'red',
+  },
+  {
+    key: 'credential_access',
+    name: '凭据获取',
+    duty: 'Kerberoasting/AS-REP/密码喷洒',
+    colorVar: '--color-cred',
+    tools: ['secretsdump', 'kerberoast', 'lsassy'],
+    techniques: ['T1558 Steal or Forge Kerberos Tickets', 'T1110 Brute Force', 'T1003 OS Credential Dumping'],
+    side: 'red',
+  },
+  {
+    key: 'cracker',
+    name: '破解',
+    duty: 'hashcat/john 离线破解',
+    colorVar: '--color-crack',
+    tools: ['hashcat', 'john'],
+    techniques: ['T1110 Brute Force', 'T1555 Credentials from Password Stores'],
+    side: 'red',
+  },
+  {
+    key: 'acl',
+    name: 'ACL 滥用',
+    duty: 'BloodHound 路径/ACL 攻击',
+    colorVar: '--color-acl',
+    tools: ['bloodyAD', 'pywhisker', 'dacl_edit'],
+    techniques: ['T1098 Account Manipulation', 'T1078 Valid Accounts'],
+    side: 'red',
+  },
+  {
+    key: 'privesc',
+    name: '提权',
+    duty: 'ADCS/委派/CVE 利用',
+    colorVar: '--color-privesc',
+    tools: ['certipy', 'nopac', 'printnightmare'],
+    techniques: ['T1068 Exploitation for Privilege Escalation', 'T1556 Modify Authentication Process'],
+    side: 'red',
+  },
+  {
+    key: 'lateral',
+    name: '横向移动',
+    duty: 'PSExec/WMI/WinRM/SSH',
+    colorVar: '--color-lateral',
+    tools: ['psexec', 'wmiexec', 'evil-winrm'],
+    techniques: ['T1021 Remote Services', 'T1077 Windows Admin Shares', 'T1059 Command and Scripting Interpreter'],
+    side: 'red',
+  },
+  {
+    key: 'coercion',
+    name: '强制认证',
+    duty: 'Responder/ntlmrelayx/PetitPotam',
+    colorVar: '--color-coercion',
+    tools: ['responder', 'ntlmrelayx', 'petitpotam'],
+    techniques: ['T1557 Adversary-in-the-Middle', 'T1187 Forced Authentication'],
+    side: 'red',
+  },
+  {
+    key: 'orchestrator',
+    name: '编排器',
+    duty: '任务分发/状态管理',
+    colorVar: '--color-orch',
+    tools: ['dispatch_*', 'get_*'],
+    techniques: ['T1059 Command and Scripting Interpreter'],
+    side: 'red',
+  },
+]
+
+/** Blue team v2 roles (4 workers + 1 orchestrator). */
+export const BLUE_V2_ROLES: V2Role[] = [
+  {
+    key: 'triage',
+    name: '分诊',
+    duty: '告警评估/IOC 提取/严重性路由',
+    colorVar: '--color-triage',
+    tools: ['query_logs', 'list_alerts', 'run_detection'],
+    techniques: ['T1027 Obfuscated Files or Information', 'T1071 Application Layer Protocol'],
+    side: 'blue',
+  },
+  {
+    key: 'threat_hunter',
+    name: '威胁狩猎',
+    duty: 'MITRE 检测/证据验证/攻击链重建',
+    colorVar: '--color-hunter',
+    tools: ['run_parallel_detections', 'lookup_technique'],
+    techniques: ['T1059 Command and Scripting Interpreter', 'T1070 Indicator Removal'],
+    side: 'blue',
+  },
+  {
+    key: 'lateral_analyst',
+    name: '横向分析',
+    duty: '多主机追踪/横向移动图',
+    colorVar: '--color-lat-analyst',
+    tools: ['network_summary', 'track_host'],
+    techniques: ['T1021 Remote Services', 'T1077 Windows Admin Shares'],
+    side: 'blue',
+  },
+  {
+    key: 'escalation_triage',
+    name: '升级审查',
+    duty: '高危审查/跨调查关联',
+    colorVar: '--color-escalation',
+    tools: ['query_logs', 'run_detection'],
+    techniques: ['T1486 Data Encrypted for Impact', 'T1499 Endpoint Denial of Service'],
+    side: 'blue',
+  },
+  {
+    key: 'orchestrator',
+    name: 'SOC 指挥官',
+    duty: '调查生命周期管理',
+    colorVar: '--color-blue-orch',
+    tools: ['dispatch_*', 'complete_investigation'],
+    techniques: ['T1059 Command and Scripting Interpreter'],
+    side: 'blue',
+  },
+]
+
+/** Wrap v2 colorVar as a CSS-ready var(...) value.
+ *  Accepts both bare names ('--color-xxx') and already-wrapped ('var(--color-xxx)'). */
+export function v2RoleColor(colorVar: string): string {
+  if (colorVar.startsWith('var(')) return colorVar
+  return `var(${colorVar})`
+}
+
+/** Look up a v2 role by key (red first, then blue). */
+export function v2RoleOf(key: string): V2Role | undefined {
+  return RED_V2_ROLES.find((r) => r.key === key)
+    ?? BLUE_V2_ROLES.find((r) => r.key === key)
+}
+
+/** Check if a key is a v2 role (used by DispatchGraph / AgentDetailModal to switch UI). */
+export function isV2Role(key: string): boolean {
+  return Boolean(v2RoleOf(key))
+}

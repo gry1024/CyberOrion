@@ -119,3 +119,26 @@ def load_cicids(csv_path: str, max_rows: int = 50000, attack_only: bool = False)
                 break
     rows = attack_rows + benign_rows                                   # 攻击行在前
     return rows[:max_rows]
+
+
+def load_ad_scenario() -> list:
+    """加载AD域攻击合成场景。
+
+    返回 list[UnifiedEvent]（已转换，非 list[dict]），
+    可直接供 detector 使用。
+    场景包含完整 AD 域攻击 kill chain：
+    侦察 → LDAP枚举 → Kerberoasting/AS-REP roasting/ADCS
+    → 横向移动 → DCSync/黄金票据。
+    """
+    from .synthetic import generate_ad_attack_scenario
+    return generate_ad_attack_scenario()
+
+
+# loader 注册表：场景名 → 加载函数
+# cicids2017/synthetic 返回 list[dict]（需 TrafficFeeder.to_events 转换）
+# ad_domain 返回 list[UnifiedEvent]（已转换，无需再转）
+LOADERS = {
+    "cicids2017": "load_cicids",
+    "synthetic": "load_synthetic",
+    "ad_domain": "load_ad_scenario",
+}

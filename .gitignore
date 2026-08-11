@@ -12,14 +12,15 @@ __pycache__/
 
 # CAI framework tracing logs (auto-generated, large, not needed for repro)
 logs/cai_*.jsonl
+logs/*.log
 
 # Workspaces (agent-generated debug scripts, not part of the product)
 workspaces/
 
-# Session logs: only keep the 3 most recent under samples/
-# (the logs/ dir itself is gitignored except for samples/)
-logs/
-!samples/
+# Logs: ignore raw benchmark JSON + timestamped temp sessions;
+# keep bench reports (.md) and session_r8_demo/
+logs/bench/*.json
+logs/session_2026*/
 
 # OS / editor
 .DS_Store

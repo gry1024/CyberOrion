@@ -5,10 +5,10 @@
 """
 from .feeder import TrafficFeeder, UnifiedEvent
 from .detector import TrafficDetector, TrafficAlert
-from .loaders import load_cicids
-from .synthetic import load_synthetic
+from .loaders import load_cicids, load_ad_scenario
+from .synthetic import load_synthetic, generate_ad_attack_scenario
 
 __all__ = [
     "TrafficFeeder", "UnifiedEvent", "TrafficDetector", "TrafficAlert",
-    "load_cicids", "load_synthetic",
+    "load_cicids", "load_synthetic", "load_ad_scenario", "generate_ad_attack_scenario",
 ]

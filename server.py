@@ -107,6 +107,8 @@ logger = logging.getLogger("cyberorion.server")
 from cyberorion.core.event_bus import EventBus, Event
 from cyberorion.core.session_state import SessionState
 from cyberorion.core.controller import Controller
+from cyberorion.core.controller_v2 import ControllerV2
+from cyberorion.core.session_runner import SessionRunner
 from cyberorion.tools._common import (
     set_session_state_ref, snapshot_ledger, reset_state, TOOL_CALL_LOG,
 )
@@ -118,6 +120,12 @@ from cyberorion.tools._common import (
 event_bus = EventBus()
 session_state = SessionState()
 controller = Controller(event_bus, session_state)
+
+# V2 会话运行器（独立于旧 Controller，管理 v2 agent loop 攻防会话）
+v2_runner = SessionRunner()
+
+# V2 ControllerV2 (agent loop framework, coexists with SessionRunner)
+controller_v2 = None
 
 # Bridge: tools mirror ledger writes into SessionState for frontend visibility.
 set_session_state_ref(session_state)
@@ -1215,6 +1223,8 @@ def _event_to_dict(e: Any) -> dict[str, Any]:
         "label": getattr(e, "label", ""),
         "technique": getattr(e, "technique", None),
         "attack_type": getattr(e, "attack_type", ""),
+        "payload_hint": getattr(e, "payload_hint", ""),
+        "severity": getattr(e, "severity", "low"),
     }
 
 
@@ -1232,13 +1242,14 @@ def _alert_to_dict(a: Any) -> dict[str, Any]:
         "confidence": getattr(a, "confidence", 0.0),
         "description": getattr(a, "description", ""),
         "evidence": _evidence_str(getattr(a, "evidence", "")),
+        "technique_id": getattr(a, "technique_id", ""),
     }
 
 
 @app.post("/api/traffic/replay")
 async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
     """启动流量回放 — 加载 CICIDS2017 或合成场景，运行检测器。"""
-    from cyberorion.traffic import load_cicids, load_synthetic, TrafficDetector
+    from cyberorion.traffic import load_cicids, load_synthetic, load_ad_scenario, TrafficDetector
     from cyberorion.traffic.feeder import TrafficFeeder
     from cyberorion.tools.blue.traffic import _set_traffic_cache
     from collections import Counter
@@ -1249,9 +1260,12 @@ async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
         from cyberorion.paths import CICIDS_DIR
         csv_path = str(CICIDS_DIR / csv_file)
         rows = load_cicids(csv_path, max_rows=max_rows)
+        events = TrafficFeeder.to_events(rows)
+    elif source == "ad_domain":
+        events = load_ad_scenario()
     else:
         rows = load_synthetic()
-    events = TrafficFeeder.to_events(rows)
+        events = TrafficFeeder.to_events(rows)
     alerts = TrafficDetector().detect(events)
     _set_traffic_cache(events, alerts)
     label_counts = Counter(getattr(e, "label", "BENIGN") for e in events)
@@ -1280,7 +1294,7 @@ async def traffic_status() -> dict[str, Any]:
     _csv_files = sorted([f for f in _os.listdir(_csv_dir) if f.endswith(".csv")]) if _os.path.isdir(_csv_dir) else []
     return {
         "ready": True,
-        "sources": ["cicids", "synthetic"],
+        "sources": ["cicids", "synthetic", "ad_domain"],
         "csv_files": _csv_files,
         "replaying": False,
         "events_count": len(_traffic_cache.get("events", [])),
@@ -1297,7 +1311,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
     攻击链重建 → 报告生成，全程 SSE 推送思考链/工具调用/报告事件。
     事件格式与 ArenaView WS 一致：{type, side, data, timestamp}。
     """
-    from cyberorion.traffic import load_cicids, load_synthetic
+    from cyberorion.traffic import load_cicids, load_synthetic, load_ad_scenario
     from cyberorion.traffic.feeder import TrafficFeeder
     from cyberorion.traffic.pipeline import run_traffic_analysis_pipeline
     from cyberorion.tools.blue.traffic import _set_traffic_cache
@@ -1316,9 +1330,12 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 from cyberorion.paths import CICIDS_DIR
                 csv_path = str(CICIDS_DIR / csv_file)
                 rows = load_cicids(csv_path, max_rows=max_rows)
+                events = TrafficFeeder.to_events(rows)
+            elif source == "ad_domain":
+                events = load_ad_scenario()
             else:
                 rows = load_synthetic()
-            events = TrafficFeeder.to_events(rows)
+                events = TrafficFeeder.to_events(rows)
             from cyberorion.traffic import TrafficDetector
             detector = TrafficDetector()
             alerts = detector.detect(events)
@@ -1350,6 +1367,115 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
 def _sse(ev: dict) -> str:
     """把事件 dict 序列化为一行 SSE data 帧。"""
     return f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+
+# --------------------------------------------------------------------------- #
+# V2 API 端点 — 基于 ControllerV2 / SessionRunner 的 ares 风格 agent loop
+# 与旧版 /api/* 端点并存，互不影响。
+# --------------------------------------------------------------------------- #
+@app.post("/api/v2/session/start")
+async def v2_start_session(scenario: str = "ad_domain") -> dict[str, Any]:
+    """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id。"""
+    global controller_v2
+    try:
+        controller_v2 = ControllerV2(event_bus, session_state)
+        await controller_v2.start_session(scenario)
+        return {
+            "session_id": controller_v2.session_id,
+            "scenario": controller_v2.scenario_name,
+        }
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"{type(exc).__name__}: {exc}"},
+        )
+
+
+@app.get("/api/v2/session/{session_id}/status")
+async def v2_session_status(session_id: str) -> dict[str, Any]:
+    """获取 v2 会话状态：红蓝运行状态/步数/发现数。"""
+    return await v2_runner.get_session_status(session_id)
+
+
+@app.post("/api/v2/session/{session_id}/stop")
+async def v2_stop_session(session_id: str) -> dict[str, Any]:
+    """停止 v2 会话。"""
+    return await v2_runner.stop_session(session_id)
+
+
+@app.get("/api/v2/session/{session_id}/timeline")
+async def v2_session_timeline(session_id: str) -> list[dict[str, Any]]:
+    """获取 v2 会话时间线。"""
+    return await v2_runner.get_session_timeline(session_id)
+
+
+@app.post("/api/v2/red/start")
+async def v2_red_start(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Start red team agent loop via ControllerV2."""
+    global controller_v2
+    if controller_v2 is None:
+        return JSONResponse(status_code=400, content={"error": "session not started"})
+    prompt = str(payload.get("prompt", ""))
+    try:
+        await controller_v2.start_red(prompt=prompt)
+        return {"ok": True, "status": controller_v2.get_status()}
+    except (RuntimeError, ValueError) as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+
+
+@app.post("/api/v2/blue/start")
+async def v2_blue_start(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Start blue team agent loop via ControllerV2."""
+    global controller_v2
+    if controller_v2 is None:
+        return JSONResponse(status_code=400, content={"error": "session not started"})
+    prompt = str(payload.get("prompt", ""))
+    try:
+        await controller_v2.start_blue(prompt=prompt)
+        return {"ok": True, "status": controller_v2.get_status()}
+    except (RuntimeError, ValueError) as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
+
+
+@app.post("/api/v2/red/stop")
+async def v2_red_stop() -> dict[str, Any]:
+    """Stop red team agent loop."""
+    global controller_v2
+    if controller_v2 is None:
+        return JSONResponse(status_code=400, content={"error": "session not started"})
+    await controller_v2.stop_red()
+    return {"ok": True, "status": controller_v2.get_status()}
+
+
+@app.post("/api/v2/blue/stop")
+async def v2_blue_stop() -> dict[str, Any]:
+    """Stop blue team agent loop."""
+    global controller_v2
+    if controller_v2 is None:
+        return JSONResponse(status_code=400, content={"error": "session not started"})
+    await controller_v2.stop_blue()
+    return {"ok": True, "status": controller_v2.get_status()}
+
+
+@app.get("/api/v2/status")
+async def v2_status() -> dict[str, Any]:
+    """Get ControllerV2 status."""
+    global controller_v2
+    if controller_v2 is None:
+        return {"active": False}
+    return {"active": True, "session_id": controller_v2.session_id, "status": controller_v2.get_status()}
+
+
+@app.post("/api/v2/session/stop")
+async def v2_session_stop() -> dict[str, Any]:
+    """Stop v2 session (ControllerV2)."""
+    global controller_v2
+    if controller_v2 is None:
+        return JSONResponse(status_code=400, content={"error": "session not started"})
+    await controller_v2.stop_session()
+    status = controller_v2.get_status()
+    controller_v2 = None
+    return {"ok": True, "status": status}
 
 # --------------------------------------------------------------------------- #
 # Static frontend (production build) - mounted last so it doesn't shadow /api

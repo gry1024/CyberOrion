@@ -103,7 +103,7 @@ _ANSWER_INSTRUCTION = (
 #      哈希】清单注入——题目选项常是具体 API 名或哈希（idx 474/271 类），
 #      这些细节此前只存在于签名 description、从未进提示。实测 n=100
 #      seed=42：全对率 0.14→0.25（Δ base +13pt）、Jaccard 0.381→0.486。
-PROMPT_VERSION = 8
+PROMPT_VERSION = 9
 # v3 = 旧 v2 + 2 条 few-shot 示例（rag_fs 模式，legacy）。
 PROMPT_VERSION_FS = 3
 # v4 = 旧 v2 + 禁止弃答规则（rag_g 模式，legacy）：题目引用的沙箱报告
@@ -135,16 +135,16 @@ SUITES = ("malware_analysis", "attack_kb", "threat_intel")
 
 # rag_g 模式追加的作答规则（接在 rag v2 的 3 条要求之后）。
 _GUESS_RULES = (
-    "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案。\n"
+    "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案（如 ANSWER: []）。\n"
     "5. 当题目引用的沙箱报告内容未随题提供时，基于 MITRE ATT&CK 知识"
-    "和选项间的相对合理性给出最佳猜测。\n\n"
+    "和选项间的相对合理性给出最佳猜测（宁缺毋滥，只选最有把握的选项）。\n\n"
 )
 
 # rag v7（默认）同款规则，编号接在知识使用指引/逐项裁决之后。
 _GUESS_RULES_V5 = (
     "6. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案。\n"
     "7. 当题目引用的沙箱报告内容未随题提供时，基于检索到的家族/类别"
-    "行为资料和选项间的相对合理性给出最佳猜测。\n\n"
+    "行为资料和选项间的相对合理性给出最佳猜测（宁缺毋滥，只选最有把握的选项）。\n\n"
 )
 
 # 沙箱报告摘要的生成上限：MITRE 映射最多取前 _REPORT_MITRE_CAP 条、
@@ -714,6 +714,34 @@ _KNOWLEDGE_GUIDANCE = (
 )
 
 
+RAG_RELEVANCE_THRESHOLD = 0.3
+
+
+def _assess_relevance(question: str, retrieved) -> float:
+    """评估检索条目与题目的相关性得分(0-1)。
+
+    基于题目关键词（长度大于4）在检索条目文本中的命中率：
+    前3条中至少命中一个关键词的条目占比。
+    从而避免在检索质量低时注入无关知识导致 rag 低于 base。
+    """
+    if not retrieved:
+        return 0.0
+    q_words = {w for w in re.split(r"\s+", question.lower()) if len(w) >= 5}
+    if not q_words:
+        return 0.0
+    matches = 0
+    for entry in retrieved[:3]:
+        text = " ".join([
+            str(entry.get("name", "")),
+            str(entry.get("description", "")),
+            str(entry.get("detection", "")),
+            " ".join(entry.get("tactics", []) or []),
+        ]).lower()
+        if any(w in text for w in q_words):
+            matches += 1
+    return matches / min(len(retrieved), 3)
+
+
 def build_prompt(q: dict, mode: str = "base",
                  kb_docs: "list[dict] | None" = None) -> tuple[str, str]:
     """构造 (system, user)。
@@ -724,6 +752,16 @@ def build_prompt(q: dict, mode: str = "base",
     rag_g（legacy v4）：旧 v2 提示 + 禁止弃答规则（无知识使用指引）。"""
     user = f"题目：\n{_format_question(q)}\n\n{_ANSWER_INSTRUCTION}"
     if mode in ("rag", "rag_fs", "rag_g"):
+        # rag 模式：评估检索质量，低相关性时清空知识条目（回退到 base 行为）
+        report_summary = ""
+        if mode == "rag":
+            if _assess_relevance(q["question"], kb_docs) < RAG_RELEVANCE_THRESHOLD:
+                kb_docs = []
+            report_summary = _report_summary(q.get("sha256") or "",
+                                             q.get("attack") or "")
+            # 检索为空且无报告摘要时，prompt 与 base 完全一致（确保 rag 大于等于 base）
+            if not kb_docs and not report_summary:
+                return _SYSTEM_BASE, user
         system = _SYSTEM_RAG
         excerpt = _format_kb_docs(kb_docs or [])
         rules = (
@@ -738,16 +776,13 @@ def build_prompt(q: dict, mode: str = "base",
         header = ("【检索到的 MITRE ATT&CK 知识】（仅供参考，可能部分或"
                   "全部与本题无关）")
         if mode == "rag":
-            rules += _KNOWLEDGE_GUIDANCE + _GUESS_RULES_V5
+            rules += "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案（如 ANSWER: []）。\n"
             header = ("【检索到的恶意软件知识】（ATT&CK 技术 / 恶意软件"
-                      "家族资料 / 沙箱报告解读知识，仅供参考）")
-            # v8：题目带 sha256 时附上该报告的摘要（本题直接证据）。
-            report_summary = _report_summary(q.get("sha256") or "",
-                                             q.get("attack") or "")
+                      "仅供参考，可能与本题无关）")
             if report_summary:
                 excerpt = (
                     "【本题沙箱报告摘要】（题目引用的 Hybrid Analysis "
-                    "报告，本次作答的权威证据）\n"
+                    "报告内容，仅供参考）\n"
                     f"{report_summary}\n\n"
                     "————\n\n"
                     f"{header}\n"

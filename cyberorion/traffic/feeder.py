@@ -29,6 +29,8 @@ class UnifiedEvent:
     technique: Optional[str]            # ATT&CK 技术（正常为 None）
     attack_type: str                    # 攻击类型描述
     raw: dict = field(default_factory=dict)  # 关键原始特征，供检测器使用
+    payload_hint: str = ""                        # 攻击描述（合成场景上游agent使用，BENIGN为空）
+    severity: str = "low"                         # 事件严重度low/medium/high/critical（合成场景使用）
 # CICIDS2017 不含 IP 地址，按攻击类型派生固定攻击源 IP，使同源攻击在时间线上聚类，
 # 从而触发端口扫描/暴力破解等基于"同源"的检测规则；BENIGN 从大地址池随机取源。
 _ATTACKER_IP_BY_TYPE: dict[str, str] = {

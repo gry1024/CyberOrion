@@ -71,6 +71,30 @@ services:
         ipv4_address: 172.29.0.14
     restart: unless-stopped
 
+  # --- Samba4 AD 域控靶场（红队 AD 渗透演练）------------------------------
+  # 提供 AD 域环境，含 AS-REP/Kerberoasting/ADCS/ACL滥用/GPP/委派等漏洞。
+  # 首次启动会自动 provision 域 CONTOSO (realm contoso.local) 并配置漏洞。
+
+  cyberorion_samba_ad:
+    build: ./docker/samba-ad
+    container_name: cyberorion_samba_ad
+    hostname: dc01
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.30
+    ports:
+      - "25389:389"   # LDAP
+      - "25445:445"   # SMB
+      - "2588:88"     # Kerberos
+      - "25135:135"   # RPC
+    environment:
+      - SAMBA_DOMAIN=CONTOSO
+      - SAMBA_REALM=contoso.local
+      - SAMBA_ADMIN_PASSWORD=P@ssw0rd2024!
+    volumes:
+      - samba_ad_data:/var/lib/samba
+    restart: always
+
   # --- future: crAPI (profile: api_heavy) ---------------------------------
   # OWASP crAPI (https://github.com/OWASP/crAPI) is a full microservices
   # stack (mongodb, postgres, mailhog, gateway, ...); too heavy for the
@@ -93,3 +117,6 @@ networks:
     ipam:
       config:
         - subnet: 172.29.0.0/24
+
+volumes:
+  samba_ad_data:

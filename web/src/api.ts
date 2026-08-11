@@ -174,6 +174,28 @@ export const api = {
       for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const f = buf.slice(0, i); buf = buf.slice(i + 2); for (const l of f.split('\n')) { const t = l.trim(); if (!t.startsWith('data:')) continue; try { onEvent(JSON.parse(t.slice(5).trim())) } catch {} } } }
     }).catch((e: Error) => { if (e.name !== 'AbortError') onError?.(e) })
     return c
-  },}
+  },
+
+  // ---- v2 multi-role architecture API (controller_v2.py) ----
+  /** Start v2 session (default scenario ad_domain, AD domain red-team vs blue-team). */
+  startV2Session: (scenario: string = 'ad_domain') =>
+    post('/api/v2/session/start', { scenario }) as Promise<{
+      ok: boolean
+      session_id?: string
+      error?: string
+    }>,
+  /** Start v2 red team orchestrator (optional task prompt). */
+  startV2Red: (prompt: string = '') =>
+    post('/api/v2/red/start', { prompt }) as Promise<{ ok: boolean; error?: string }>,
+  /** Start v2 blue team orchestrator. */
+  startV2Blue: (prompt: string = '') =>
+    post('/api/v2/blue/start', { prompt }) as Promise<{ ok: boolean; error?: string }>,
+  /** Stop v2 red team. */
+  stopV2Red: () => post('/api/v2/red/stop', {}) as Promise<{ ok: boolean; error?: string }>,
+  /** Stop v2 blue team. */
+  stopV2Blue: () => post('/api/v2/blue/stop', {}) as Promise<{ ok: boolean; error?: string }>,
+  /** Stop current v2 session. */
+  stopV2Session: () => post('/api/v2/session/stop', {}) as Promise<{ ok: boolean; error?: string }>,
+}
 
 export type { AgentRoleSpec } from './types'

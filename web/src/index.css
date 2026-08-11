@@ -84,6 +84,22 @@
   --color-chain-recon:   #f5b14a;
   --color-report-writer: #b9a8ff;
 
+  /* v2 multi-role architecture: red 7 workers + orchestrator */
+  --color-recon:     #00d4aa;
+  --color-cred:      #ff6b6b;
+  --color-crack:     #ffa94d;
+  --color-acl:       #cc5de8;
+  --color-privesc:   #ff8787;
+  --color-lateral:   #4dabf7;
+  --color-coercion:  #f783ac;
+  --color-orch:      #748ffc;
+  /* v2 blue 4 workers + orchestrator */
+  --color-triage:        #74c0fc;
+  --color-hunter:        #69db7c;
+  --color-lat-analyst:   #38d9a9;
+  --color-escalation:    #ffa94d;
+  --color-blue-orch:     #748ffc;
+
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei",
     "Noto Sans CJK SC", sans-serif;
@@ -159,6 +175,21 @@
   --color-sem-analyst:   #1d6fd1;
   --color-chain-recon:   #8f5400;
   --color-report-writer: #6e5aff;
+
+  /* v2 multi-role architecture (light, higher contrast) */
+  --color-recon:     #0f766e;
+  --color-cred:      #c92a2a;
+  --color-crack:     #b26a00;
+  --color-acl:       #6e5aff;
+  --color-privesc:   #c2410c;
+  --color-lateral:   #1d6fd1;
+  --color-coercion:  #a61e4d;
+  --color-orch:      #4c3bcc;
+  --color-triage:        #1d6fd1;
+  --color-hunter:        #1a7f4e;
+  --color-lat-analyst:   #0f766e;
+  --color-escalation:    #b26a00;
+  --color-blue-orch:     #4c3bcc;
 }
 
 html, body, #root {

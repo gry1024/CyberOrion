@@ -241,6 +241,14 @@ async def _stage_semantic_analysis(
         "2. 评估整体威胁严重度（critical/high/medium/low）并说明依据；\n"
         "3. 推断攻击者意图（侦察？渗透？持久化？数据外泄？）；\n"
         "4. 指出最危险的 2-3 个源 IP 及其行为画像。\n"
+        "特别注意 AD 域攻防场景的识别：\n"
+        "- Kerberoasting (T1558.003): 大量 TGS-REQ 到 88 端口请求不同 SPN\n"
+        "- AS-REP roasting (T1558.004): AS-REQ 无预认证到 88 端口\n"
+        "- DCSync (T1003.006): LDAP 复制请求 (DRSUAPI) 到 389/445 端口\n"
+        "- NTLM 中继 (T1557.001): 异常 SMB 认证模式到 445 端口\n"
+        "- ADCS 攻击 (T1649): 证书服务请求 (ICPR) 到 445/135 端口\n"
+        "- 黄金票据 (T1558.001): 伪造 TGT 的 TGS-REQ 到 88 端口\n"
+        "AD 域攻击通常呈现多阶段 kill chain：侦察 → LDAP 枚举 → 凭据窃取 → 横向移动 → 域控接管。\n"
         "用中文输出，条理清晰，可使用 Markdown 列表与加粗。"
     )
     user = (

@@ -1,0 +1,32 @@
+name: ad_domain
+display_name: AD域渗透攻防
+description: Samba4 AD域环境，包含AS-REP/Kerberoasting/ADCS/ACL滥用/GPP/委派等漏洞
+targets:
+  dc01:
+    type: ad_dc
+    ip: 172.29.0.30
+    domain: contoso.local
+    realm: CONTOSO.LOCAL
+    container: cyberorion_ad_dc01
+    ground_truth:
+      creds:
+        Administrator: P@ssw0rd2024!
+red_team:
+  initial_credential:
+    username: alice
+    password: Welcome2024!
+    domain: contoso.local
+  goal: 获取域管理员权限(krbtgt hash或Administrator凭据)
+  success_conditions:
+  - 获得krbtgt账户的NTLM hash
+  - 获得Administrator账户凭据
+  - 生成有效黄金票据
+blue_team:
+  detection_sources:
+  - samba_logs: /var/log/samba/
+  - ldap_queries: dc01:389
+  objectives:
+  - 检测侦察活动(nmap/ldap枚举)
+  - 检测凭据攻击(kerberoasting/asrep-roasting)
+  - 检测横向移动(psexec/wmiexec)
+  - 检测提权(ADCS/ACL滥用)
