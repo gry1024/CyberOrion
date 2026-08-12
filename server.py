@@ -375,7 +375,7 @@ def _generate_summary() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Session dir names look like session_20260721_140728; the strict regex
 # blocks path traversal on the per-session endpoints below.
-_SESSION_ID_RE = re.compile(r"^session_\d{8}_\d{6}$")
+_SESSION_ID_RE = re.compile(r"^session_\d{8}_\d{6}(_\w+)?$")
 
 
 @app.get("/api/scenario")
