@@ -1415,9 +1415,9 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 _report_md += f"**事件数**: {len(events)}\n"
                 _report_md += f"**告警数**: {len(_traffic_alerts_persist)}\n\n"
                 for i, a in enumerate(_traffic_alerts_persist[:20]):
-                    _report_md += f"## 告警 {i+1}: {getattr(a, 'rule_name', 'unknown')}\n"
+                    _report_md += f"## 告警 {i+1}: {getattr(a, 'alert_type', 'unknown')}\n"
                     _report_md += f"- 严重度: {getattr(a, 'severity', 'unknown')}\n"
-                    _report_md += f"- ATT&CK: {getattr(a, 'mitre_technique', 'N/A')}\n"
+                    _report_md += f"- ATT&CK: {getattr(a, 'technique', 'N/A')}\n"
                     _report_md += f"- 源IP: {getattr(a, 'src_ip', 'N/A')} -> 目标IP: {getattr(a, 'dst_ip', 'N/A')}\n\n"
 
             # Write report.md
@@ -1435,9 +1435,9 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 "alert_count": len(_traffic_alerts_persist),
                 "alerts": [
                     {
-                        "rule_name": getattr(a, "rule_name", "unknown"),
+                        "alert_type": getattr(a, "alert_type", "unknown"),
                         "severity": getattr(a, "severity", "unknown"),
-                        "mitre_technique": getattr(a, "mitre_technique", ""),
+                        "technique": getattr(a, "technique", ""),
                         "src_ip": getattr(a, "src_ip", ""),
                         "dst_ip": getattr(a, "dst_ip", ""),
                         "description": getattr(a, "description", ""),

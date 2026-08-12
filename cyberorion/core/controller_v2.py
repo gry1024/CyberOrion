@@ -250,6 +250,59 @@ class ControllerV2:
             timestamp=time.time(),
         ))
         report = await self._build_report()
+
+        # Write metrics.json with actual session data
+        if self._session_dir:
+            import json as _json
+            red_tool_names = [tc.get("name", "") for tc in self._red_tool_calls]
+            blue_tool_names = [tc.get("name", "") for tc in self._blue_tool_calls]
+            red_snap = await self.red_state.snapshot()
+            has_da = red_snap.has_domain_admin
+            has_gt = red_snap.has_golden_ticket
+            has_bh = any(tc.get("name") == "bloodhound_owned" for tc in self._red_tool_calls)
+            has_ir_report = any(tc.get("name") == "generate_report" for tc in self._blue_tool_calls)
+            has_krbtgt = any(tc.get("name") == "krbtgt_rotate" for tc in self._blue_tool_calls)
+            has_rbcd = any(tc.get("name") == "revoke_rbcd" for tc in self._blue_tool_calls)
+            has_isolation = any(tc.get("name") == "host_isolation" for tc in self._blue_tool_calls)
+
+            red_score = 0
+            if has_da: red_score += 40
+            if has_gt: red_score += 30
+            if has_bh: red_score += 15
+            red_score += min(15, len(red_tool_names))
+
+            blue_score = 0
+            if has_ir_report: blue_score += 30
+            if has_krbtgt: blue_score += 25
+            if has_rbcd: blue_score += 15
+            if has_isolation: blue_score += 15
+            blue_score += min(15, len(blue_tool_names))
+
+            metrics = {
+                "session_id": self.session_id,
+                "scenario": self.scenario_name,
+                "simulate": self.simulate,
+                "red_score": red_score,
+                "blue_score": blue_score,
+                "red_steps": self._red_step_count,
+                "blue_steps": self._blue_step_count,
+                "red_tools_used": sorted(set(red_tool_names)),
+                "blue_tools_used": sorted(set(blue_tool_names)),
+                "red_tool_count": len(red_tool_names),
+                "blue_tool_count": len(blue_tool_names),
+                "has_domain_admin": has_da,
+                "has_golden_ticket": has_gt,
+                "has_bloodhound_owned": has_bh,
+                "has_incident_report": has_ir_report,
+                "has_krbtgt_rotate": has_krbtgt,
+                "has_revoke_rbcd": has_rbcd,
+                "has_host_isolation": has_isolation,
+                "winner": "red" if red_score > blue_score else ("blue" if blue_score > red_score else "draw"),
+            }
+            metrics_path = self._session_dir / "metrics.json"
+            with open(metrics_path, "w", encoding="utf-8") as f:
+                _json.dump(metrics, f, ensure_ascii=False, indent=2)
+
         return report
     async def start_red(
         self, prompt: "str | dict" = "", max_steps: Optional[int] = None
@@ -679,6 +732,8 @@ class ControllerV2:
             rpath.write_text(report, encoding="utf-8")
             final_path = self._session_dir / "final_report.txt"
             final_path.write_text(report, encoding="utf-8")
+            md_path = self._session_dir / "report.md"
+            md_path.write_text(report, encoding="utf-8")
         return report
 
 
