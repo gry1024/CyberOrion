@@ -31,7 +31,10 @@ _TIMELINE_SEVERITIES = ("medium", "high", "critical")
 # timeline.jsonl 中计入时间线的事件类型（ledger_snapshot 等噪声跳过）。
 _JSONL_TIMELINE_EVENTS = ("session_started", "session_ended",
                           "round_started", "round_ended",
-                          "red_action", "blue_action")
+                          "red_action", "blue_action",
+                          "session_start", "session_end",
+                          "round_start", "round_end",
+                          "tool_call", "tool_output", "thinking")
 # response 事件 summary 的工具名前缀（"remediate: lock_user ..."）。
 _TOOL_PREFIX_RE = re.compile(r"^([a-z_]{3,30}):\s*(.*)$")
 
@@ -130,28 +133,35 @@ def _tool_calls_from_db(attacks: list[dict], alerts: list[dict],
 
 
 def _tool_calls_from_jsonl(entries: list[dict]) -> list[dict]:
-    """timeline.jsonl red_action/blue_action 事件中的结构化工具调用。"""
-    calls: list[dict] = []
+    """timeline.jsonl tool_call events -> structured tool calls."""
+    calls = []
+    output_map = {}
     for entry in entries:
-        event = str(entry.get("event") or "")
-        if not (event.startswith("red") or event.startswith("blue")):
+        if str(entry.get("type") or "") == "tool_output":
+            d = entry.get("data") or {}
+            tid = d.get("tool_call_id") or ""
+            if tid:
+                output_map[tid] = str(d.get("output") or "")[:200]
+    for entry in entries:
+        event = str(entry.get("event") or entry.get("type") or "")
+        if event.startswith("red") or event.startswith("blue"):
+            side = "red" if event.startswith("red") else "blue"
+            for tc in entry.get("tool_calls") or []:
+                args = tc.get("args")
+                if not isinstance(args, str):
+                    try: args = json.dumps(args, ensure_ascii=False, default=str)
+                    except: args = str(args)
+                calls.append({"ts": float(tc.get("started_at") or entry.get("ts") or 0), "side": side, "tool": tc.get("tool") or "unknown", "args": str(args)[:200], "ok": tc.get("status") == "ok", "summary": str(tc.get("result") or tc.get("error") or "")[:200]})
             continue
-        side = "red" if event.startswith("red") else "blue"
-        for tc in entry.get("tool_calls") or []:
-            args = tc.get("args")
+        if event == "tool_call":
+            d = entry.get("data") or {}
+            side = str(entry.get("side") or "red")
+            args = d.get("arguments") or d.get("args") or ""
             if not isinstance(args, str):
-                try:
-                    args = json.dumps(args, ensure_ascii=False, default=str)
-                except Exception:
-                    args = str(args)
-            calls.append({
-                "ts": float(tc.get("started_at") or entry.get("ts") or 0),
-                "side": side,
-                "tool": tc.get("tool") or "unknown",
-                "args": _clip(args, 200),
-                "ok": tc.get("status") == "ok",
-                "summary": _clip(tc.get("result") or tc.get("error"), 200),
-            })
+                try: args = json.dumps(args, ensure_ascii=False, default=str)
+                except: args = str(args)
+            tid = d.get("tool_call_id") or ""
+            calls.append({"ts": float(entry.get("ts") or 0), "side": side, "tool": d.get("name") or "unknown", "args": str(args)[:200], "ok": True, "summary": output_map.get(tid, "")})
     return calls
 
 
@@ -217,20 +227,51 @@ def _timeline_from_db(attacks: list[dict], alerts: list[dict],
 
 
 def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
-    """timeline.jsonl 的会话/轮次边界与红蓝回合报告（补充条目）。"""
+    """timeline.jsonl events -> timeline items (supports type field)."""
     items: list[dict] = []
     for entry in entries:
-        event = str(entry.get("event") or "")
+        event = str(entry.get("event") or entry.get("type") or "")
         if event not in _JSONL_TIMELINE_EVENTS:
             continue
-        title = event
-        if entry.get("round") is not None:
-            title = f"{event} (round {entry['round']})"
+        side = str(entry.get("side") or "system")
+        d = entry.get("data") or {}
+        if event in ("session_start", "session_started"):
+            title = f"Session Start ({d.get('scenario', d.get('session_name', ''))})"
+        elif event in ("session_end", "session_ended"):
+            w = d.get("winner", "")
+            title = f"Session End - Winner: {w}" if w else "Session End"
+        elif event in ("round_start", "round_started"):
+            title = f"{side.upper()} Round Start"
+        elif event in ("round_end", "round_ended"):
+            o = d.get("outcome", d.get("reason", ""))
+            title = f"{side.upper()} Round End - {o}" if o else f"{side.upper()} Round End"
+        elif event == "tool_call":
+            title = f"{side.upper()} tool: {d.get('name', '')}"
+        elif event == "tool_output":
+            title = f"{side.upper()} output: {d.get('name', '')}"
+        elif event == "thinking":
+            title = f"{side.upper()} thinking"
+        else:
+            title = event
+        detail = ""
+        if event == "tool_call":
+            a = d.get("arguments") or d.get("args") or ""
+            if not isinstance(a, str):
+                try: a = json.dumps(a, ensure_ascii=False, default=str)
+                except: a = str(a)
+            detail = str(a)[:300]
+        elif event == "tool_output":
+            detail = str(d.get("output") or "")[:300]
+        elif event == "thinking":
+            detail = str(d.get("text") or "")[:300]
+        else:
+            detail = str(d.get("output") or d.get("description") or d.get("summary") or "")[:300]
         items.append({
             "ts": float(entry.get("ts") or 0),
             "kind": "event",
+            "side": side,
             "title": title,
-            "detail": _clip(entry.get("output")),
+            "detail": detail,
             "technique": "",
             "success": None,
         })
