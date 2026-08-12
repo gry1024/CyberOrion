@@ -65,6 +65,7 @@ class AgentLoopConfig:
     llm_retry_backoff: tuple = (1.0, 2.0, 4.0)  # 退避间隔（秒）
     llm_timeout: float = 120.0                # 单次 LLM 调用超时
     budget_tokens: int | None = None          # 累计 token 预算上限，None 表示不限
+    max_empty_turns: int = 3                 # max consecutive empty-turn retries before EndTurn
 
 
 @dataclass
@@ -350,6 +351,7 @@ async def run_agent_loop(
             logger.warning("事件回调异常: %s", exc)
 
     step = 0
+    empty_turn_count = 0
     while step < config.max_steps:
         # stop signal: checked before each step so V2Controller can stop the loop.
         if stop_event is not None and stop_event.is_set():
@@ -409,7 +411,8 @@ async def run_agent_loop(
         })
 
         tool_calls = msg.tool_calls or []
-
+        if tool_calls:
+            empty_turn_count = 0
         # 追加 assistant 消息（剥离 reasoning_content 以保持 OpenAI 兼容）
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
@@ -441,6 +444,19 @@ async def run_agent_loop(
 
         # 无工具调用：agent 以纯文本应答 -> 结束本轮
         if not tool_calls:
+            empty_turn_count += 1
+            if empty_turn_count <= config.max_empty_turns and step < config.max_steps:
+                # DeepSeek may put thinking into reasoning_content without emitting tool_calls.
+                # Inject a reminder to nudge the agent into calling a tool.
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You did not call any tool just now. As an action-oriented agent, you MUST call a tool to make progress. "
+                        "Review the available tools and invoke one. Do not just output text or reasoning. "
+                        f"(step {step}/{config.max_steps}, empty turn {empty_turn_count}/{config.max_empty_turns})"
+                    ),
+                })
+                continue
             if content:
                 findings.append(content)
             return AgentLoopOutcome(

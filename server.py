@@ -1383,8 +1383,105 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         })
 
         # ---- 阶段 1-4：多 agent 分层分析流水线（流式） ----
+        # 同时收集产物用于持久化
+        _traffic_report_parts = []
+        _traffic_alerts_persist = []
+        try:
+            _traffic_alerts_persist = list(alerts)
+        except Exception:
+            pass
         async for ev in run_traffic_analysis_pipeline(events):
+            ev_type = ev.get("type", "")
+            if ev_type == "report":
+                _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("content", "")))
+            elif ev_type == "report_chunk":
+                _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
             yield _sse(ev)
+
+        # ---- 持久化流量分析结果到磁盘 ----
+        try:
+            import time as _time, json as _json
+            from datetime import datetime as _dt
+            from pathlib import Path as _Path
+            _ts_str = _dt.fromtimestamp(_time.time()).strftime("%Y%m%d_%H%M%S")
+            _session_dir = _Path("logs") / f"session_{_ts_str}"
+            _session_dir.mkdir(parents=True, exist_ok=True)
+
+            _report_md = "".join(_traffic_report_parts) if _traffic_report_parts else ""
+            if not _report_md:
+                # Fallback: build a minimal report from alerts
+                _report_md = "# 流量分析报告\n\n"
+                _report_md += f"**数据源**: {source}\n"
+                _report_md += f"**事件数**: {len(events)}\n"
+                _report_md += f"**告警数**: {len(_traffic_alerts_persist)}\n\n"
+                for i, a in enumerate(_traffic_alerts_persist[:20]):
+                    _report_md += f"## 告警 {i+1}: {getattr(a, 'rule_name', 'unknown')}\n"
+                    _report_md += f"- 严重度: {getattr(a, 'severity', 'unknown')}\n"
+                    _report_md += f"- ATT&CK: {getattr(a, 'mitre_technique', 'N/A')}\n"
+                    _report_md += f"- 源IP: {getattr(a, 'src_ip', 'N/A')} -> 目标IP: {getattr(a, 'dst_ip', 'N/A')}\n\n"
+
+            # Write report.md
+            (_session_dir / "report.md").write_text(_report_md, encoding="utf-8")
+
+            # Write traffic_analysis.json (metadata for session listing)
+            _meta = {
+                "session_id": f"session_{_ts_str}",
+                "type": "traffic_analysis",
+                "timestamp": _ts_str,
+                "source": source,
+                "csv_file": csv_file,
+                "max_rows": max_rows,
+                "event_count": len(events),
+                "alert_count": len(_traffic_alerts_persist),
+                "alerts": [
+                    {
+                        "rule_name": getattr(a, "rule_name", "unknown"),
+                        "severity": getattr(a, "severity", "unknown"),
+                        "mitre_technique": getattr(a, "mitre_technique", ""),
+                        "src_ip": getattr(a, "src_ip", ""),
+                        "dst_ip": getattr(a, "dst_ip", ""),
+                        "description": getattr(a, "description", ""),
+                    }
+                    for a in _traffic_alerts_persist
+                ],
+            }
+            (_session_dir / "traffic_analysis.json").write_text(
+                _json.dumps(_meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            # Write timeline.jsonl (one event per line for compatibility)
+            with open(_session_dir / "timeline.jsonl", "w", encoding="utf-8") as _tf:
+                for ev_obj in events[:200]:
+                    _tf.write(_json.dumps({
+                        "timestamp": getattr(ev_obj, "timestamp", _time.time()),
+                        "type": "traffic_event",
+                        "data": {
+                            "src_ip": getattr(ev_obj, "src_ip", ""),
+                            "dst_ip": getattr(ev_obj, "dst_ip", ""),
+                            "protocol": getattr(ev_obj, "protocol", ""),
+                            "event_type": getattr(ev_obj, "event_type", ""),
+                            "label": getattr(ev_obj, "label", ""),
+                        }
+                    }, ensure_ascii=False) + "\n")
+
+            # Write metrics.json (placeholder scores)
+            _metrics = {
+                "session_id": f"session_{_ts_str}",
+                "type": "traffic_analysis",
+                "event_count": len(events),
+                "alert_count": len(_traffic_alerts_persist),
+                "critical_count": sum(1 for a in _traffic_alerts_persist if getattr(a, "severity", "") == "critical"),
+                "high_count": sum(1 for a in _traffic_alerts_persist if getattr(a, "severity", "") == "high"),
+                "medium_count": sum(1 for a in _traffic_alerts_persist if getattr(a, "severity", "") == "medium"),
+                "low_count": sum(1 for a in _traffic_alerts_persist if getattr(a, "severity", "") == "low"),
+            }
+            (_session_dir / "metrics.json").write_text(
+                _json.dumps(_metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            print(f"[traffic] Persisted to {_session_dir}")
+        except Exception as _exc:
+            print(f"[traffic] Persistence failed: {_exc}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -1399,11 +1496,13 @@ def _sse(ev: dict) -> str:
 # 与旧版 /api/* 端点并存，互不影响。
 # --------------------------------------------------------------------------- #
 @app.post("/api/v2/session/start")
-async def v2_start_session(scenario: str = "ad_domain") -> dict[str, Any]:
-    """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id。"""
+async def v2_start_session(scenario: str = "ad_domain", simulate: bool = True) -> dict[str, Any]:
+    """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id.
+    simulate=True 默认使用模拟工具层（无需 Docker/CLI），simulate=False 走真实工具。
+    """
     global controller_v2
     try:
-        controller_v2 = ControllerV2(event_bus, session_state)
+        controller_v2 = ControllerV2(event_bus, session_state, simulate=simulate)
         await controller_v2.start_session(scenario)
         return {
             "session_id": controller_v2.session_id,

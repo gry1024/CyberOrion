@@ -368,6 +368,7 @@ export interface SessionInfo {
   score: number | null
   scenario: string
   mtime: number
+  type: 'arena' | 'traffic_analysis'
 }
 
 // ---------------------------------------------------------------------------

@@ -101,6 +101,44 @@ def _gen_revshell(rng, count=25):
     return rows
 
 
+
+
+def _gen_log4j(rng, count=40):
+    """Log4j CVE-2021-44228 exploit traffic (web scenario).
+
+    Simulates attacker sending malicious JNDI payloads to Apache Solr (port 8983),
+    followed by reverse shell connections to attacker C2 server.
+    """
+    rows = []
+    # Phase 1: Exploit payloads to Solr (port 8983)
+    exploit_count = count // 2
+    for _ in range(exploit_count):
+        fp = rng.randint(3, 8)
+        bp = rng.randint(2, 6)
+        # Large forward payload (JNDI injection string in HTTP header)
+        fl = fp * rng.randint(800, 1500)
+        bl = bp * rng.randint(200, 600)
+        dur = rng.uniform(5000, 50000)
+        pps = (fp + bp) / max(dur / 1e6, 0.001)
+        bps = (fl + bl) / max(dur / 1e6, 0.001)
+        rows.append(_row(8983, dur, fp, bp, fl, bl, bps, pps,
+                         "Log4j-Exploit", "T1190", "log4j_exploit"))
+
+    # Phase 2: Reverse shell / C2 callback after successful exploit
+    for _ in range(count - exploit_count):
+        fp = rng.randint(2, 6)
+        bp = rng.randint(2, 6)
+        fl = fp * rng.randint(40, 200)
+        bl = bp * rng.randint(40, 200)
+        dur = rng.uniform(100000, 800000)
+        pps = (fp + bp) / max(dur / 1e6, 0.001)
+        bps = (fl + bl) / max(dur / 1e6, 0.001)
+        rows.append(_row(4444, dur, fp, bp, fl, bl, bps, pps,
+                         "Log4j-Exploit", "T1071", "log4j_c2"))
+
+    return rows
+
+
 def load_synthetic(seed=42, benign_count=200):
     """生成合成内鬼场景事件，返回 list[dict]。"""
     rng = random.Random(seed)
@@ -110,6 +148,7 @@ def load_synthetic(seed=42, benign_count=200):
     rows.extend(_gen_portscan(rng, 50))
     rows.extend(_gen_exfil(rng, 30))
     rows.extend(_gen_revshell(rng, 25))
+    rows.extend(_gen_log4j(rng, 40))
     return rows
 
 

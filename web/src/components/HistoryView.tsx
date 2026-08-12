@@ -460,13 +460,20 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
       .catch(() => setError('会话详情读取失败 — 后端可能尚未实现 /detail'))
   }, [session.id])
 
-  const tabs: Array<{ key: DetailTab; label: string }> = [
-    { key: 'duel', label: '红蓝对垒' },
-    { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
-    { key: 'tools', label: `工具调用 ${detail ? detail.tool_calls.length : ''}` },
-    { key: 'truth', label: '告警与攻击' },
-    { key: 'report', label: '报告' },
-  ]
+  const isTraffic = (session.type ?? 'arena') === 'traffic_analysis'
+  const tabs: Array<{ key: DetailTab; label: string }> = isTraffic
+    ? [
+        { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
+        { key: 'truth', label: '流量告警' },
+        { key: 'report', label: '报告' },
+      ]
+    : [
+        { key: 'duel', label: '红蓝对垒' },
+        { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
+        { key: 'tools', label: `工具调用 ${detail ? detail.tool_calls.length : ''}` },
+        { key: 'truth', label: '告警与攻击' },
+        { key: 'report', label: '报告' },
+      ]
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-thin pr-1">
@@ -498,7 +505,12 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
               {tab === 'duel' && <DuelTimeline detail={detail} />}
               {tab === 'timeline' && <TimelineTab rows={detail.timeline} />}
               {tab === 'tools' && <ToolCallsTab rows={detail.tool_calls} />}
-              {tab === 'truth' && <TruthTab detail={detail} />}
+              {tab === 'truth' &&
+                (isTraffic ? (
+                  <TrafficAlertsTab detail={detail} />
+                ) : (
+                  <TruthTab detail={detail} />
+                ))}
               {tab === 'report' &&
                 (detail.report_md ? (
                   <div className="p-5">
@@ -518,12 +530,144 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
 }
 
 // ---------------------------------------------------------------------------
+// session list helpers (grouped by type)
+// ---------------------------------------------------------------------------
+
+function SessionGroupHeader({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+      <span className="text-[9px] uppercase tracking-[0.15em] text-text-3">{title}</span>
+      <span className="text-[9px] tabular-nums text-text-4">{count}</span>
+      <span className="ml-2 h-px flex-1 bg-hairline" />
+    </div>
+  )
+}
+
+function SessionListItem({
+  s,
+  selected,
+  onSelect,
+}: {
+  s: SessionInfo
+  selected: boolean
+  onSelect: (s: SessionInfo) => void
+}) {
+  const isTraffic = (s.type ?? 'arena') === 'traffic_analysis'
+  return (
+    <button
+      onClick={() => onSelect(s)}
+      className={`mb-1 flex w-full flex-col gap-1 px-3 py-1.5 text-left transition-colors ${
+        selected ? 'bg-panel' : 'hover:bg-overlay'
+      }`}
+    >
+      <div className="flex w-full items-center gap-2">
+        <span
+          className={`flex-none rounded border px-1 py-px text-[9px] tracking-normal ${
+            isTraffic ? 'border-blue/40 text-blue' : 'border-attacker/40 text-attacker'
+          }`}
+        >
+          {isTraffic ? '流量分析' : '作战台'}
+        </span>
+        <span className="truncate font-mono text-[11px] text-text-1">{s.id}</span>
+        {s.score != null && (
+          <span className="ml-auto flex-none rounded border border-success/40 px-1 py-px font-mono text-[9px] tabular-nums text-success">
+            {s.score.toFixed(1)}
+          </span>
+        )}
+      </div>
+      <div className="w-full truncate text-[9px] text-text-3">
+        {s.scenario || '默认靶场'}
+      </div>
+      <div className="flex w-full items-center gap-2 text-[9px] text-text-2">
+        <span className="font-mono">{fmtMtime(s.mtime)}</span>
+        <span className="ml-auto flex gap-1.5 font-mono">
+          <span title="report.md" className={s.has_report ? 'text-text-2' : 'text-text-3'}>
+            ▤
+          </span>
+          <span title="metrics" className={s.has_metrics ? 'text-text-2' : 'text-text-3'}>
+            ◈
+          </span>
+        </span>
+      </div>
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// traffic analysis alerts tab
+// ---------------------------------------------------------------------------
+
+function TrafficAlertsTab({ detail }: { detail: SessionDetail }) {
+  const alerts = detail.alerts
+  return (
+    <div className="p-4">
+      <div className="mb-2 text-[10px] uppercase tracking-widest text-text-2">
+        流量告警（{alerts.length}）
+      </div>
+      {alerts.length === 0 ? (
+        <div className="py-6 text-center text-[11px] text-text-3">无告警</div>
+      ) : (
+        <table className="w-full text-[11px]">
+          <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
+            <tr>
+              <th className="pb-1.5 text-left font-normal">时间</th>
+              <th className="text-left font-normal">源 → 目的</th>
+              <th className="text-left font-normal">告警类型</th>
+              <th className="text-left font-normal">技术</th>
+              <th className="text-left font-normal">严重级别</th>
+              <th className="text-right font-normal">置信度</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((a, i) => {
+              const src = cell(a, 'src_ip')
+              const dst = cell(a, 'dst_ip')
+              const flow = src || dst ? `${src} → ${dst}` : '--'
+              const sev = cell(a, 'severity')
+              const sevTone =
+                sev === 'critical' || sev === 'high'
+                  ? 'text-attacker'
+                  : sev === 'medium'
+                    ? 'text-warning'
+                    : 'text-text-3'
+              return (
+                <tr key={i} className="border-t border-hairline/60 text-text-2">
+                  <td className="py-1.5 font-mono tabular-nums text-text-2">
+                    {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
+                  </td>
+                  <td className="font-mono text-[10px] text-text-2">{flow}</td>
+                  <td className="text-text-1">{cell(a, 'alert_type') || '--'}</td>
+                  <td className="font-mono text-text-2">{cell(a, 'technique') || '--'}</td>
+                  <td className={sevTone}>{sev || '--'}</td>
+                  <td className="text-right font-mono tabular-nums">
+                    {a.confidence != null ? `${Math.round(Number(a.confidence) * 100)}%` : '--'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // view
 // ---------------------------------------------------------------------------
 
 export function HistoryView() {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selected, setSelected] = useState<SessionInfo | null>(null)
+
+  const arenaSessions = useMemo(
+    () => sessions.filter((s) => (s.type ?? 'arena') === 'arena'),
+    [sessions],
+  )
+  const trafficSessions = useMemo(
+    () => sessions.filter((s) => (s.type ?? 'arena') === 'traffic_analysis'),
+    [sessions],
+  )
 
   const load = useCallback(() => {
     api
@@ -563,40 +707,32 @@ export function HistoryView() {
               暂无历史会话
             </div>
           )}
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSelected(s)}
-              className={`mb-1 flex w-full flex-col gap-1 px-3 py-1.5 text-left transition-colors ${
-                selected?.id === s.id
-                  ? 'bg-panel'
-                  : 'hover:bg-overlay'
-              }`}
-            >
-              <div className="flex w-full items-center gap-2">
-                <span className="truncate font-mono text-[11px] text-text-1">{s.id}</span>
-                {s.score != null && (
-                  <span className="ml-auto flex-none rounded border border-success/40 px-1 py-px font-mono text-[9px] tabular-nums text-success">
-                    {s.score.toFixed(1)}
-                  </span>
-                )}
-              </div>
-              <div className="w-full truncate text-[9px] text-text-3">
-                {s.scenario || '默认靶场'}
-              </div>
-              <div className="flex w-full items-center gap-2 text-[9px] text-text-2">
-                <span className="font-mono">{fmtMtime(s.mtime)}</span>
-                <span className="ml-auto flex gap-1.5 font-mono">
-                  <span title="report.md" className={s.has_report ? 'text-text-2' : 'text-text-3'}>
-                    ▤
-                  </span>
-                  <span title="metrics" className={s.has_metrics ? 'text-text-2' : 'text-text-3'}>
-                    ◈
-                  </span>
-                </span>
-              </div>
-            </button>
-          ))}
+          {arenaSessions.length > 0 && (
+            <>
+              <SessionGroupHeader title="作战台" count={arenaSessions.length} />
+              {arenaSessions.map((s) => (
+                <SessionListItem
+                  key={s.id}
+                  s={s}
+                  selected={selected?.id === s.id}
+                  onSelect={setSelected}
+                />
+              ))}
+            </>
+          )}
+          {trafficSessions.length > 0 && (
+            <>
+              <SessionGroupHeader title="流量分析" count={trafficSessions.length} />
+              {trafficSessions.map((s) => (
+                <SessionListItem
+                  key={s.id}
+                  s={s}
+                  selected={selected?.id === s.id}
+                  onSelect={setSelected}
+                />
+              ))}
+            </>
+          )}
         </div>
       </aside>
       </FadeIn>
