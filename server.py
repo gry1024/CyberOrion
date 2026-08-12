@@ -1393,7 +1393,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         async for ev in run_traffic_analysis_pipeline(events):
             ev_type = ev.get("type", "")
             if ev_type == "report":
-                _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("content", "")))
+                _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
             elif ev_type == "report_chunk":
                 _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
             yield _sse(ev)
