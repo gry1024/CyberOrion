@@ -1,4 +1,4 @@
-"""FastAPI WebSocket backend for the CyberOrion red-vs-blue arena.
+﻿"""FastAPI WebSocket backend for the CyberOrion red-vs-blue arena.
 
 Provides real-time event streaming and manual control of red/blue agents.
 
@@ -62,7 +62,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -1062,6 +1062,31 @@ async def bench_questions(suite: str = "malware_analysis",
     return {"suite": suite, "n": len(qs), "seed": seed,
             "questions": [{k: q[k] for k in keys if k in q} for q in qs]}
 
+
+
+
+@app.get("/api/skills")
+def get_skills_catalog():
+    from cyberorion.skills.registry import discover_skills
+    red_skills = []
+    for s in discover_skills("red"):
+        red_skills.append({"name": s.name, "description": s.description})
+    blue_skills = []
+    for s in discover_skills("blue"):
+        blue_skills.append({"name": s.name, "description": s.description})
+    return {"red": red_skills, "blue": blue_skills, "total": len(red_skills) + len(blue_skills)}
+
+
+@app.get("/api/skills/{side}/{name}")
+def get_skill_detail(side: str, name: str):
+    from cyberorion.skills.registry import load_skill_document, SkillError
+    if side not in ("red", "blue"):
+        raise HTTPException(status_code=400, detail="side must be 'red' or 'blue'")
+    try:
+        content = load_skill_document(side, name)
+    except SkillError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"side": side, "name": name, "content": content}
 
 @app.get("/api/about")
 async def about() -> Any:

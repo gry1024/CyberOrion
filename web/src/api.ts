@@ -21,6 +21,8 @@ import type {
   ScoreMetrics,
   SessionDetail,
   SessionInfo,
+  SkillDetail,
+  SkillsCatalog,
   StorylineResult,
   TelemetryEventRow,
   TrafficReplayResult,
@@ -196,6 +198,10 @@ export const api = {
   stopV2Blue: () => post('/api/v2/blue/stop', {}) as Promise<{ ok: boolean; error?: string }>,
   /** Stop current v2 session. */
   stopV2Session: () => post('/api/v2/session/stop', {}) as Promise<{ ok: boolean; error?: string }>,
+
+  getSkills: () => get('/api/skills') as Promise<SkillsCatalog>,
+  getSkillDetail: (side: string, name: string) =>
+    get(`/api/skills/${side}/${name}`) as Promise<SkillDetail>,
 }
 
 export type { AgentRoleSpec } from './types'

@@ -9,6 +9,7 @@ import { TrafficView } from './components/TrafficView'
 import { BenchmarkView } from './components/BenchmarkView'
 import { HistoryView } from './components/HistoryView'
 import { KnowledgeView } from './components/KnowledgeView'
+import { SkillsView } from './components/SkillsView'
 import { AboutView } from './components/AboutView'
 import { Toaster } from './components/Toaster'
 
@@ -31,6 +32,7 @@ export default function App() {
               <HistoryView />
             </div>
           )}
+          {view === 'skills' && <SkillsView />}
           {view === 'kb' && (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
               <KnowledgeView />

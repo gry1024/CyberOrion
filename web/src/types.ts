@@ -3,7 +3,7 @@
 export type Side = 'red' | 'blue' | 'system'
 
 /** Top-level view switch in the header. */
-export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'kb' | 'docs'
+export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'kb' | 'skills' | 'docs'
 
 export interface ArenaEvent {
   type: string
@@ -962,4 +962,21 @@ export function v2RoleOf(key: string): V2Role | undefined {
 /** Check if a key is a v2 role (used by DispatchGraph / AgentDetailModal to switch UI). */
 export function isV2Role(key: string): boolean {
   return Boolean(v2RoleOf(key))
+}
+
+export interface SkillInfo {
+  name: string
+  description: string
+}
+
+export interface SkillsCatalog {
+  red: SkillInfo[]
+  blue: SkillInfo[]
+  total: number
+}
+
+export interface SkillDetail {
+  side: 'red' | 'blue'
+  name: string
+  content: string
 }
