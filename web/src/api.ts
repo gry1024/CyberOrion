@@ -202,6 +202,14 @@ export const api = {
   getSkills: () => get('/api/skills') as Promise<SkillsCatalog>,
   getSkillDetail: (side: string, name: string) =>
     get(`/api/skills/${side}/${name}`) as Promise<SkillDetail>,
+
+  // ---- hostguard (host maintenance) ----
+  hostguardConnect: (opts: { host: string; port: number; username: string; password: string; key_path: string }) =>
+    post('/api/hostguard/connect', opts) as Promise<{ ok: boolean; host?: string; system_info?: string; error?: string }>,
+  hostguardStatus: () => get('/api/hostguard/status') as Promise<{ connected: boolean; host?: string; username?: string; port?: number; system_info?: string }>,
+  hostguardDisconnect: () => post('/api/hostguard/disconnect', {}) as Promise<{ ok: boolean }>,
+  hostguardScanURL: () => url('/api/hostguard/scan'),
+  hostguardChatURL: () => url('/api/hostguard/chat'),
 }
 
 export type { AgentRoleSpec } from './types'

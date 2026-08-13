@@ -13,6 +13,7 @@ const NAV: { key: ViewKey; label: string }[] = [
   { key: 'traffic', label: '流量分析' },
   { key: 'bench', label: '基准测试' },
   { key: 'history', label: '历史复盘' },
+  { key: 'hostguard', label: '主机卫士' },
   { key: 'skills', label: '\u6280\u80fd\u6a21\u5757' },
   { key: 'kb', label: '知识库' },
   { key: 'docs', label: '框架文档' },

@@ -1,7 +1,8 @@
 // 历史 tab: full-page session replay — left session list, right detail with
-// ① AI 复盘 (storyline, generate-on-demand) ② 战役统计 strip ③ tabbed
-// 完整时间线 / 工具调用 / 告警与攻击 / 报告. All endpoints fail soft: the
-// backend may still be in flight, so 404/empty render empty states.
+// 1) AI 复盘 (auto-generated, no manual trigger needed)
+// 2) 战役统计 strip
+// 3) tabbed: 红蓝对垒 / 时间线(分页+颜色优化) / 工具调用 / 报告
+// "告警与攻击" tab 已移除（storyline 自动生成后不再需要）。
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
@@ -30,17 +31,8 @@ function fmtTime(ts: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-/** Defensive field read for loosely-typed truth rows. */
-function cell(row: Record<string, unknown>, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = row[k]
-    if (v != null && v !== '') return String(v)
-  }
-  return ''
-}
-
 // ---------------------------------------------------------------------------
-// AI 复盘 (storyline) — render, or generate + poll
+// AI 复盘 (storyline) — 自动显示，无需手动触发
 // ---------------------------------------------------------------------------
 
 function StorylineSection({
@@ -100,7 +92,6 @@ function StorylineSection({
           setMd(r.storyline_md)
           setGenerating(false)
         } else {
-          // 202 {status:"generating"} — poll the GET endpoint.
           startPolling()
         }
       })
@@ -144,7 +135,7 @@ function StorylineSection({
         ) : generating ? (
           <div className="flex items-center gap-2 py-4 text-[11px] text-text-3">
             <span className="live-pulse inline-block h-1.5 w-1.5 rounded-full bg-fg-4" />
-            AI 正在复盘整场对抗，通常需要几十秒…
+            AI 正在复盘整场对抗，通常需要十几秒…
           </div>
         ) : (
           <div className="flex items-center gap-3 py-2">
@@ -155,7 +146,7 @@ function StorylineSection({
               生成 AI 复盘
             </button>
             <span className="text-[10px] text-text-2">
-              {error || '由 LLM 基于完整时间线生成战役叙事'}
+              {error || '用 LLM 基于完整时间线生成战役故事复盘'}
             </span>
           </div>
         )}
@@ -200,37 +191,32 @@ function StatCell({ label, value, tone = 'text-text-1' }: {
 
 function BattleStats({ detail }: { detail: SessionDetail }) {
   const m: ScoreMetrics | null = detail.metrics
+  const isTraffic = detail.id.includes('traffic') || (detail.alerts.length > 0 && detail.attacks.length === 0 && detail.counts.attacks === 0)
   return (
     <section className="panel flex-none overflow-hidden">
       <div className="flex divide-x divide-hairline overflow-x-auto">
-        <StatCell label="攻击" value={String(detail.counts.attacks)} tone="text-attacker" />
-        <StatCell
-          label="已验证"
-          value={String(detail.counts.verified)}
-          tone="text-attacker/70"
-        />
+        {!isTraffic && (
+          <>
+            <StatCell label="攻击" value={String(detail.counts.attacks)} tone="text-attacker" />
+            <StatCell label="已验证" value={String(detail.counts.verified)} tone="text-attacker/70" />
+          </>
+        )}
         <StatCell label="告警" value={String(detail.counts.alerts)} />
         <StatCell label="处置/事件" value={String(detail.counts.events)} tone="text-success" />
-        {m && (
+        {m && !isTraffic && (
           <>
-            <StatCell
-              label="检测率"
-              value={`${(m.detection_rate * 100).toFixed(0)}%`}
-            />
-            <StatCell
-              label="MTTD"
-              value={m.mttd_sec != null ? `${m.mttd_sec.toFixed(1)}s` : '--'}
-            />
-            <StatCell
-              label="蓝队分"
-              value={m.blue_score.toFixed(1)}
-              tone="text-success"
-            />
-            <StatCell
-              label="红队分"
-              value={m.red_score.toFixed(1)}
-              tone="text-attacker"
-            />
+            <StatCell label="检出率" value={`${(m.detection_rate * 100).toFixed(0)}%`} />
+            <StatCell label="MTTD" value={m.mttd_sec != null ? `${m.mttd_sec.toFixed(1)}s` : '--'} />
+            <StatCell label="蓝队分" value={m.blue_score.toFixed(1)} tone="text-success" />
+            <StatCell label="红队分" value={m.red_score.toFixed(1)} tone="text-attacker" />
+          </>
+        )}
+        {m && isTraffic && (
+          <>
+            {m.event_count != null && <StatCell label="流量事件" value={String(m.event_count)} />}
+            {m.alert_count != null && <StatCell label="告警数" value={String(m.alert_count)} />}
+            {m.critical_count != null && <StatCell label="严重" value={String(m.critical_count)} tone="text-attacker" />}
+            {m.high_count != null && <StatCell label="高危" value={String(m.high_count)} tone="text-warning" />}
           </>
         )}
       </div>
@@ -242,55 +228,126 @@ function BattleStats({ detail }: { detail: SessionDetail }) {
 // detail tabs
 // ---------------------------------------------------------------------------
 
-const KIND_META: Record<
-  SessionTimelineRow['kind'],
-  { label: string; cls: string; dot: string }
-> = {
-  attack: { label: '攻击', cls: 'border-attacker/40 text-attacker', dot: 'bg-attacker' },
-  alert: { label: '告警', cls: 'border-hairline text-text-1', dot: 'bg-fg-4' },
-  event: { label: '事件', cls: 'border-line text-text-3', dot: 'bg-fg-4/60' },
-  response: { label: '处置', cls: 'border-success/40 text-success', dot: 'bg-success' },
+/** 时间线颜色配置：根据 kind + side 返回标签、徽章样式、圆点样式 */
+function getTimelineColors(r: SessionTimelineRow): { label: string; badge: string; dot: string; titleColor: string } {
+  // 从 title 中推断 side（如 "RED tool:", "BLUE output:" 等）
+  const title = (r.title || '').toUpperCase()
+  const side = title.startsWith('RED') ? 'red' : title.startsWith('BLUE') ? 'blue' : 'system'
+
+  if (r.kind === 'attack') {
+    return {
+      label: '攻击',
+      badge: 'border-attacker/50 bg-attacker/10 text-attacker font-semibold',
+      dot: 'bg-attacker',
+      titleColor: 'text-attacker/90',
+    }
+  }
+  if (r.kind === 'alert') {
+    return {
+      label: '告警',
+      badge: 'border-warning/50 bg-warning/10 text-warning font-semibold',
+      dot: 'bg-warning',
+      titleColor: 'text-warning/90',
+    }
+  }
+  if (r.kind === 'response') {
+    return {
+      label: '处置',
+      badge: 'border-success/50 bg-success/10 text-success font-semibold',
+      dot: 'bg-success',
+      titleColor: 'text-success/90',
+    }
+  }
+  // event: 根据 side 区分颜色
+  if (side === 'red') {
+    return {
+      label: '红方',
+      badge: 'border-red/40 bg-red/5 text-red/80 font-medium',
+      dot: 'bg-red/70',
+      titleColor: 'text-red/80',
+    }
+  }
+  if (side === 'blue') {
+    return {
+      label: '蓝方',
+      badge: 'border-blue/40 bg-blue/5 text-blue/80 font-medium',
+      dot: 'bg-blue/70',
+      titleColor: 'text-blue/80',
+    }
+  }
+  return {
+    label: '系统',
+    badge: 'border-hairline bg-overlay/50 text-text-2 font-medium',
+    dot: 'bg-fg-4/60',
+    titleColor: 'text-text-2',
+  }
 }
 
+const PAGE_SIZE = 50
+
 function TimelineTab({ rows }: { rows: SessionTimelineRow[] }) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const sorted = useMemo(() => [...rows].sort((a, b) => a.ts - b.ts), [rows])
+
+  // Reset pagination when rows change (switching sessions)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [rows])
+
   if (sorted.length === 0) {
     return <div className="py-16 text-center text-[11px] text-text-3">暂无时间线数据</div>
   }
+
+  const visible = sorted.slice(0, visibleCount)
+  const hasMore = visibleCount < sorted.length
+
   return (
     <div>
-      {sorted.map((r, i) => {
-        const meta = KIND_META[r.kind] ?? KIND_META.event
+      {/* 统计摘要 */}
+      <div className="border-b border-hairline/60 bg-overlay/30 px-4 py-1.5 text-[10px] text-text-3">
+        共 {sorted.length} 条事件
+        {hasMore && <span className="ml-2 text-text-4">（当前显示前 {visible.length} 条）</span>}
+      </div>
+      {visible.map((r, i) => {
+        const colors = getTimelineColors(r)
         return (
-          <div key={i} className="flex gap-3 border-b border-hairline/60 px-4 py-2">
+          <div key={i} className="flex gap-3 border-b border-hairline/60 px-4 py-2 transition-colors hover:bg-overlay/30">
             <span className="w-16 flex-none pt-0.5 text-right font-mono text-[10px] tabular-nums text-text-3">
               {fmtTime(r.ts)}
             </span>
-            <span className={`mt-1.5 h-1.5 w-1.5 flex-none rounded-full ${meta.dot}`} />
+            <span className={`mt-1.5 h-2 w-2 flex-none rounded-full ${colors.dot}`} />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className={`flex-none rounded border px-1 py-px text-[9px] ${meta.cls}`}>
-                  {meta.label}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={`flex-none rounded border px-1.5 py-px text-[9px] ${colors.badge}`}>
+                  {colors.label}
                 </span>
-                <span className="truncate text-[12px] text-text-2">{r.title}</span>
+                <span className={`truncate text-[12px] ${colors.titleColor}`}>{r.title}</span>
                 {r.kind === 'attack' && r.success !== undefined && (
-                  <span className={`flex-none text-[10px] ${r.success ? 'text-attacker' : 'text-text-3'}`}>
+                  <span className={`flex-none text-[10px] font-bold ${r.success ? 'text-attacker' : 'text-text-3'}`}>
                     {r.success ? '✓' : '✗'}
                   </span>
                 )}
                 {r.technique && (
-                  <span className="flex-none rounded bg-overlay px-1 py-px font-mono text-[9px] text-text-3">
+                  <span className="flex-none rounded bg-purple/10 border border-purple/30 px-1 py-px font-mono text-[9px] text-purple">
                     {r.technique}
                   </span>
                 )}
               </div>
               {r.detail && (
-                <div className="mt-0.5 text-[10px] leading-4 text-text-3">{r.detail}</div>
+                <div className="mt-0.5 text-[10px] leading-4 text-text-2">{r.detail}</div>
               )}
             </div>
           </div>
         )
       })}
+      {hasMore && (
+        <button
+          onClick={() => setVisibleCount(visibleCount + PAGE_SIZE)}
+          className="w-full border-t border-hairline/60 py-2.5 text-[11px] text-text-3 transition-colors hover:bg-overlay/50 hover:text-fg"
+        >
+          加载更多（剩余 {sorted.length - visibleCount} 条）
+        </button>
+      )}
     </div>
   )
 }
@@ -327,12 +384,20 @@ function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
               <td className="py-1.5 pl-4 font-mono tabular-nums text-text-2">
                 {fmtTime(r.ts)}
               </td>
-              <td className={r.side === 'red' ? 'text-attacker/80' : ''}>{r.side}</td>
+              <td>
+                <span className={`rounded px-1 py-px text-[9px] font-medium ${
+                  r.side === 'red'
+                    ? 'bg-attacker/10 text-attacker border border-attacker/30'
+                    : 'bg-blue/10 text-blue border border-blue/30'
+                }`}>
+                  {r.side === 'red' ? '红方' : '蓝方'}
+                </span>
+              </td>
               <td className="font-mono text-text-1">{r.tool}</td>
               <td className="max-w-0 w-[45%] truncate pr-3 font-mono text-[10px] text-text-2" title={r.args}>
                 {r.args}
               </td>
-              <td className={`pr-4 text-right ${r.ok ? 'text-success' : 'text-attacker'}`}>
+              <td className={`pr-4 text-right font-bold ${r.ok ? 'text-success' : 'text-attacker'}`}>
                 {r.ok ? '✓' : '✗'}
               </td>
             </tr>
@@ -358,92 +423,11 @@ function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
   )
 }
 
-function TruthTab({ detail }: { detail: SessionDetail }) {
-  const { alerts, attacks } = detail
-  return (
-    <div className="p-4">
-      <div className="mb-2 text-[10px] uppercase tracking-widest text-text-2">
-        告警（{alerts.length}）
-      </div>
-      {alerts.length === 0 ? (
-        <div className="py-6 text-center text-[11px] text-text-3">无告警</div>
-      ) : (
-        <table className="mb-6 w-full text-[11px]">
-          <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
-            <tr>
-              <th className="pb-1.5 text-left font-normal">时间</th>
-              <th className="text-left font-normal">主机</th>
-              <th className="text-left font-normal">技术</th>
-              <th className="text-left font-normal">判定</th>
-              <th className="text-right font-normal">置信度</th>
-              <th className="text-right font-normal">状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            {alerts.map((a, i) => (
-              <tr key={i} className="border-t border-hairline/60 text-text-2">
-                <td className="py-1.5 font-mono tabular-nums text-text-2">
-                  {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
-                </td>
-                <td className="font-mono">{cell(a, 'host') || '--'}</td>
-                <td className="font-mono text-text-2">{cell(a, 'technique') || '--'}</td>
-                <td>{cell(a, 'verdict') || '--'}</td>
-                <td className="text-right font-mono tabular-nums">
-                  {a.confidence != null ? `${Math.round(Number(a.confidence) * 100)}%` : '--'}
-                </td>
-                <td className="text-right">{cell(a, 'status') || '--'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <div className="mb-2 text-[10px] uppercase tracking-widest text-text-2">
-        攻击真值（{attacks.length}）
-      </div>
-      {attacks.length === 0 ? (
-        <div className="py-6 text-center text-[11px] text-text-3">无攻击记录</div>
-      ) : (
-        <table className="w-full text-[11px]">
-          <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
-            <tr>
-              <th className="pb-1.5 text-left font-normal">时间</th>
-              <th className="text-left font-normal">目标</th>
-              <th className="text-left font-normal">技术</th>
-              <th className="text-left font-normal">动作</th>
-              <th className="text-right font-normal">结果</th>
-            </tr>
-          </thead>
-          <tbody>
-            {attacks.map((a, i) => {
-              const ok = a.success === true || a.success === 'true'
-              return (
-                <tr key={i} className="border-t border-hairline/60 text-text-2">
-                  <td className="py-1.5 font-mono tabular-nums text-text-2">
-                    {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
-                  </td>
-                  <td className="font-mono">{cell(a, 'target', 'host') || '--'}</td>
-                  <td className="font-mono text-text-2">{cell(a, 'technique') || '--'}</td>
-                  <td className="max-w-0 w-[40%] truncate pr-3 text-text-2">
-                    {cell(a, 'action') || '--'}
-                  </td>
-                  <td className={`text-right ${ok ? 'text-attacker' : 'text-text-3'}`}>
-                    {ok ? '✓ 成功' : '✗ 失败'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // session detail (right side)
 // ---------------------------------------------------------------------------
 
-type DetailTab = 'duel' | 'timeline' | 'tools' | 'truth' | 'report'
+type DetailTab = 'duel' | 'timeline' | 'tools' | 'report'
 
 function SessionDetailView({ session }: { session: SessionInfo }) {
   const [detail, setDetail] = useState<SessionDetail | null>(null)
@@ -464,14 +448,12 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
   const tabs: Array<{ key: DetailTab; label: string }> = isTraffic
     ? [
         { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
-        { key: 'truth', label: '流量告警' },
         { key: 'report', label: '报告' },
       ]
     : [
         { key: 'duel', label: '红蓝对垒' },
         { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
         { key: 'tools', label: `工具调用 ${detail ? detail.tool_calls.length : ''}` },
-        { key: 'truth', label: '告警与攻击' },
         { key: 'report', label: '报告' },
       ]
 
@@ -505,12 +487,6 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
               {tab === 'duel' && <DuelTimeline detail={detail} />}
               {tab === 'timeline' && <TimelineTab rows={detail.timeline} />}
               {tab === 'tools' && <ToolCallsTab rows={detail.tool_calls} />}
-              {tab === 'truth' &&
-                (isTraffic ? (
-                  <TrafficAlertsTab detail={detail} />
-                ) : (
-                  <TruthTab detail={detail} />
-                ))}
               {tab === 'report' &&
                 (detail.report_md ? (
                   <div className="p-5">
@@ -590,65 +566,6 @@ function SessionListItem({
         </span>
       </div>
     </button>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// traffic analysis alerts tab
-// ---------------------------------------------------------------------------
-
-function TrafficAlertsTab({ detail }: { detail: SessionDetail }) {
-  const alerts = detail.alerts
-  return (
-    <div className="p-4">
-      <div className="mb-2 text-[10px] uppercase tracking-widest text-text-2">
-        流量告警（{alerts.length}）
-      </div>
-      {alerts.length === 0 ? (
-        <div className="py-6 text-center text-[11px] text-text-3">无告警</div>
-      ) : (
-        <table className="w-full text-[11px]">
-          <thead className="text-[9px] uppercase tracking-[0.15em] text-text-3">
-            <tr>
-              <th className="pb-1.5 text-left font-normal">时间</th>
-              <th className="text-left font-normal">源 → 目的</th>
-              <th className="text-left font-normal">告警类型</th>
-              <th className="text-left font-normal">技术</th>
-              <th className="text-left font-normal">严重级别</th>
-              <th className="text-right font-normal">置信度</th>
-            </tr>
-          </thead>
-          <tbody>
-            {alerts.map((a, i) => {
-              const src = cell(a, 'src_ip')
-              const dst = cell(a, 'dst_ip')
-              const flow = src || dst ? `${src} → ${dst}` : '--'
-              const sev = cell(a, 'severity')
-              const sevTone =
-                sev === 'critical' || sev === 'high'
-                  ? 'text-attacker'
-                  : sev === 'medium'
-                    ? 'text-warning'
-                    : 'text-text-3'
-              return (
-                <tr key={i} className="border-t border-hairline/60 text-text-2">
-                  <td className="py-1.5 font-mono tabular-nums text-text-2">
-                    {cell(a, 'ts') ? fmtTime(Number(a.ts)) : '--'}
-                  </td>
-                  <td className="font-mono text-[10px] text-text-2">{flow}</td>
-                  <td className="text-text-1">{cell(a, 'alert_type') || '--'}</td>
-                  <td className="font-mono text-text-2">{cell(a, 'technique') || '--'}</td>
-                  <td className={sevTone}>{sev || '--'}</td>
-                  <td className="text-right font-mono tabular-nums">
-                    {a.confidence != null ? `${Math.round(Number(a.confidence) * 100)}%` : '--'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
   )
 }
 
@@ -746,7 +663,7 @@ export function HistoryView() {
           <div className="text-center">
             <div className="text-[13px] font-medium text-text-3">选择一个会话</div>
             <div className="mt-1 text-[11px] text-text-2">
-              AI 复盘 · 战役统计 · 红蓝对垒 · 完整时间线 · 工具调用 · 告警与攻击真值 · 报告
+              AI 复盘 · 战役统计 · 红蓝对垒 · 完整时间线 · 工具调用 · 报告
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@
 export type Side = 'red' | 'blue' | 'system'
 
 /** Top-level view switch in the header. */
-export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'kb' | 'skills' | 'docs'
+export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'hostguard' | 'kb' | 'skills' | 'docs'
 
 export interface ArenaEvent {
   type: string
@@ -358,6 +358,11 @@ export interface ScoreMetrics {
   response: { total: number; responded: number; response_rate: number }
   blue_score: number
   red_score: number
+  // Traffic-analysis optional fields
+  event_count?: number
+  alert_count?: number
+  critical_count?: number
+  high_count?: number
 }
 
 export interface SessionInfo {

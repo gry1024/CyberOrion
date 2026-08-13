@@ -8,6 +8,7 @@ import { ArenaView } from './components/ArenaView'
 import { TrafficView } from './components/TrafficView'
 import { BenchmarkView } from './components/BenchmarkView'
 import { HistoryView } from './components/HistoryView'
+import { HostGuardView } from './components/HostGuardView'
 import { KnowledgeView } from './components/KnowledgeView'
 import { SkillsView } from './components/SkillsView'
 import { AboutView } from './components/AboutView'
@@ -32,6 +33,7 @@ export default function App() {
               <HistoryView />
             </div>
           )}
+          {view === 'hostguard' && <HostGuardView />}
           {view === 'skills' && <SkillsView />}
           {view === 'kb' && (
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">

@@ -232,6 +232,7 @@ logs/
     ├── report.md            # 最终分析报告（Markdown，含规则告警 + LLM 深度分析）
     ├── summary.json         # 会话摘要（ID、类型、状态、关键指标）
     └── traffic_analysis.json # LLM 原始分析结果（含模型、字数、生成时间）
+    │   │   storyline.md          # AI 故事复盘（会话结束后 LLM 自动生成）
 ```
 
 - 时间戳精度到秒，避免冲突
@@ -246,6 +247,17 @@ logs/
 | `red_vs_blue` | 红蓝实弹/模拟对抗 | timeline.jsonl / final_report.txt / summary.json |
 | `traffic_analysis` | AD 域流量深度分析 | timeline.jsonl / metrics.json / report.md / traffic_analysis.json |
 | `benchmark` | 基准测试运行 | logs/bench/ 下独立目录 |
+
+
+### AI 故事复盘（storyline.md）自动生成
+
+每次作战或流量分析结束后，框架自动调用 cyberorion.storyline.generate_storyline() 生成故事复盘报告：
+
+- **触发时机**：作战台 ControllerV2.stop_session() 和流量分析 server.py 持久化逻辑中均内嵌自动调用
+- **生成方式**：从 	imeline.jsonl + metrics.json + 
+eport.md 提取关键事实（facts），传入 LLM 渲染为叙事性 Markdown 报告；LLM 不可用时降级为模板拼接
+- **前端展示**：历史复盘页 HistoryView 的 StorylineSection 组件自动读取并展示，无需手动触发
+- **内容结构**：包含红蓝双方意图分析、关键攻防动作、工具执行情况、检测/响应过程、最终结果与证据评价
 
 ---
 
@@ -382,3 +394,36 @@ npm run build                             # 产物输出到 web/dist 供后端�
 - **CloudBase**：云托管静态前端与可选的无状态 API 层，敏感的对抗编排与靶场留在自有环境。
 
 默认零配置即可运行；venv / benchmarks / 数据目录可通过 `CAI_VENV` / `CICIDS_DIR` / `PURPLE_LLAMA_DIR` / `CVEBENCH_REPO` 等环境变量覆盖。
+
+---
+
+## 11. 主机卫士（HostGuard）
+
+主机卫士是一个基于 CyberOrion 蓝方架构的远程服务器维护模块，通过 SSH 连接用户服务器后自动进行安全扫描、威胁分析与加固建议。
+
+### 架构
+
+- **SSH 客户端**（cyberorion/hostguard/ssh_client.py）：封装 sshpass + ssh 命令调用，支持密码认证与密钥认证，异步执行远程命令并实时返回输出。连接信息仅存在内存中，不持久化到磁盘。
+- **扫描分析流水线**（cyberorion/hostguard/pipeline.py）：4 个 Agent 串行研判，SSE 流式输出思考链/工具调用/报告：
+  1. **系统侦察**（recon_agent）：uname 系统信息、端口扫描、进程审计、用户审计
+  2. **安全扫描**（scanner_agent）：服务状态、日志分析、防火墙检查、文件权限审计
+  3. **威胁分析**（analyst_agent）：LLM 综合前两阶段结果进行威胁评估
+  4. **加固建议**（hardener_agent）：LLM 生成具体加固建议
+- **自由对话**（
+un_hostguard_chat）：用户输入消息后，自动匹配关键词执行相应工具（端口/进程/用户/日志/防火墙等），再调用 LLM 综合回答。
+
+### REST API
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| /api/hostguard/connect | POST | SSH 连接（host/port/username/password/key_path） |
+| /api/hostguard/status | GET | 查询当前连接状态 |
+| /api/hostguard/disconnect | POST | 断开连接 |
+| /api/hostguard/scan | POST | 启动自动扫描分析流水线（SSE） |
+| /api/hostguard/chat | POST | 自由对话（SSE 流式输出） |
+
+### 前端 UI
+
+- **聊天界面**：模仿 Kimi/ChatGPT/Claude 风格，支持 Markdown 渲染、流式输出、工具调用与 Agent 派遣的彩色展示
+- **Agent 色彩**：系统侦察（蓝）、安全扫描（青）、威胁分析（紫）、加固建议（绿）、主机卫士（黄）
+- **初始化**：未连接时展示连接表单，提示用户提供 IP/端口/用户名/密码或密钥；连接成功后进入聊天界面

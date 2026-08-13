@@ -24,6 +24,8 @@ from typing import Any
 
 # 事件时间线条目上限（telemetry.db events 表）。
 MAX_EVENTS = 500
+# timeline entries cap (prevent LLM streaming chunks from flooding frontend).
+MAX_TIMELINE = 300
 # 摘要 / 证据字段的展示截断长度。
 _CLIP = 300
 # severity >= medium 的非 response 事件进入时间线（kind="event"）。
@@ -34,7 +36,7 @@ _JSONL_TIMELINE_EVENTS = ("session_started", "session_ended",
                           "red_action", "blue_action",
                           "session_start", "session_end",
                           "round_start", "round_end",
-                          "tool_call", "tool_output", "thinking")
+                          "tool_call", "tool_output")
 # response 事件 summary 的工具名前缀（"remediate: lock_user ..."）。
 _TOOL_PREFIX_RE = re.compile(r"^([a-z_]{3,30}):\s*(.*)$")
 
@@ -233,6 +235,10 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
         event = str(entry.get("event") or entry.get("type") or "")
         if event not in _JSONL_TIMELINE_EVENTS:
             continue
+        # Skip LLM streaming delta chunks (only keep complete events).
+        d_raw = entry.get("data") or {}
+        if d_raw.get("delta") is True:
+            continue
         side = str(entry.get("side") or "system")
         d = entry.get("data") or {}
         if event in ("session_start", "session_started"):
@@ -339,6 +345,9 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
     timeline = _timeline_from_db(attacks, alerts, events) \
         + _timeline_from_jsonl(jsonl_entries)
     timeline.sort(key=lambda x: float(x["ts"]))
+    # Cap timeline to prevent frontend freeze on huge sessions.
+    if len(timeline) > MAX_TIMELINE:
+        timeline = timeline[-MAX_TIMELINE:]
 
     def _read(filename: str) -> "str | None":
         path = session_dir / filename
