@@ -219,6 +219,118 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CyberOrion Arena", version="1.0.0", lifespan=lifespan)
+# ===============================================================================
+# REST: hostguard (host maintenance via SSH + blue team architecture)
+# --------------------------------------------------------------------------- #
+from cyberorion.hostguard import (
+    SSHClient, HostInfo, get_client, set_client,
+    run_hostguard_pipeline, run_hostguard_chat,
+)
+
+
+@app.post("/api/hostguard/connect")
+async def hostguard_connect(payload: dict = Body(default={})) -> Any:
+    """Connect to a remote server via SSH.
+
+    Body: {host, port, username, password, key_path}
+    """
+    host = str(payload.get("host", "")).strip()
+    if not host:
+        return JSONResponse({"ok": False, "error": "host is required"}, status_code=400)
+
+    info = HostInfo(
+        host=host,
+        port=int(payload.get("port", 22)),
+        username=str(payload.get("username", "root")),
+        password=str(payload.get("password", "")),
+        key_path=str(payload.get("key_path", "")),
+    )
+    ssh = SSHClient(info)
+    ok, msg = await ssh.connect()
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=400)
+    set_client(ssh)
+    return {"ok": True, "host": host, "system_info": msg[:500]}
+
+
+@app.get("/api/hostguard/status")
+async def hostguard_status() -> Any:
+    """Check current SSH connection status."""
+    ssh = get_client()
+    if ssh is None or not ssh.connected:
+        return {"connected": False}
+    return {
+        "connected": True,
+        "host": ssh.info.host,
+        "username": ssh.info.username,
+        "port": ssh.info.port,
+        "system_info": ssh.info.system_info[:300],
+    }
+
+
+@app.post("/api/hostguard/disconnect")
+async def hostguard_disconnect() -> Any:
+    """Disconnect from the remote server."""
+    ssh = get_client()
+    if ssh is not None:
+        await ssh.disconnect()
+        set_client(None)
+    return {"ok": True}
+
+
+@app.post("/api/hostguard/scan")
+async def hostguard_scan(payload: dict = Body(default={})) -> StreamingResponse:
+    """Run automatic scan analysis pipeline (SSE streaming).
+
+    Body: {} (uses current connection)
+    """
+    ssh = get_client()
+    if ssh is None or not ssh.connected:
+        return StreamingResponse(
+            _iter_sse([{"type": "error", "side": "system",
+                        "data": {"message": "未连接服务器，请先连接"},
+                        "timestamp": time.time()}]),
+            media_type="text/event-stream",
+        )
+
+    async def event_stream():
+        async for ev in run_hostguard_pipeline(ssh):
+            yield _sse(ev)
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/hostguard/chat")
+async def hostguard_chat(payload: dict = Body(default={})) -> StreamingResponse:
+    """Chat with hostguard agent (SSE streaming).
+
+    Body: {message}
+    """
+    ssh = get_client()
+    if ssh is None or not ssh.connected:
+        return StreamingResponse(
+            _iter_sse([{"type": "error", "side": "system",
+                        "data": {"message": "未连接服务器，请先连接"},
+                        "timestamp": time.time()}]),
+            media_type="text/event-stream",
+        )
+
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        return JSONResponse({"ok": False, "error": "message is required"}, status_code=400)
+
+    async def event_stream():
+        async for ev in run_hostguard_chat(ssh, message):
+            yield _sse(ev)
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _iter_sse(events: list) -> Any:
+    """Convert a list of event dicts to SSE string stream."""
+    for ev in events:
+        yield _sse(ev)
+
+# ===============================================================================
+
 
 # CORS：生产环境前端（nginx 静态托管）与后端（同源反代）同源，但仍放行以便灵活部署
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -1645,111 +1757,4 @@ if __name__ == "__main__":
 
 
 # --------------------------------------------------------------------------- #
-# REST: hostguard (host maintenance via SSH + blue team architecture)
-# --------------------------------------------------------------------------- #
-from cyberorion.hostguard import (
-    SSHClient, HostInfo, get_client, set_client,
-    run_hostguard_pipeline, run_hostguard_chat,
-)
 
-
-@app.post("/api/hostguard/connect")
-async def hostguard_connect(payload: dict = Body(default={})) -> Any:
-    """Connect to a remote server via SSH.
-
-    Body: {host, port, username, password, key_path}
-    """
-    host = str(payload.get("host", "")).strip()
-    if not host:
-        return JSONResponse({"ok": False, "error": "host is required"}, status_code=400)
-
-    info = HostInfo(
-        host=host,
-        port=int(payload.get("port", 22)),
-        username=str(payload.get("username", "root")),
-        password=str(payload.get("password", "")),
-        key_path=str(payload.get("key_path", "")),
-    )
-    ssh = SSHClient(info)
-    ok, msg = await ssh.connect()
-    if not ok:
-        return JSONResponse({"ok": False, "error": msg}, status_code=400)
-    set_client(ssh)
-    return {"ok": True, "host": host, "system_info": msg[:500]}
-
-
-@app.get("/api/hostguard/status")
-async def hostguard_status() -> Any:
-    """Check current SSH connection status."""
-    ssh = get_client()
-    if ssh is None or not ssh.connected:
-        return {"connected": False}
-    return {
-        "connected": True,
-        "host": ssh.info.host,
-        "username": ssh.info.username,
-        "port": ssh.info.port,
-        "system_info": ssh.info.system_info[:300],
-    }
-
-
-@app.post("/api/hostguard/disconnect")
-async def hostguard_disconnect() -> Any:
-    """Disconnect from the remote server."""
-    ssh = get_client()
-    if ssh is not None:
-        await ssh.disconnect()
-        set_client(None)
-    return {"ok": True}
-
-
-@app.post("/api/hostguard/scan")
-async def hostguard_scan(payload: dict = Body(default={})) -> StreamingResponse:
-    """Run automatic scan analysis pipeline (SSE streaming).
-
-    Body: {} (uses current connection)
-    """
-    ssh = get_client()
-    if ssh is None or not ssh.connected:
-        return StreamingResponse(
-            _iter_sse([{"type": "error", "side": "system",
-                        "data": {"message": "未连接服务器，请先连接"},
-                        "timestamp": time.time()}]),
-            media_type="text/event-stream",
-        )
-
-    async def event_stream():
-        async for ev in run_hostguard_pipeline(ssh):
-            yield _sse(ev)
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@app.post("/api/hostguard/chat")
-async def hostguard_chat(payload: dict = Body(default={})) -> StreamingResponse:
-    """Chat with hostguard agent (SSE streaming).
-
-    Body: {message}
-    """
-    ssh = get_client()
-    if ssh is None or not ssh.connected:
-        return StreamingResponse(
-            _iter_sse([{"type": "error", "side": "system",
-                        "data": {"message": "未连接服务器，请先连接"},
-                        "timestamp": time.time()}]),
-            media_type="text/event-stream",
-        )
-
-    message = str(payload.get("message", "")).strip()
-    if not message:
-        return JSONResponse({"ok": False, "error": "message is required"}, status_code=400)
-
-    async def event_stream():
-        async for ev in run_hostguard_chat(ssh, message):
-            yield _sse(ev)
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-async def _iter_sse(events: list) -> Any:
-    """Convert a list of event dicts to SSE string stream."""
-    for ev in events:
-        yield _sse(ev)
