@@ -97,7 +97,7 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
   const [port, setPort] = useState('22')
   const [username, setUsername] = useState('root')
   const [password, setPassword] = useState('')
-  const [keyPath, setKeyPath] = useState('')
+  const [keyFile, setKeyFile] = useState<File | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState('')
 
@@ -105,12 +105,12 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
     if (!host.trim()) { setError('请输入服务器 IP 或域名'); return }
     setConnecting(true); setError('')
     try {
-      const r = await api.hostguardConnect({ host: host.trim(), port: parseInt(port) || 22, username: username.trim() || 'root', password, key_path: keyPath })
+      const r = await api.hostguardConnect({ host: host.trim(), port: parseInt(port) || 22, username: username.trim() || 'root', password, keyFile })
       if (r.ok) { pushToast(`已连接到 ${host}`, { title: '主机卫士' }); onConnected() }
       else { setError(r.error || '连接失败') }
     } catch (e) { setError(e instanceof Error ? e.message : '连接请求失败') }
     finally { setConnecting(false) }
-  }, [host, port, username, password, keyPath, onConnected])
+  }, [host, port, username, password, keyFile, onConnected])
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
@@ -126,7 +126,7 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
             <div>• 服务器 IP 地址或域名</div>
             <div>• SSH 端口（默认 22）</div>
             <div>• 登录用户名（默认 root）</div>
-            <div>• 密码 或 SSH 密钥路径（二选一）</div>
+            <div>• 密码 或 SSH 私钥文件（上传）（二选一）</div>
             <div className="mt-1.5 text-text-3">连接成功后，将自动按 CyberOrion 蓝方架构（侦察→扫描→分析→加固）进行扫描分析。</div>
           </div>
           <div className="space-y-3">
@@ -149,8 +149,8 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="密码认证（需要 sshpass）" className="w-full rounded border border-hairline bg-panel-2 px-3 py-1.5 text-[12px] text-fg outline-none transition-colors focus:border-blue/50" />
             </div>
             <div>
-              <label className="mb-1 block text-[10px] uppercase tracking-wider text-text-3">SSH 密钥路径</label>
-              <input value={keyPath} onChange={(e) => setKeyPath(e.target.value)} placeholder="例如 ~/.ssh/id_rsa（密钥认证）" className="w-full rounded border border-hairline bg-panel-2 px-3 py-1.5 text-[12px] text-fg outline-none transition-colors focus:border-blue/50" />
+              <label className="mb-1 block text-[10px] uppercase tracking-wider text-text-3">SSH 私钥文件</label>
+              <input type="file" accept=".pem,.key,.p8,id_rsa" onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)} placeholder="例如 ~/.ssh/id_rsa（密钥认证）" className="w-full rounded border border-hairline bg-panel-2 px-3 py-1.5 text-[12px] text-fg outline-none transition-colors focus:border-blue/50" />
             </div>
           </div>
           {error && <div className="mt-3 rounded border border-attacker/40 bg-attacker/5 p-2 text-[11px] text-attacker">{error}</div>}

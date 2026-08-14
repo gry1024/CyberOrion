@@ -62,7 +62,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -229,28 +229,47 @@ from cyberorion.hostguard import (
 
 
 @app.post("/api/hostguard/connect")
-async def hostguard_connect(payload: dict = Body(default={})) -> Any:
+async def hostguard_connect(
+    # multipart/form-data：支持上传私钥文件，避免前端引用本地路径
+    host: str = Form(""),
+    port: int = Form(22),
+    username: str = Form("root"),
+    password: str = Form(""),
+    key_file: UploadFile | None = File(None),
+) -> Any:
     """Connect to a remote server via SSH.
 
-    Body: {host, port, username, password, key_path}
+    Form: host, port, username, password, key_file(可选，上传私钥)
     """
-    host = str(payload.get("host", "")).strip()
+    host = host.strip()
     if not host:
         return JSONResponse({"ok": False, "error": "host is required"}, status_code=400)
 
+    # 处理上传的私钥文件：安全存储后把路径传给 SSHClient
+    saved_key: str = ""
+    if key_file is not None and key_file.filename:
+        content = await key_file.read()
+        if content and content.strip():
+            from cyberorion.hostguard import key_store
+            saved_key = str(key_store.save_key(content, key_file.filename or "id_rsa"))
+
     info = HostInfo(
         host=host,
-        port=int(payload.get("port", 22)),
-        username=str(payload.get("username", "root")),
-        password=str(payload.get("password", "")),
-        key_path=str(payload.get("key_path", "")),
+        port=port,
+        username=username,
+        password=password,
+        key_path=saved_key,
     )
     ssh = SSHClient(info)
     ok, msg = await ssh.connect()
     if not ok:
-        return JSONResponse({"ok": False, "error": msg}, status_code=400)
+        # 连接失败：清理本次上传的临时密钥
+        if saved_key:
+            from cyberorion.hostguard import key_store
+            key_store.remove_key(saved_key)
+        return JSONResponse({"ok": False, "error": msg + ("（已上传密钥，请确认密钥有效性）" if saved_key else "")}, status_code=400)
     set_client(ssh)
-    return {"ok": True, "host": host, "system_info": msg[:500]}
+    return {"ok": True, "host": host, "system_info": msg[:500], "key_used": bool(saved_key)}
 
 
 @app.get("/api/hostguard/status")
@@ -274,6 +293,10 @@ async def hostguard_disconnect() -> Any:
     ssh = get_client()
     if ssh is not None:
         await ssh.disconnect()
+        # 清理本次连接上传的临时私钥
+        if ssh.info.key_path:
+            from cyberorion.hostguard import key_store
+            key_store.remove_key(ssh.info.key_path)
         set_client(None)
     return {"ok": True}
 

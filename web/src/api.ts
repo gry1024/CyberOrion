@@ -56,6 +56,26 @@ async function post(path: string, body?: unknown): Promise<unknown> {
   return data
 }
 
+async function postFormData(path: string, fields: Record<string, unknown>): Promise<unknown> {
+  const fd = new FormData()
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined || v === null || v === '') continue
+    fd.append(k, v as string | Blob)
+  }
+  let r: Response
+  try {
+    r = await fetch(url(path), { method: 'POST', body: fd })
+  } catch {
+    throw new Error('POST ' + path + ' failed')
+  }
+  const data: unknown = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const msg = (data as { error?: string })?.error ?? 'HTTP ' + r.status
+    throw new Error(msg)
+  }
+  return data
+}
+
 async function get(path: string): Promise<unknown> {
   const r = await fetch(url(path))
   if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`)
@@ -204,8 +224,8 @@ export const api = {
     get(`/api/skills/${side}/${name}`) as Promise<SkillDetail>,
 
   // ---- hostguard (host maintenance) ----
-  hostguardConnect: (opts: { host: string; port: number; username: string; password: string; key_path: string }) =>
-    post('/api/hostguard/connect', opts) as Promise<{ ok: boolean; host?: string; system_info?: string; error?: string }>,
+  hostguardConnect: (opts: { host: string; port: number; username: string; password: string; keyFile?: File | null }) =>
+    postFormData('/api/hostguard/connect', opts as Record<string, unknown>) as Promise<{ ok: boolean; host?: string; key_used?: boolean; system_info?: string; error?: string }>,
   hostguardStatus: () => get('/api/hostguard/status') as Promise<{ connected: boolean; host?: string; username?: string; port?: number; system_info?: string }>,
   hostguardDisconnect: () => post('/api/hostguard/disconnect', {}) as Promise<{ ok: boolean }>,
   hostguardScanURL: () => url('/api/hostguard/scan'),

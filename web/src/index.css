@@ -493,3 +493,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .live-pulse, .fade-in, .cursor-blink::after { animation: none; }
 }
+
+/* 全局放大所有文字与界面元素 */
+html { zoom: 1.18; }
