@@ -417,7 +417,7 @@ async def auto_update_loop(stop_event=None):
     # 启动后立即执行一次，然后按间隔循环
     while True:
         try:
-            run_auto_update()
+            await asyncio.to_thread(run_auto_update)
         except Exception:
             logger.exception("自动更新周期执行异常")
 

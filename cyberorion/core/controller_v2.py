@@ -126,7 +126,7 @@ def _convert_sim_tools(sim_tools, red_state=None, blue_state=None):
         def make_handler(_fn, _name, _red, _blue):
             async def _handler(**kwargs):
                 try:
-                    result = _fn(**kwargs)
+                    result = await asyncio.to_thread(_fn, **kwargs)
                     if _red is not None:
                         if _name in ("pass_the_hash", "mimikatz_dump"):
                             await _red.set_domain_admin()
