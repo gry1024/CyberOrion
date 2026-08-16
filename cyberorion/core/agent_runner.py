@@ -32,7 +32,7 @@ import time
 import traceback
 from typing import Any, Awaitable, Callable
 
-from cai.sdk.agents import Agent, Runner
+from cai.sdk.agents import Agent, Runner, RunConfig
 
 from ..tools._common import TOOL_CALL_LOG, snapshot_tool_log
 from .event_bus import EventBus, Event
@@ -237,7 +237,13 @@ class AgentRunner:
 
         async def _stream() -> Any:
             nonlocal output
-            result = Runner.run_streamed(agent, input=prompt, max_turns=max_turns)
+            # run_streamed 是同步调用：整个 LLM 对话都会在调用线程跑完，
+            # 若直接放在事件循环线程里执行，运行期间整个 Web 服务都会无响应。
+            # 因此把它丢到线程池执行，并禁用 tracing（避免同步重试/退避烧 CPU）。
+            result = await asyncio.to_thread(
+                Runner.run_streamed, agent, input=prompt, max_turns=max_turns,
+                run_config=RunConfig(tracing_disabled=True),
+            )
             async for ev in result.stream_events():
                 # Honour a stop request before processing the event.
                 if stop_event is not None and stop_event.is_set():

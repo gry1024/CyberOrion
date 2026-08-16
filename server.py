@@ -419,6 +419,15 @@ async def get_status() -> dict[str, Any]:
     status = controller.get_status()
     status["ledger"] = snapshot_ledger()
     status["summary"] = _session_summary
+    # 合并 V2 控制器状态：V2 会话进行中时前端按钮/状态才能正确显示。
+    if controller_v2 is not None:
+        try:
+            v2 = controller_v2.get_status()
+            status["v2"] = v2
+            if v2.get("session_id"):
+                status["session_active"] = True
+        except Exception:
+            pass
     return status
 
 
@@ -1248,9 +1257,15 @@ async def session_start() -> dict[str, Any]:
 
 @app.post("/api/session/stop")
 async def session_stop() -> dict[str, Any]:
-    global _session_summary
+    global _session_summary, controller_v2
     _session_summary = _generate_summary()
     await controller.stop_session()
+    # V2 会话存在时也一并收尾，确保 report/metrics/storyline 落盘。
+    if controller_v2 is not None:
+        try:
+            await controller_v2.stop_session()
+        except Exception as _e:
+            print(f"[server] v2 stop failed: {_e}")
     await event_bus.publish(Event(
         type="session_end", side="system",
         data={"summary": _session_summary, "snapshot": session_state.snapshot()},
@@ -1302,23 +1317,11 @@ async def blue_start() -> dict[str, Any]:
     if controller._blue_agent is None:  # type: ignore[attr-defined]
         await controller.start_session()
     prompt = _blue_manual_prompt()
-    from cyberorion.tools._common import TOOL_CALL_LOG, reset_tool_log
-    reset_tool_log()
     try:
-        blue_task = await controller.start_blue(prompt=prompt)
-        try:
-            await asyncio.wait_for(blue_task, timeout=120)
-        except asyncio.TimeoutError:
-            return {"ok": False, "error": "timeout", "output": ""}
-        except Exception as e:
-            return {"ok": False, "error": str(e), "output": ""}
-        lines = []
-        for rec in TOOL_CALL_LOG:
-            lines.append(f"[{rec.get('status','?')}] {rec.get('tool','?')}({rec.get('args','')})")
-            r = rec.get('result','')
-            if r: lines.append(f"  -> {r}")
-        output = "\n".join(lines) if lines else "(no tool calls)"
-        return {"ok": True, "output": output, "tool_calls": len(TOOL_CALL_LOG)}
+        # 非阻塞：后台运行蓝方 agent，立即返回。旧代码在此 await 120s，
+        # 把前端请求和 WebSocket 全部拖死（点击“开始”看起来毫无反应）。
+        await controller.start_blue(prompt=prompt)
+        return {"ok": True, "status": await get_status()}
     except (RuntimeError, ValueError) as e:
         return JSONResponse(
             {"ok": False, "error": str(e), "status": await get_status()},

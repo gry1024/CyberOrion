@@ -574,8 +574,13 @@ class Controller:
                 from ..eval.report import finalize_session
                 self.last_metrics = finalize_session(
                     self.store, Path(self.store.path).parent)
-            except Exception:
-                pass
+                print("controller: finalize_session -> report/metrics written for "
+                      + Path(self.store.path).parent.name)
+            except Exception as _e:
+                # 失败不再静默吞掉：打日志便于排查复盘落盘问题。
+                print("controller: finalize_session FAILED for "
+                      + Path(self.store.path).parent.name + ": "
+                      + type(_e).__name__ + ": " + str(_e))
             try:
                 self.store.close()
             except Exception:

@@ -306,7 +306,7 @@ class ControllerV2:
             # Auto-generate storyline.md (LLM battle recap) after session ends.
             try:
                 from ..storyline import generate_storyline
-                generate_storyline(self._session_dir)
+                await asyncio.to_thread(generate_storyline, self._session_dir)
                 print(f"[controller_v2] Auto-generated storyline for {self.session_id}")
             except Exception as _e:
                 print(f"[controller_v2] Storyline auto-gen failed: {_e}")

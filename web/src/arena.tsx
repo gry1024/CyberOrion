@@ -194,6 +194,10 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
     try {
       const st = await api.getStatus()
       setStatus(st)
+      // REST request success means backend is online. WS may fail to connect
+      // due to proxy/network, but as long as REST returns status we should
+      // NOT show "backend offline".
+      setConnected(true)
       // 后端已无活动会话（可能错过了 session_end WS 事件）：清掉残留的
       // 红蓝流与团队状态，避免终端显示上一会话的子代理输出。
       if (!st.session_active) {
@@ -202,7 +206,8 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
         setTeam({ active: {}, done: [], dispatched: {} })
       }
     } catch {
-      /* keep last known state */
+      // REST request failed means backend is offline.
+      setConnected(false)
     }
   }, [])
 
@@ -708,7 +713,8 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
         }
       }
       ws.onclose = () => {
-        setConnected(false)
+        // WS drop alone does not mean backend is down; let the 4s REST poll
+        // decide the online/offline state.
         schedule()
       }
       ws.onerror = () => {
