@@ -130,8 +130,12 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
                     key=lambda r: float(r.get("ts") or 0))
     # 侦察类动作（nmap_scan 等）不留日志痕迹、蓝方无从检测：
     # 从检测率分母排除，只影响攻击计数展示，不计入 TP/FN。
-    verified = [a for a in attacks
-                if a.get("success") and not a.get("recon")]
+    # 检测匹配用"可检测攻击"：所有非 recon 的攻击行为（含未成功得手的
+    # 爆破/注入尝试）。只要蓝方在时间窗口内用对应技术检测到该行为，即算有效
+    # 检测（TP）——攻击行为真实发生了且被侦测到，不能因其未得手就判误报。
+    eligible = [a for a in attacks if not a.get("recon")]
+    # 红方得分仅统计已验证成功且非 recon 的攻击（体现实际战果）。
+    verified = [a for a in eligible if a.get("success")]
 
     detections: list[dict] = []
     missed: list[dict] = []
@@ -139,7 +143,7 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     per_technique: dict[str, dict] = {}
     per_target: dict[str, dict] = {}
 
-    for atk in verified:
+    for atk in eligible:
         equiv = _host_equiv(atk.get("target") or "", scenario)
         hit = None
         hit_weak = False
@@ -184,7 +188,7 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
         if alert["id"] in matched_alert_ids:
             continue
         matched_any = False
-        for atk in verified:
+        for atk in eligible:
             equiv = _host_equiv(atk.get("target") or "", scenario)
             ok, _weak = _matches(atk, alert, equiv, window)
             if ok:
@@ -204,12 +208,13 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     fn = len(missed)
     fp = len(false_positives)
     n_verified = len(verified)
+    n_eligible = len(eligible)
     n_malicious = len(malicious_alerts)
     # 侦察（recon）与可检测攻击分开统计：侦察不留日志、蓝方无从检测，
     # 只作展示（红方时间线标注），不进检测率分母。
     n_recon = sum(1 for a in attacks if a.get("recon"))
 
-    detection_rate = tp / n_verified if n_verified else 0.0
+    detection_rate = tp / n_eligible if n_eligible else 0.0
     fp_rate = fp / n_malicious if n_malicious else 0.0
     mttd = (sum(d["ttd_sec"] for d in detections) / tp) if tp else None
 
@@ -217,7 +222,7 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     responses = store.query_events(source="response", limit=100000)
     responded = 0
     for det in detections:
-        atk = next(a for a in verified if a["id"] == det["attack_id"])
+        atk = next(a for a in eligible if a["id"] == det["attack_id"])
         a_ts = float(atk.get("ts") or 0)
         if any(a_ts <= float(ev.get("ts") or 0) <= a_ts + window
                for ev in responses):

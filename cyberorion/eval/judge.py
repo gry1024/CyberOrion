@@ -10,7 +10,10 @@
     用模板直接从原始数据渲染同样的章节 —— 保证永远产出报告。
 """
 
+
+
 from __future__ import annotations
+from ..core.agent_runner import run_agent_once_sync
 
 import json
 from typing import Any
@@ -117,8 +120,7 @@ def _render_with_llm(facts: dict, model: Any = None) -> str:
         "以下是本场对抗演练的结构化事实（JSON），请据此撰写裁判报告：\n"
         + json.dumps(facts, ensure_ascii=False, indent=2, default=str)
     )
-    result = Runner.run_sync(agent, input=prompt, max_turns=1)
-    report = str(getattr(result, "final_output", "") or "").strip()
+    result = run_agent_once_sync(agent, prompt, max_turns=1, timeout=600)
     if not report:
         raise RuntimeError("judge agent 返回空报告")
     return report

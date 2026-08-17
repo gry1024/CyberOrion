@@ -1621,8 +1621,11 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
 
             # Auto-generate storyline.md (LLM traffic analysis recap).
             try:
+                # 在 worker 线程执行 LLM 复盘生成，避免同步调用阻塞事件循环
+                # （旧代码直接同步调用，traffic/analyze 的 SSE 生成器卡住，
+                # 表现为「后端离线」）。
                 from cyberorion.storyline import generate_storyline
-                generate_storyline(_session_dir)
+                await asyncio.to_thread(generate_storyline, _session_dir)
                 print(f"[traffic] Auto-generated storyline for {_session_dir.name}")
             except Exception as _se:
                 print(f"[traffic] Storyline auto-gen failed: {_se}")

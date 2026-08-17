@@ -9,7 +9,10 @@
     供 ``GET /api/sessions/{id}/storyline`` 返回 ``llm`` 标志。
 """
 
+
+
 from __future__ import annotations
+from .core.agent_runner import run_agent_once_sync
 
 import json
 import time
@@ -169,8 +172,7 @@ def _render_with_llm(facts: dict, llm_fn: Callable | None = None) -> str:
             tools=[],
             model=_model(),
         )
-        result = Runner.run_sync(agent, input=prompt, max_turns=1)
-        report = str(getattr(result, "final_output", "") or "").strip()
+        report = run_agent_once_sync(agent, prompt, max_turns=1, timeout=600)
     if not report:
         raise RuntimeError("storyline LLM 返回空报告")
     return report

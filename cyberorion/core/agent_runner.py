@@ -33,6 +33,8 @@ import traceback
 from typing import Any, Awaitable, Callable
 
 from cai.sdk.agents import Agent, Runner, RunConfig
+from openai import APIConnectionError, APITimeoutError, RateLimitError
+
 
 from ..tools._common import TOOL_CALL_LOG, snapshot_tool_log
 from .event_bus import EventBus, Event
@@ -237,11 +239,13 @@ class AgentRunner:
 
         async def _stream() -> Any:
             nonlocal output
-            # run_streamed 是同步调用：整个 LLM 对话都会在调用线程跑完，
-            # 若直接放在事件循环线程里执行，运行期间整个 Web 服务都会无响应。
-            # 因此把它丢到线程池执行，并禁用 tracing（避免同步重试/退避烧 CPU）。
-            result = await asyncio.to_thread(
-                Runner.run_streamed, agent, input=prompt, max_turns=max_turns,
+            # run_streamed 是非阻塞的：它在当前线程的 event loop 上创建后台
+            # 任务（内部用 asyncio.create_task）并立即返回，真正的对话在后台
+            # 异步执行，事件经 asyncio.Queue 边跑边推。因此必须直接在当前
+            # 事件循环线程调用，绝不能丢到 asyncio.to_thread（工作线程没有
+            # 运行中的 loop，会抛 RuntimeError: no running event loop）。
+            result = Runner.run_streamed(
+                agent, input=prompt, max_turns=max_turns,
                 run_config=RunConfig(tracing_disabled=True),
             )
             async for ev in result.stream_events():
@@ -257,43 +261,78 @@ class AgentRunner:
             await fwd.flush()
             return result
 
-        try:
-            result_obj, timed_out = await run_with_timeout(
-                _stream, timeout, task_registry=task_registry)
-            if timed_out:
-                output = f"({self.side} timed out after {timeout}s)"
+        # DeepSeek 网络/API 瞬时故障重试：连接断开、超时、
+        # 限流都不应该让整轮攻防作废。可重试异常做
+        # 最多 max_attempts 次重试（指数退避），其余异常照旧上报。
+        retriable = (APIConnectionError, APITimeoutError, RateLimitError)
+        max_attempts = 3
+        for _attempt in range(1, max_attempts + 1):
+            try:
+                result_obj, timed_out = await run_with_timeout(
+                    _stream, timeout, task_registry=task_registry)
+                if timed_out:
+                    output = f"({self.side} timed out after {timeout}s)"
+                    await self.event_bus.publish(Event(
+                        type="tool_output", side=self.side,
+                        data=self._tag({"output": output, "error": "timeout"}),
+                    ))
+                    await self.event_bus.publish(Event(
+                        type="error", side=self.side,
+                        data=self._tag({
+                            "message": f"{self.side} agent 运行超时（{timeout}s）",
+                            "source": "agent_run",
+                        }),
+                    ))
+                else:
+                    try:
+                        output = (getattr(result_obj, "final_output", "") or "").strip()
+                    except Exception:
+                        output = ""
+                break  # success
+            except retriable as exc:
+                if _attempt >= max_attempts:
+                    ename = type(exc).__name__
+                    tb = traceback.format_exc(limit=3)
+                    output = f"(agent error: {ename}: {exc})"
+                    await self.event_bus.publish(Event(
+                        type="tool_output", side=self.side,
+                        data=self._tag({"output": output, "error": ename,
+                                        "traceback": tb}),
+                    ))
+                    await self.event_bus.publish(Event(
+                        type="error", side=self.side,
+                        data=self._tag({
+                            "message": f"{ename}: {exc}"[:400],
+                            "source": "agent_run",
+                        }),
+                    ))
+                    break
+                wait_s = min(30, 2 ** (_attempt + 1))
+                msg = (f"({self.side} API 瞬时故障 "
+                       f"{type(exc).__name__} ，{wait_s}s 后重试 "
+                       f"{_attempt}/{max_attempts})")
                 await self.event_bus.publish(Event(
                     type="tool_output", side=self.side,
-                    data=self._tag({"output": output, "error": "timeout"}),
+                    data=self._tag({"output": msg, "retry": True}),
+                ))
+                await asyncio.sleep(wait_s)
+            except Exception as exc:
+                ename = type(exc).__name__
+                tb = traceback.format_exc(limit=3)
+                output = f"(agent error: {ename}: {exc})"
+                await self.event_bus.publish(Event(
+                    type="tool_output", side=self.side,
+                    data=self._tag({"output": output, "error": ename,
+                                    "traceback": tb}),
                 ))
                 await self.event_bus.publish(Event(
                     type="error", side=self.side,
                     data=self._tag({
-                        "message": f"{self.side} agent 运行超时（{timeout}s）",
+                        "message": f"{ename}: {exc}"[:400],
                         "source": "agent_run",
                     }),
                 ))
-            else:
-                try:
-                    output = (getattr(result_obj, "final_output", "") or "").strip()
-                except Exception:
-                    output = ""
-        except Exception as exc:
-            ename = type(exc).__name__
-            tb = traceback.format_exc(limit=3)
-            output = f"(agent error: {ename}: {exc})"
-            await self.event_bus.publish(Event(
-                type="tool_output", side=self.side,
-                data=self._tag({"output": output, "error": ename,
-                                "traceback": tb}),
-            ))
-            await self.event_bus.publish(Event(
-                type="error", side=self.side,
-                data=self._tag({
-                    "message": f"{ename}: {exc}"[:400],
-                    "source": "agent_run",
-                }),
-            ))
+                break
 
         # Tool calls recorded during this run (best-effort slice).
         full_log = snapshot_tool_log()
@@ -482,3 +521,48 @@ class AgentRunner:
                     "output": "ERROR: " + str(tc.get("error")),
                 })
         return trace
+
+
+def run_agent_once_sync(
+    agent: Any, prompt: str, max_turns: int = 1, timeout: int = 600,
+) -> str:
+    """在独立线程 + 全新事件循环中运行一次 agent，返回 final_output 文本。
+
+    解决两类崩溃：
+      * 在 FastAPI 事件循环线程中调用 Runner.run_sync ->
+        ``This event loop is already running``；
+      * 在 asyncio.to_thread 工作线程（无线程 event loop）中调用
+        Runner.run_streamed/run_sync -> ``no running event loop``。
+
+    无论调用方处于何种上下文，这里都会开一个专用线程，用 asyncio.run 建
+    全新事件循环运行 agent，线程结束即回收，互不干扰。
+
+    Args:
+        agent: 要运行的 cai.sdk.agents.Agent。
+        prompt: 输入提示词。
+        max_turns: 最大轮次。
+        timeout: 墙钟超时（秒），超时抛 RuntimeError。
+
+    Returns:
+        agent 的 final_output 文本（可能为空串）。
+    """
+    import concurrent.futures
+
+    def _worker() -> str:
+        async def _run() -> str:
+            result = Runner.run_streamed(
+                agent, input=prompt, max_turns=max_turns,
+                run_config=RunConfig(tracing_disabled=True),
+            )
+            async for _ in result.stream_events():
+                pass
+            return str(getattr(result, "final_output", "") or "").strip()
+        return asyncio.run(_run())
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_worker)
+        try:
+            return fut.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            fut.cancel()
+            raise RuntimeError(f"agent 运行超时（{timeout}s）")
