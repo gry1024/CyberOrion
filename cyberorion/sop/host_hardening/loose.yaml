@@ -1,0 +1,21 @@
+name: host_harden_loose
+version: 1
+description: |
+  主机卫士宽松 SOP：扫描→分析→加固三段，可选步骤可跳过。
+phases:
+  - id: 1
+    name: scan
+    name_zh: 系统扫描
+    suggested_workers: [host_scanner]
+    expected_tools: [harden_service]
+    kb_query: "host vulnerability scan best practices"
+    min_steps: 3
+    strict: false
+  - id: 2
+    name: harden
+    name_zh: 加固执行
+    suggested_workers: [host_hardener]
+    expected_tools: [harden_service, password_reset, disable_account]
+    kb_query: "Linux Windows hardening checklist"
+    min_steps: 3
+    strict: true

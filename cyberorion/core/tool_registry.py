@@ -224,7 +224,17 @@ _ROLE_TOOLS: dict[AgentRole, list[ToolDefinition]] = {
 
 
 def register_tool(role: AgentRole, tool: ToolDefinition) -> None:
-    """向某角色注册一个专属工具（后续扩展用）。"""
+    """向某角色注册一个专属工具（后续扩展用）。
+
+    强制 i18n：注册前必须已在 core/i18n.py::TOOL_LABELS 中存在该工具的中文标签，
+    否则抛 I18nMissingError（REFACTOR_M1 D7）。
+    """
+    from .i18n import has_label, I18nMissingError
+    if not has_label(tool.name):
+        raise I18nMissingError(
+            f"tool '{tool.name}' 注册失败：必须在 core/i18n.py 添加中文标签 "
+            f"（REFACTOR_M1_tools.md D7 强制要求）"
+        )
     _ROLE_TOOLS[role].append(tool)
 
 

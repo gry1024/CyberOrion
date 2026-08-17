@@ -1,10 +1,10 @@
-// ChatStream — 平铺聊天流（Cursor 风格：无气泡无卡片，分隔线分区）
-// 消息形态：
-//  - thinking    → agent 名 + 流式文本（12.5px，行内）
-//  - tool_call   → 行内工具标签 + 参数（点击展开）
-//  - tool_output → 折叠工具结果（点击展开）
-//  - report      → 子代理报告（点击展开 md）
-//  - system      → 灰色小字（攻击命中 / 遥测 / 回合标记）
+// ChatStream — REFACTOR_M4 重构版
+// 路由 11 种 kind（thinking/tool_call/tool_output/rag_retrieval/rag_no_match/
+//   rag_unavailable/subagent_dispatch/subagent_result/sop_phase/report/error）
+// 各 kind 用专属颜色卡片区分；中文标注由后端预生成（label_zh/summary_zh）。
+//
+// 旧事件向后兼容：缺失 kind 时按 legacy type 映射。
+
 import { useEffect, useRef, useState } from 'react'
 import { blueRoleOf } from '../types'
 import { MarkdownView } from './MarkdownView'
@@ -18,27 +18,6 @@ function fmtTs(ts: number): string {
   })
 }
 
-const TOOL_ZH: Record<string, string> = {
-  dispatch_task: '派遣子代理',
-  analyze_logs: '日志分析',
-  check_telemetry: '遥测检查',
-  harden_service: '加固服务',
-  block_ip: '封禁 IP',
-  report_finding: '上报发现',
-  verify_intrusion: '失陷排查',
-  scan: '端口扫描',
-  exploit: '漏洞利用',
-  escalate: '权限提升',
-  persist: '植入持久化',
-  attack: '发起攻击',
-  collect: '信息收集',
-  search_attack_kb: 'RAG检索知识库',
-  lookup_technique: 'RAG技术查询',
-}
-
-/** RAG 工具集合 —— 用紫色高亮，与普通工具调用区分 */
-const RAG_TOOLS = new Set(['search_attack_kb', 'lookup_technique'])
-
 interface AgentMeta {
   label: string
   color: string
@@ -51,8 +30,7 @@ function metaOf(agent: string | undefined, side: Side): AgentMeta {
   return { label: '调度指挥', color: 'var(--color-blue)' }
 }
 
-/** 人像头像：角色色圆底 + 白色人像剪影（头 + 肩），
- * 让每个角色看起来是一个可随时调用的 sub-agent。 */
+/** 人像头像：角色色圆底 + 白色人像剪影 */
 function AgentAvatar({ color, size = 20 }: { color: string; size?: number }) {
   return (
     <span
@@ -67,49 +45,75 @@ function AgentAvatar({ color, size = 20 }: { color: string; size?: number }) {
   )
 }
 
-function ToolCall({ step, side }: { step: ThoughtStep; side: Side }) {
+// =============== 11 种 kind 各有专属组件 ===============
+
+/** 工具调用：蓝框 + label_zh + 参数 */
+function ToolCallCard({ step }: { step: ThoughtStep }) {
   const [open, setOpen] = useState(false)
-  const isRed = side === 'red'
-  const isRag = RAG_TOOLS.has(step.tool ?? '')
-  const zh = TOOL_ZH[step.tool ?? '']
-  const toolStyle = isRag
-    ? { color: 'var(--color-purple)', background: 'var(--color-purple-soft)' }
-    : isRed
-      ? { color: 'var(--color-red)', background: 'var(--color-red-soft)' }
-      : { color: 'var(--color-tool)', background: 'var(--color-cyan-soft)' }
+  const labelZh = step.label_zh || step.tool || ''
   return (
-    <div className="fade-in flex flex-wrap items-center gap-1.5 py-px">
-      <span className="flex-none font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
-      <span className="kimi-toolcard" style={toolStyle}>
-        {isRag ? '📚' : isRed ? '⚔' : '⚙'} {zh || step.tool}
-      </span>
+    <div
+      className="fade-in my-2 rounded-lg p-3 shadow-sm"
+      style={{
+        borderLeft: '4px solid #2E86AB',
+        background: '#EBF5FB',
+      }}
+    >
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span>🔧 工具调用</span>
+        <span
+          className="rounded bg-blue-100 px-2 py-0.5 font-mono text-[10px] text-blue-800"
+        >
+          {step.tool}
+        </span>
+      </div>
+      <div className="mt-1 font-semibold text-gray-900">{labelZh}</div>
       {step.args && (
-        <button className="kimi-toolcard" onClick={() => setOpen((v) => !v)}>
-          {open ? '收起' : '参数'}
-        </button>
-      )}
-      {open && step.args && (
-        <pre className="scroll-thin w-full overflow-x-auto whitespace-pre-wrap break-all border-l-2 py-0.5 pl-3 font-mono text-[11px]" style={{ borderColor: 'var(--color-line)', color: 'var(--color-fg-2)' }}>
-          {step.args}
-        </pre>
+        <>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="mt-1 text-[10.5px] text-gray-600 hover:text-gray-900"
+          >
+            {open ? '收起参数' : '展开参数'}
+          </button>
+          {open && (
+            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-[11px]">
+              {typeof step.args === 'string' ? step.args : JSON.stringify(step.args, null, 2)}
+            </pre>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function ToolOutput({ step }: { step: ThoughtStep }) {
+/** 工具输出：浅蓝虚线框 + summary_zh + 折叠 raw */
+function ToolOutputCard({ step }: { step: ThoughtStep }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="fade-in pl-6">
+    <div
+      className="fade-in my-2 rounded-lg border border-dashed p-3"
+      style={{
+        borderColor: '#5DADE2',
+        background: '#F4FBFE',
+      }}
+    >
+      <div className="text-xs font-medium" style={{ color: '#5DADE2' }}>
+        📋 工具结果
+      </div>
+      {step.summary_zh && (
+        <div className="mt-1 text-sm font-semibold text-gray-900">
+          {step.summary_zh}
+        </div>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="text-[10.5px] transition-colors hover:text-[var(--color-fg)]"
-        style={{ color: 'var(--color-fg-3)' }}
+        className="mt-1 text-[10.5px] text-gray-600 hover:text-gray-900"
       >
-        {open ? '▾' : '▸'} {RAG_TOOLS.has(step.tool ?? '') ? `📚 ${step.tool} 检索结果` : `${step.tool} 结果`}
-</button>
-      {open && (
-        <pre className="scroll-thin overflow-x-auto whitespace-pre-wrap break-words border-l-2 py-0.5 pl-3 font-mono text-[11px] leading-relaxed" style={{ borderColor: 'var(--color-line)', color: 'var(--color-output)' }}>
+        {open ? '收起原始输出' : '展开原始输出'}
+      </button>
+      {open && step.output && (
+        <pre className="mt-1 max-h-64 overflow-auto rounded bg-white p-2 font-mono text-[11px]">
           {step.output}
         </pre>
       )}
@@ -117,23 +121,206 @@ function ToolOutput({ step }: { step: ThoughtStep }) {
   )
 }
 
-function Report({ step, side, defaultOpen = false }: { step: ThoughtStep; side: Side; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
-  const meta = metaOf(step.role ?? step.agent, side)
-  const hasError = step.report?.startsWith('✗')
-  const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
+/** RAG 检索：紫色粗框 + 命中 doc 列表可展开 */
+function RagRetrievalCard({ step }: { step: ThoughtStep }) {
+  const [open, setOpen] = useState(false)
+  const docIds: string[] = step.doc_ids || []
+  const titles: string[] = step.doc_titles_zh || []
   return (
-    <div className="fade-in pl-6">
+    <div
+      className="fade-in my-2 rounded-lg p-3"
+      style={{
+        border: '2px solid #8E44AD',
+        background: '#F4ECF7',
+      }}
+    >
+      <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#8E44AD' }}>
+        <span>📚 检索知识库</span>
+        <span className="text-xs font-normal text-gray-600">
+          命中 {step.hit_count ?? docIds.length} 条 · {step.total_chars ?? 0} 字符
+        </span>
+      </div>
+      <div className="mt-1 text-xs text-gray-700">
+        检索词：{step.query}
+      </div>
+      {docIds.length > 0 && (
+        <>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="mt-2 text-[10.5px] text-purple-700 underline hover:text-purple-900"
+          >
+            {open ? '收起命中条目' : `展开命中条目（${docIds.length}）`}
+          </button>
+          {open && (
+            <div className="mt-2 space-y-2">
+              {docIds.map((id, i) => (
+                <details
+                  key={id + i}
+                  className="rounded bg-white p-2"
+                >
+                  <summary className="cursor-pointer font-mono text-xs">
+                    <span style={{ color: '#8E44AD' }}>[{id}]</span> {titles[i] || id}
+                  </summary>
+                  {step.docs && step.docs[i] && (
+                    <div className="mt-2 whitespace-pre-wrap text-xs text-gray-700">
+                      {(step.docs[i].detection || step.docs[i].description || '').slice(0, 800)}
+                    </div>
+                  )}
+                </details>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** RAG 无结果：浅紫虚线小条 */
+function RagNoMatchBanner({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-2 rounded border border-dashed p-2 text-xs"
+      style={{
+        borderColor: '#D7BDE2',
+        background: '#FAF4FC',
+        color: '#7D3C98',
+      }}
+    >
+      📚 知识库无相关条目：{step.intent || step.message || ''}
+    </div>
+  )
+}
+
+/** RAG 不可用：灰虚线警示 */
+function RagUnavailableBanner({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-2 rounded border border-dashed p-2 text-xs"
+      style={{
+        borderColor: '#BDC3C7',
+        background: '#F4F6F6',
+        color: '#5D6D7E',
+      }}
+    >
+      ⚠️ 知识库不可用：{step.error || 'KB 索引不可访问'}
+    </div>
+  )
+}
+
+/** 子 Agent 派遣：青色粗框 + Worker 名 badge */
+function SubagentDispatchCard({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-2 rounded-lg p-3"
+      style={{
+        border: '2px solid #16A085',
+        background: '#E8F6F3',
+      }}
+    >
+      <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#16A085' }}>
+        🚀 调度子 Agent
+        <span className="rounded bg-teal-100 px-2 py-0.5 font-mono text-[10px]" style={{ color: '#16A085' }}>
+          {step.worker_name}
+        </span>
+      </div>
+      <div className="mt-1 text-sm text-gray-800">{step.task_zh}</div>
+      {step.sop_phase && (
+        <div className="mt-1 text-xs text-amber-700">SOP 阶段：{step.sop_phase}</div>
+      )}
+    </div>
+  )
+}
+
+/** 子 Agent 回报：浅青虚线 */
+function SubagentResultCard({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-2 rounded-lg border border-dashed p-3"
+      style={{
+        borderColor: '#76D7C4',
+        background: '#F0F9F8',
+      }}
+    >
+      <div className="text-sm font-medium" style={{ color: '#16A085' }}>
+        ✅ {step.worker_name} 完成
+      </div>
+      {step.findings_zh && (
+        <div className="mt-1 text-sm text-gray-800">{step.findings_zh}</div>
+      )}
+    </div>
+  )
+}
+
+/** SOP 阶段 banner：琥珀色横条 */
+function SopPhaseBanner({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-3 rounded-lg p-3"
+      style={{
+        border: '2px solid #F39C12',
+        background: '#FEF5E7',
+      }}
+    >
+      <div className="text-sm font-semibold" style={{ color: '#9C640C' }}>
+        阶段 {step.phase_id}/{step.phase_total} · {step.phase_name_zh || step.phase_name}
+        {step.strict && (
+          <span className="ml-2 rounded bg-amber-600 px-2 py-0.5 text-[10px] text-white">
+            强制
+          </span>
+        )}
+      </div>
+      {step.suggested_workers && (
+        <div className="mt-1 text-xs" style={{ color: '#9C640C' }}>
+          建议派遣：{step.suggested_workers.join(', ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 错误：红色警示框 */
+function ErrorBanner({ step }: { step: ThoughtStep }) {
+  return (
+    <div
+      className="fade-in my-2 rounded-lg p-3"
+      style={{
+        border: '2px solid #C0392B',
+        background: '#FADBD8',
+      }}
+    >
+      <div className="text-sm font-semibold text-red-700">
+        ❌ 错误
+      </div>
+      <div className="mt-1 text-sm text-red-900">
+        {step.message || JSON.stringify(step)}
+      </div>
+    </div>
+  )
+}
+
+/** 报告：绿色大块卡片 */
+function ReportCard({ step, side }: { step: ThoughtStep; side: Side }) {
+  const [open, setOpen] = useState(true)
+  const meta = metaOf(step.role ?? step.agent, side)
+  return (
+    <div
+      className="fade-in my-2 rounded-lg p-3"
+      style={{
+        border: '2px solid #27AE60',
+        background: '#EAFAF1',
+      }}
+    >
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-[11.5px] font-medium transition-opacity hover:opacity-80"
-        style={{ color: hasError ? 'var(--color-red)' : meta.color }}
+        className="flex items-center gap-2 text-sm font-semibold"
+        style={{ color: '#1E8449' }}
       >
-        <AgentAvatar color={meta.color} size={16} />
-        {open ? '▾' : '▸'} {agentName} 报告{hasError ? '（异常）' : ''}
+        <AgentAvatar color={meta.color} size={18} />
+        {open ? '▾' : '▸'} 📄 最终报告
       </button>
       {open && step.report && (
-        <div className="mt-1 border-l-2 pl-3" style={{ borderColor: 'var(--color-line)' }}>
+        <div className="mt-2 rounded bg-white p-3">
           <MarkdownView markdown={step.report} />
         </div>
       )}
@@ -141,98 +328,88 @@ function Report({ step, side, defaultOpen = false }: { step: ThoughtStep; side: 
   )
 }
 
-function StepRow({ step, side, isLast, defaultReportOpen = false }: { step: ThoughtStep; side: Side; isLast: boolean; defaultReportOpen?: boolean }) {
-  if (step.kind === 'system') {
-    return (
-      <div className="fade-in py-px text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
-        {step.text}
-      </div>
-    )
-  }
-  if (step.kind === 'thinking' && step.text) {
-    const meta = metaOf(step.agent, side)
-    const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
-    return (
-      <div className="fade-in flex gap-2 py-px">
-        <AgentAvatar color={meta.color} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[11px] font-semibold" style={{ color: meta.color }}>{agentName}</span>
-            <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{fmtTs(step.timestamp)}</span>
-          </div>
-          <div className="stream-thinking">
-            <MarkdownView markdown={step.text} className="md-inline" />
-            {isLast && <span className="cursor-blink" />}
-          </div>
+/** 思考（LLM 流式文本）：斜体灰文 */
+function ThinkingView({ step, side }: { step: ThoughtStep; side: Side }) {
+  if (!step.text) return null
+  const meta = metaOf(step.agent, side)
+  const agentName = side === 'red' ? '红方 agent' : `${meta.label} agent`
+  return (
+    <div className="fade-in flex gap-2 py-px">
+      <AgentAvatar color={meta.color} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[11px] font-semibold" style={{ color: meta.color }}>
+            {agentName}
+          </span>
+          <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
+            {fmtTs(step.timestamp)}
+          </span>
+        </div>
+        <div className="stream-thinking italic" style={{ color: '#666' }}>
+          <MarkdownView markdown={step.text} className="md-inline" />
         </div>
       </div>
-    )
-  }
-  if (step.kind === 'tool_call') return <ToolCall step={step} side={side} />
-  if (step.kind === 'tool_output' && step.output) return <ToolOutput step={step} />
-  if (step.kind === 'report') return <Report step={step} side={side} defaultOpen={defaultReportOpen} />
-  return null
+    </div>
+  )
 }
 
-export function ChatStream({
-  side,
-  steps,
-  running,
-  accent,
-  emptyTitle,
-  emptyDesc,
-  autoExpandReports = false,
-}: {
-  side: Side
-  steps: ThoughtStep[]
-  running: boolean
-  accent: 'red' | 'blue'
-  emptyTitle: string
-  emptyDesc: string
-  autoExpandReports?: boolean
-}) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const stickBottom = useRef(true)
-
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (stickBottom.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [steps])
-
-  const onScroll = () => {
-    const el = scrollRef.current
-    if (!el) return
-    stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  }
-
-  const accentColor = accent === 'red' ? 'var(--color-red)' : 'var(--color-blue)'
-
+/** 系统事件（向后兼容） */
+function SystemLine({ step }: { step: ThoughtStep }) {
   return (
-    <section className="flex min-h-0 flex-1 flex-col" style={{ minHeight: 0 }}>
-      {/* 栏头：一行 */}
-      <div className="flex flex-none items-center gap-1.5 border-b px-2 py-1" style={{ borderColor: 'var(--color-hairline)' }}>
-        <span className="dot" style={{ background: accentColor }} />
-        <span className="text-[11.5px] font-semibold" style={{ color: 'var(--color-fg)' }}>
-          {emptyTitle.split('（')[0]}
-        </span>
-        {running && <span className="text-[10.5px]" style={{ color: accentColor }}>运行中</span>}
-      </div>
-
-      <div ref={scrollRef} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 py-1">
-        {steps.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-0.5 py-10">
-            <div className="text-[12px]" style={{ color: 'var(--color-fg-3)' }}>{emptyTitle}</div>
-            <div className="text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>{emptyDesc}</div>
-          </div>
-        ) : (
-          steps.map((s, i) => (
-            <StepRow key={s.id} step={s} side={side} isLast={i === steps.length - 1 && s.kind === 'thinking' && running} defaultReportOpen={autoExpandReports} />
-          ))
-        )}
-        <div ref={bottomRef} />
-      </div>
-    </section>
+    <div className="fade-in py-px text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
+      {step.text}
+    </div>
   )
+}
+
+// =============== 路由分发 ===============
+
+export function ChatStream({ steps, side }: { steps: ThoughtStep[]; side: Side }) {
+  return (
+    <div className="chat-stream space-y-1">
+      {steps.map((step, i) => {
+        const kind = step.kind || (step.type ? mapLegacyKind(step.type) : 'thinking')
+        switch (kind) {
+          case 'thinking':
+            return <ThinkingView key={i} step={step} side={side} />
+          case 'tool_call':
+            return <ToolCallCard key={i} step={step} />
+          case 'tool_output':
+            return <ToolOutputCard key={i} step={step} />
+          case 'rag_retrieval':
+            return <RagRetrievalCard key={i} step={step} />
+          case 'rag_no_match':
+            return <RagNoMatchBanner key={i} step={step} />
+          case 'rag_unavailable':
+            return <RagUnavailableBanner key={i} step={step} />
+          case 'subagent_dispatch':
+            return <SubagentDispatchCard key={i} step={step} />
+          case 'subagent_result':
+            return <SubagentResultCard key={i} step={step} />
+          case 'sop_phase':
+            return <SopPhaseBanner key={i} step={step} />
+          case 'report':
+            return <ReportCard key={i} step={step} side={side} />
+          case 'error':
+            return <ErrorBanner key={i} step={step} />
+          case 'system':
+            return <SystemLine key={i} step={step} />
+          default:
+            return <ThinkingView key={i} step={step} side={side} />
+        }
+      })}
+    </div>
+  )
+}
+
+function mapLegacyKind(type: string): string {
+  const map: Record<string, string> = {
+    thinking: 'thinking',
+    tool_call: 'tool_call',
+    tool_output: 'tool_output',
+    report: 'report',
+    error: 'error',
+    system: 'system',
+  }
+  return map[type] || 'thinking'
 }

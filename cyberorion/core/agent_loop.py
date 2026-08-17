@@ -66,6 +66,8 @@ class AgentLoopConfig:
     llm_timeout: float = 120.0                # 单次 LLM 调用超时
     budget_tokens: int | None = None          # 累计 token 预算上限，None 表示不限
     max_empty_turns: int = 3                 # max consecutive empty-turn retries before EndTurn
+    pre_llm_hook: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None  # REFACTOR_M2：可注入 RAG 上下文。返回新 messages 或 None
+    rag_inject_interval: int = 3              # 每 N 步注入一次 RAG（避免 token 浪费）
 
 
 @dataclass
@@ -378,6 +380,23 @@ async def run_agent_loop(
 
         # 构造工具 schema（每次循环重建，因为工具可能被移除）
         tools_schema = [_tool_to_schema(t) for t in available.values()]
+
+        # REFACTOR_M2：每 N 步调用 pre_llm_hook 注入 RAG 上下文（默认 3 步）
+        if (
+            config.pre_llm_hook is not None
+            and step % max(1, config.rag_inject_interval) == 0
+        ):
+            try:
+                hook_ctx = {
+                    "step": step,
+                    "messages": messages,
+                    "available_tools": list(available.keys()),
+                }
+                new_messages = await config.pre_llm_hook(hook_ctx)
+                if new_messages is not None:
+                    messages = list(new_messages)
+            except Exception as exc:  # noqa: BLE001 - hook 失败不拖垮循环
+                logger.warning("pre_llm_hook 异常: %s", exc)
 
         # 调用 LLM（带重试）
         try:

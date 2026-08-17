@@ -12,19 +12,59 @@ export interface ArenaEvent {
   timestamp: number
 }
 
+/** M4：扩展至 11 种 kind（含 3 种 RAG 事件 + 2 种子 Agent + SOP + error）。 */
+export type ThoughtStepKind =
+  | 'thinking'
+  | 'tool_call'
+  | 'tool_output'
+  | 'rag_retrieval'
+  | 'rag_no_match'
+  | 'rag_unavailable'
+  | 'subagent_dispatch'
+  | 'subagent_result'
+  | 'sop_phase'
+  | 'report'
+  | 'error'
+  | 'system'
+
 export interface ThoughtStep {
   id: string
-  kind: 'thinking' | 'tool_call' | 'tool_output' | 'report' | 'system'
+  kind: ThoughtStepKind
+  type?: string  // legacy 字段，兼容
   text?: string
   tool?: string
-  args?: string
+  /** 后端预生成的中文标签（tool_call） */
+  label_zh?: string
+  /** 后端预生成的中文摘要（tool_output） */
+  summary_zh?: string
+  args?: string | Record<string, unknown>
   output?: string
-  /** Blue sub-agent attribution (missing = orchestrator / legacy). */
+  /** Blue sub-agent attribution */
   agent?: string
-  /** kind === 'report': collapsed sub-agent report card in the blue stream. */
   role?: string
   mission?: string
   report?: string
+  /** RAG 检索字段 */
+  query?: string
+  hit_count?: number
+  total_chars?: number
+  doc_ids?: string[]
+  doc_titles_zh?: string[]
+  docs?: Array<{ id: string; name_zh?: string; name?: string; detection?: string; description?: string }>
+  intent?: string
+  error?: string
+  message?: string
+  /** 子 Agent 派遣字段 */
+  worker_name?: string
+  task_zh?: string
+  findings_zh?: string
+  /** SOP 阶段字段 */
+  phase_id?: number
+  phase_total?: number
+  phase_name?: string
+  phase_name_zh?: string
+  suggested_workers?: string[]
+  strict?: boolean
   timestamp: number
 }
 

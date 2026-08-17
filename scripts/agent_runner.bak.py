@@ -33,8 +33,6 @@ import traceback
 from typing import Any, Awaitable, Callable
 
 from cai.sdk.agents import Agent, Runner, RunConfig
-from openai import APIConnectionError, APITimeoutError, RateLimitError
-
 
 from ..tools._common import TOOL_CALL_LOG, snapshot_tool_log
 from .event_bus import EventBus, Event
@@ -261,78 +259,43 @@ class AgentRunner:
             await fwd.flush()
             return result
 
-        # DeepSeek 网络/API 瞬时故障重试：连接断开、超时、
-        # 限流都不应该让整轮攻防作废。可重试异常做
-        # 最多 max_attempts 次重试（指数退避），其余异常照旧上报。
-        retriable = (APIConnectionError, APITimeoutError, RateLimitError)
-        max_attempts = 3
-        for _attempt in range(1, max_attempts + 1):
-            try:
-                result_obj, timed_out = await run_with_timeout(
-                    _stream, timeout, task_registry=task_registry)
-                if timed_out:
-                    output = f"({self.side} timed out after {timeout}s)"
-                    await self.event_bus.publish(Event(
-                        type="tool_output", side=self.side,
-                        data=self._tag({"output": output, "error": "timeout"}),
-                    ))
-                    await self.event_bus.publish(Event(
-                        type="error", side=self.side,
-                        data=self._tag({
-                            "message": f"{self.side} agent 运行超时（{timeout}s）",
-                            "source": "agent_run",
-                        }),
-                    ))
-                else:
-                    try:
-                        output = (getattr(result_obj, "final_output", "") or "").strip()
-                    except Exception:
-                        output = ""
-                break  # success
-            except retriable as exc:
-                if _attempt >= max_attempts:
-                    ename = type(exc).__name__
-                    tb = traceback.format_exc(limit=3)
-                    output = f"(agent error: {ename}: {exc})"
-                    await self.event_bus.publish(Event(
-                        type="tool_output", side=self.side,
-                        data=self._tag({"output": output, "error": ename,
-                                        "traceback": tb}),
-                    ))
-                    await self.event_bus.publish(Event(
-                        type="error", side=self.side,
-                        data=self._tag({
-                            "message": f"{ename}: {exc}"[:400],
-                            "source": "agent_run",
-                        }),
-                    ))
-                    break
-                wait_s = min(30, 2 ** (_attempt + 1))
-                msg = (f"({self.side} API 瞬时故障 "
-                       f"{type(exc).__name__} ，{wait_s}s 后重试 "
-                       f"{_attempt}/{max_attempts})")
+        try:
+            result_obj, timed_out = await run_with_timeout(
+                _stream, timeout, task_registry=task_registry)
+            if timed_out:
+                output = f"({self.side} timed out after {timeout}s)"
                 await self.event_bus.publish(Event(
                     type="tool_output", side=self.side,
-                    data=self._tag({"output": msg, "retry": True}),
-                ))
-                await asyncio.sleep(wait_s)
-            except Exception as exc:
-                ename = type(exc).__name__
-                tb = traceback.format_exc(limit=3)
-                output = f"(agent error: {ename}: {exc})"
-                await self.event_bus.publish(Event(
-                    type="tool_output", side=self.side,
-                    data=self._tag({"output": output, "error": ename,
-                                    "traceback": tb}),
+                    data=self._tag({"output": output, "error": "timeout"}),
                 ))
                 await self.event_bus.publish(Event(
                     type="error", side=self.side,
                     data=self._tag({
-                        "message": f"{ename}: {exc}"[:400],
+                        "message": f"{self.side} agent 运行超时（{timeout}s）",
                         "source": "agent_run",
                     }),
                 ))
-                break
+            else:
+                try:
+                    output = (getattr(result_obj, "final_output", "") or "").strip()
+                except Exception:
+                    output = ""
+        except Exception as exc:
+            ename = type(exc).__name__
+            tb = traceback.format_exc(limit=3)
+            output = f"(agent error: {ename}: {exc})"
+            await self.event_bus.publish(Event(
+                type="tool_output", side=self.side,
+                data=self._tag({"output": output, "error": ename,
+                                "traceback": tb}),
+            ))
+            await self.event_bus.publish(Event(
+                type="error", side=self.side,
+                data=self._tag({
+                    "message": f"{ename}: {exc}"[:400],
+                    "source": "agent_run",
+                }),
+            ))
 
         # Tool calls recorded during this run (best-effort slice).
         full_log = snapshot_tool_log()

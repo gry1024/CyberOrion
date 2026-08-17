@@ -1,0 +1,10 @@
+import json
+m = json.load(open("/home/groy/cai/cyberorion/logs/session_20260817_125054/metrics.json"))
+print("totals", m.get("totals"))
+print("tp", m.get("tp"), "fn", m.get("fn"), "fp", m.get("fp"))
+print("detection_rate", m.get("detection_rate"), "fp_rate", m.get("fp_rate"))
+print("response_rate", (m.get("response") or {}).get("response_rate"))
+print("blue_score", m.get("blue_score"), "red_score", m.get("red_score"))
+print("detections:", [(d.get("target"), d.get("technique")) for d in (m.get("detections") or [])])
+print("false_positives:", [(f.get("host"), f.get("technique")) for f in (m.get("false_positives") or [])])
+print("missed:", [(x.get("target"), x.get("technique")) for x in (m.get("missed") or [])][:8])

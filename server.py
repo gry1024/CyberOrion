@@ -106,7 +106,6 @@ logger = logging.getLogger("cyberorion.server")
 
 from cyberorion.core.event_bus import EventBus, Event
 from cyberorion.core.session_state import SessionState
-from cyberorion.core.controller import Controller
 from cyberorion.core.controller_v2 import ControllerV2
 from cyberorion.core.session_runner import SessionRunner
 from cyberorion.tools._common import (
@@ -119,7 +118,7 @@ from cyberorion.tools._common import (
 # --------------------------------------------------------------------------- #
 event_bus = EventBus()
 session_state = SessionState()
-controller = Controller(event_bus, session_state)
+controller = ControllerV2(event_bus, session_state)
 
 # V2 会话运行器（独立于旧 Controller，管理 v2 agent loop 攻防会话）
 v2_runner = SessionRunner()
@@ -1645,13 +1644,14 @@ def _sse(ev: dict) -> str:
 # 与旧版 /api/* 端点并存，互不影响。
 # --------------------------------------------------------------------------- #
 @app.post("/api/v2/session/start")
-async def v2_start_session(scenario: str = "ad_domain", simulate: bool = True) -> dict[str, Any]:
+async def v2_start_session(scenario: str = "ad_domain") -> dict[str, Any]:
     """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id.
-    simulate=True 默认使用模拟工具层（无需 Docker/CLI），simulate=False 走真实工具。
+
+    注意：simulate 参数已移除（REFACTOR_M1 D1）。仅支持 live 模式，需要 Docker 靶场。
     """
     global controller_v2
     try:
-        controller_v2 = ControllerV2(event_bus, session_state, simulate=simulate)
+        controller_v2 = ControllerV2(event_bus, session_state)
         await controller_v2.start_session(scenario)
         return {
             "session_id": controller_v2.session_id,

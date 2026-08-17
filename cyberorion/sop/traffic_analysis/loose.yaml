@@ -1,0 +1,37 @@
+name: traffic_analysis_loose
+version: 1
+description: |
+  流量分析宽松 SOP：4 阶段流水线（规则→语义→链→报告）天然串行。
+phases:
+  - id: 1
+    name: rule_engine
+    name_zh: 规则引擎
+    suggested_workers: [traffic_parser]
+    expected_tools: []
+    kb_query: "Sigma detection rules"
+    min_steps: 1
+    strict: true
+  - id: 2
+    name: semantic_analysis
+    name_zh: 语义分析
+    suggested_workers: [traffic_parser]
+    expected_tools: []
+    kb_query: "ATT&CK traffic analysis"
+    min_steps: 1
+    strict: true
+  - id: 3
+    name: chain_recon
+    name_zh: 攻击链重建
+    suggested_workers: [traffic_parser]
+    expected_tools: []
+    kb_query: "kill chain analysis"
+    min_steps: 1
+    strict: true
+  - id: 4
+    name: report
+    name_zh: 报告生成
+    suggested_workers: [traffic_parser]
+    expected_tools: []
+    kb_query: "security incident report format"
+    min_steps: 1
+    strict: true

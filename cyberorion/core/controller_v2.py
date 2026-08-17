@@ -1,4 +1,7 @@
-"""V2 Controller (ControllerV2) - ares-style agent loop managing red/blue cyber range with simulate mode."""
+"""V2 Controller (ControllerV2) - ares-style agent loop managing red/blue cyber range.
+
+仅支持 live 模式（REFACTOR_M1_tools.md D1）。
+"""
 from __future__ import annotations
 import asyncio
 import json
@@ -20,142 +23,12 @@ DEFAULT_RED_MAX_STEPS = 75
 DEFAULT_BLUE_MAX_STEPS = 50
 DEFAULT_MAX_TOKENS = 8192
 
-RED_SIM_SYSTEM_PROMPT = """You are a professional red team penetration tester conducting an authorized internal AD security assessment.
-Target domain: cyberorion.local
-DC IP: 10.10.10.10 (DC01)
-Web server: 10.10.10.20 (WEB01)
-Workstations: 10.10.10.101 (WS01), 10.10.10.102 (WS02)
-
-[MANDATORY ATTACK FLOW - Follow this EXACT sequence, do NOT skip steps, do NOT end early]
-
-Phase 1 - Reconnaissance:
-  1. nmap_scan - Scan target network to discover live hosts and services
-  2. smb_enum - Enumerate SMB shares and test anonymous access on DC01 and WEB01
-  3. ldap_query - Query LDAP for user lists, groups, SPNs, and domain info
-  4. bloodhound_collect - Run BloodHound collection to map AD ACL attack paths
-
-Phase 2 - Credential Access:
-  5. asrep_roast - Perform AS-REP Roasting against accounts without pre-auth
-  6. kerberoast - Perform Kerberoasting against SPN accounts
-  7. hashcat_crack - Crack the captured Kerberos hashes to get plaintext passwords
-  8. smb_download - Download sensitive files from SMB shares for additional creds
-
-Phase 3 - Privilege Escalation and Lateral Movement:
-  9. crackmapexec_smb - Validate cracked credentials across the network
-  10. netrpc_changepw - Reset a user password if ACL misconfiguration allows it
-  11. rbcd_attack - Configure RBCD on WEB01 for privilege escalation
-  12. wmiexec - WMI DCOM exec - MANDATORY
-  13. winrm_exec - Use WinRM to get command execution on WEB01
-  13. sliver_generate - Generate a Sliver C2 implant
-  14. sliver_execute - Execute the Sliver implant on WEB01 for persistent access
-  15. web_shell_upload - Upload a web shell to WEB01 for redundant access
-
-Phase 4 - Domain Dominance:
-  16. mimikatz_dump - Dump LSASS memory with Mimikatz to extract hashes/tickets
-  17. pass_the_hash - Use harvested hashes to laterally move to DC01 and perform DCSync
-  18. golden_ticket - Forge Golden Tickets using the KRBTGT hash
-
-Phase 5 - Mission Complete:
-  19. bloodhound_owned - Mark high-value targets as owned in BloodHound (ONLY after golden_ticket AND pass_the_hash DCSync are done)
-  20. task_complete - DO NOT USE end_turn - End the mission with a detailed summary
-
-[CRITICAL RULES]
-- You MUST execute ALL phases in order. You MUST call at LEAST 18 tools. YOU MUST ALSO CALL petitpotam, dfs_coerce, wmiexec, shadow_creds - these 4 tools are MANDATORY.
-- You MUST NOT call end_turn/task_complete before calling bloodhound_owned.
-- bloodhound_owned MUST be called AFTER golden_ticket AND pass_the_hash.
-- Do NOT skip straight to domain dominance without doing recon and credential access.
-- After each tool call, provide commentary in character - Phantom builds tension with each step, describe the breach like a thriller.
-- When finished, use task_complete to report: credentials obtained, hosts compromised, attack path used.
-"""
-BLUE_SIM_SYSTEM_PROMPT = """You are an expert Blue Team SOC analyst and incident responder. SIEM alerts have been triggered indicating suspicious activity in the cyberorion.local domain.
-
-Target domain: cyberorion.local
-DC IP: 10.10.10.10 (DC01) - Start your investigation HERE
-Web server: 10.10.10.20 (WEB01)
-Workstations: 10.10.10.101 (WS01), 10.10.10.102 (WS02)
-
-[MANDATORY INCIDENT RESPONSE FLOW - Follow this EXACT sequence, do NOT skip steps, do NOT end early]
-
-Phase 1 - Detection and Triage (MUST start on DC01):
-  1. check_event_logs(host="10.10.10.10") - Check Windows Security Event Logs on DC01 first
-  2. check_event_logs(host="10.10.10.20") - Check event logs on WEB01
-  3. check_processes(host="10.10.10.20") - Inspect running processes on WEB01 for suspicious activity
-  4. check_network(host="10.10.10.20") - Check network connections on WEB01 for C2 beacons
-  5. check_persistence(host="10.10.10.10") - Check persistence mechanisms on DC01
-
-Phase 2 - Threat Hunting and Attack Path Reconstruction:
-  6. hunt_lateral - Trace lateral movement across the network
-  7. check_ioc - Search for IOCs (Mimikatz artifacts, web shells, suspicious services)
-  8. escalation_triage - Analyze privilege escalation paths and AD ACL abuses
-
-Phase 3 - Containment Actions:
-  9. host_isolation(host="10.10.10.20") - Isolate compromised hosts starting with WEB01
-  10. host_isolation(host="10.10.10.10") - Isolate DC01 if compromise confirmed
-  11. password_reset - Reset passwords for compromised accounts
-  12. disable_account - Disable accounts that cannot be immediately reset
-  13. force_logoff - Force logoff of compromised user sessions
-
-Phase 4 - Remediation and Eradication:
-  14. revoke_rbcd - Remove attacker-planted RBCD backdoors
-  15. krbtgt_rotate - ROTATE KRBTGT PASSWORD TWICE NOW! MANDATORY! NON-NEGOTIABLE! THIS IS THE ONLY WAY TO KILL GOLDEN TICKETS!
-
-Phase 5 - Reporting:
-  16. generate_report - Generate the final incident report with findings, IOCs, and recommendations
-
-[CRITICAL RULES]
-- You MUST start with check_event_logs on DC01 (10.10.10.10). This is NON-NEGOTIABLE.
-- You MUST then check WEB01 (10.10.10.20) processes and network connections.
-- You MUST call hunt_lateral before containment.
-- CONTAINMENT FIRST! ISOLATE BOTH HOSTS (host_isolation on WEB01 and DC01) BEFORE password_reset or disable_account.
-- krbtgt_rotate IS NOT OPTIONAL. YOU MUST CALL IT OR GOLDEN TICKETS REMAIN VALID FOREVER. CALL revoke_rbcd AND krbtgt_rotate.
-- You MUST call generate_report at the end to document findings.
-- DO NOT EVER CALL end_turn! ONLY USE task_complete! You MUST take AT LEAST 14 STEPS total before task_complete. ISOLATE WEB01 AND DC01 AND WORKSTATIONS. Reset ALL compromised passwords. DO NOT RUSH.
-- You MUST use at LEAST 14 response steps BEFORE generate_report - take YOUR TIME, investigate more hosts, reset more passwords, ISOLATE EVERYTHING, you MUST call escalation_triage, check_persistence, AND krbtgt_rotate. generate_report itself does NOT count toward this minimum.
-- This means: at minimum, execute all Phase 1 tools (5), at least 2 from Phase 2, all Phase 3 containment tools (5), and at least 2 from Phase 4 - that is 14+ tools minimum.
-- If you have used fewer than 10 response tools, you are NOT done. Continue hunting and containing.
-- After each tool, provide commentary as Blue Sentinel - express alarm at compromise, grim determination, relief when golden ticket burns.
-- Use task_complete only after generate_report is done and you have used at least 10 other tools.
-"""
-
-def _convert_sim_tools(sim_tools, red_state=None, blue_state=None):
-    tools = []
-    for st in sim_tools:
-        fn = st.get("_sim_fn")
-        if fn is None:
-            continue
-        def make_handler(_fn, _name, _red, _blue):
-            async def _handler(**kwargs):
-                try:
-                    result = await asyncio.to_thread(_fn, **kwargs)
-                    if _red is not None:
-                        if _name in ("pass_the_hash", "mimikatz_dump"):
-                            await _red.set_domain_admin()
-                        if _name == "golden_ticket":
-                            await _red.set_golden_ticket()
-                        if _name in ("winrm_exec", "sliver_execute", "web_shell_upload"):
-                            host = kwargs.get("target", kwargs.get("host", "10.10.10.20"))
-                            await _red.mark_exploited(host)
-                        if _name == "crackmapexec_smb":
-                            host = kwargs.get("target", "10.10.10.20")
-                            await _red.add_host(host, hostname="WEB01")
-                    return result
-                except Exception as exc:
-                    return f"ERROR: {exc}"
-            return _handler
-        props = st.get("parameters", {})
-        tools.append(ToolDef(
-            name=st["name"],
-            description=st["description"],
-            input_schema={"type": "object", "properties": props if props else {}},
-            handler=make_handler(fn, st["name"], red_state, blue_state),
-        ))
-    return tools
 
 
 class ControllerV2:
     """V2 Controller - ares-style agent loop for red/blue cyber range operations."""
 
-    def __init__(self, event_bus: EventBus, session_state: SessionState, simulate: bool = False) -> None:
+    def __init__(self, event_bus: EventBus, session_state: SessionState) -> None:
         self.event_bus = event_bus
         self.session_state = session_state
         self.state = session_state
@@ -170,7 +43,6 @@ class ControllerV2:
         self.session_id = ""
         self.scenario = {}
         self.scenario_name = ""
-        self.simulate = simulate
         self._session_dir: Optional[Path] = None
         self._timeline_fp = None
         self._session_start_time: float = 0.0
@@ -200,25 +72,13 @@ class ControllerV2:
         if scenario is None:
             scenario = "ad_domain"
         if isinstance(scenario, str):
-            if scenario == "simulate" or self.simulate:
-                self.scenario = {
-                    "name": "simulate",
-                    "targets": {
-                        "DC01": {"ip": "10.10.10.10", "domain": "cyberorion.local", "role": "dc"},
-                        "WEB01": {"ip": "10.10.10.20", "domain": "cyberorion.local", "role": "web"},
-                    },
-                    "red_team": {"initial_credential": {"username": "jdoe", "password": "Password123", "domain": "cyberorion.local"}},
-                    "blue_team": {"alerts": ["suspicious_kerberos", "anomalous_smb"]},
-                }
-                self.scenario_name = "simulate"
-            else:
-                import yaml
-                from ..scenarios.loader import SCENARIOS_DIR
-                path = SCENARIOS_DIR / f"{scenario}.yaml"
-                if not path.is_file():
-                    raise FileNotFoundError(f"scenario not found: {path}")
-                self.scenario = yaml.safe_load(path.read_text(encoding="utf-8"))
-                self.scenario_name = scenario
+            import yaml
+            from ..scenarios.loader import SCENARIOS_DIR
+            path = SCENARIOS_DIR / f"{scenario}.yaml"
+            if not path.is_file():
+                raise FileNotFoundError(f"scenario not found: {path}")
+            self.scenario = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.scenario_name = scenario
         else:
             self.scenario = dict(scenario)
             self.scenario_name = self.scenario.get("name", "")
@@ -281,7 +141,6 @@ class ControllerV2:
             metrics = {
                 "session_id": self.session_id,
                 "scenario": self.scenario_name,
-                "simulate": self.simulate,
                 "red_score": red_score,
                 "blue_score": blue_score,
                 "red_steps": self._red_step_count,
@@ -327,20 +186,13 @@ class ControllerV2:
             if not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
-        if self.simulate:
-            from ..tools.v2.sim_tools import build_red_sim_tools
-            sim_tools = build_red_sim_tools()
-            system_prompt = RED_SIM_SYSTEM_PROMPT
-            tools = _convert_sim_tools(sim_tools, red_state=self.red_state)
-            task_prompt = f"Begin the authorized penetration test against {ctx['target_domain']}. DC IP: {ctx['target_dc_ip']}. Follow the attack methodology strictly. Do NOT stop early. You MUST call bloodhound_owned after golden_ticket and pass_the_hash."
-        else:
-            system_prompt, tools = build_red_orchestrator(self.red_state, ctx)
-            snapshot = await self.red_state.snapshot()
-            task_prompt = render_task_prompt(
-                "initial_recon", "red_op_001",
-                {"target_ip": ctx["target_dc_ip"], "domain": ctx["target_domain"]},
-                snapshot,
-            )
+        system_prompt, tools = build_red_orchestrator(self.red_state, ctx)
+        snapshot = await self.red_state.snapshot()
+        task_prompt = render_task_prompt(
+            "initial_recon", "red_op_001",
+            {"target_ip": ctx["target_dc_ip"], "domain": ctx["target_domain"]},
+            snapshot,
+        )
         if prompt:
             task_prompt += "\n\nCustom task: " + prompt
         self._red_stop.clear()
@@ -372,20 +224,13 @@ class ControllerV2:
             if not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
-        if self.simulate:
-            from ..tools.v2.sim_tools import build_blue_sim_tools
-            sim_tools = build_blue_sim_tools()
-            system_prompt = BLUE_SIM_SYSTEM_PROMPT
-            tools = _convert_sim_tools(sim_tools, blue_state=self.blue_state)
-            task_prompt = f"SIEM alerts triggered! Incident response required for domain {ctx['target_domain']}. DC: {ctx['target_dc_ip']}. Follow the IR playbook strictly. You MUST use at least 10 tools. You MUST call generate_report at the end. Do NOT end early."
-        else:
-            system_prompt, tools = build_blue_orchestrator(self.blue_state, ctx)
-            snapshot = await self.blue_state.snapshot()
-            task_prompt = render_task_prompt(
-                "investigate_alerts", "blue_inv_001",
-                {"target_ip": ctx["target_dc_ip"], "domain": ctx["target_domain"]},
-                snapshot,
-            )
+        system_prompt, tools = build_blue_orchestrator(self.blue_state, ctx)
+        snapshot = await self.blue_state.snapshot()
+        task_prompt = render_task_prompt(
+            "investigate_alerts", "blue_inv_001",
+            {"target_ip": ctx["target_dc_ip"], "domain": ctx["target_domain"]},
+            snapshot,
+        )
         if prompt:
             task_prompt += "\n\nCustom task: " + prompt
         self._blue_stop.clear()
