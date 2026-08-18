@@ -749,6 +749,18 @@ def _scan_sessions() -> list[dict[str, Any]]:
     return out
 
 
+def _read_summary(session_dir: Path) -> dict[str, Any]:
+    """Read summary.json if present; return {} on any error."""
+    path = session_dir / "summary.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _session_has_replay_content(session_dir: Path) -> bool:
     """Exclude aborted shells while retaining telemetry-only live sessions."""
     for filename in ("report.md", "metrics.json", "storyline.md"):
@@ -1882,16 +1894,21 @@ def _select_demo_session(task_type: str) -> str | None:
 
     def _score(session: dict[str, Any]) -> tuple[float, str]:
         score = 0.0
-        metrics_file = Path(session["dir"]) / "metrics.json"
+        session_dir = Path(session["dir"])
+        metrics_file = session_dir / "metrics.json"
         metrics: dict[str, Any] = {}
         if metrics_file.is_file():
             try:
                 metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
             except Exception:
                 metrics = {}
+        summary = _read_summary(session_dir)
+        summary_type = str(summary.get("type") or "")
+        summary_scenario = str(summary.get("scenario") or "")
+        summary_winner = str(summary.get("winner") or "")
 
         report_size = 0
-        report_path = Path(session["dir"]) / "report.md"
+        report_path = session_dir / "report.md"
         if report_path.is_file():
             try:
                 report_size = report_path.stat().st_size
@@ -1919,6 +1936,14 @@ def _select_demo_session(task_type: str) -> str | None:
         )
 
         if task_type in {"red_adversary", "blue_response"}:
+            if summary_type == "battle":
+                score += 1500
+            if summary_scenario in {"nightfall", "shieldwall"}:
+                score += 1000
+            if task_type == "red_adversary" and summary_winner == "red":
+                score += 2500
+            if task_type == "blue_response" and summary_winner == "blue":
+                score += 2500
             if scenario == "ad_domain":
                 score += 1000
             score += blue_score + red_score
@@ -1927,6 +1952,10 @@ def _select_demo_session(task_type: str) -> str | None:
             score += timeline_events * 3
             score += report_size / 100.0
         elif task_type == "traffic_analysis":
+            if summary_type == "traffic_analysis":
+                score += 1500
+            if summary_scenario in {"traffic_ad", "traffic_web"}:
+                score += 1000
             if session_type == "traffic_analysis" or session.get("type") == "traffic_analysis":
                 score += 1000
             score += pipeline_stages * 500
