@@ -50,6 +50,21 @@ class ControllerV2:
         self._blue_tool_calls: list = []
         self._red_step_count: int = 0
         self._blue_step_count: int = 0
+        # Compatibility surface for read-only telemetry endpoints. The v2
+        # controller does not own a TelemetryStore, so callers see None until
+        # a future adapter explicitly attaches one.
+        self.store = None
+        self.last_metrics = None
+
+    def set_scenario(self, name: str) -> None:
+        """Select and validate the scenario used by the next session."""
+        from ..scenarios.loader import SCENARIOS_DIR
+
+        path = SCENARIOS_DIR / f"{name}.yaml"
+        if not path.is_file():
+            raise FileNotFoundError(f"scenario not found: {path}")
+        os.environ["CO_SCENARIO"] = name
+        self.scenario_name = name
 
     def _setup_session_dir(self):
         ts = datetime.fromtimestamp(self._session_start_time).strftime("%Y%m%d_%H%M%S")
@@ -186,7 +201,11 @@ class ControllerV2:
             if not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
-        system_prompt, tools = build_red_orchestrator(self.red_state, ctx)
+        self._red_tool_calls = []
+        worker_events = self._make_loop_event_handler("red", self._red_tool_calls)
+        system_prompt, tools = build_red_orchestrator(
+            self.red_state, ctx, on_worker_event=worker_events
+        )
         snapshot = await self.red_state.snapshot()
         task_prompt = render_task_prompt(
             "initial_recon", "red_op_001",
@@ -196,7 +215,6 @@ class ControllerV2:
         if prompt:
             task_prompt += "\n\nCustom task: " + prompt
         self._red_stop.clear()
-        self._red_tool_calls = []
         self._log_timeline("round_start", "red", {"scenario": scenario.get("name", "")})
         await self.event_bus.publish(Event(
             type="round_start", side="red",
@@ -224,7 +242,11 @@ class ControllerV2:
             if not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
-        system_prompt, tools = build_blue_orchestrator(self.blue_state, ctx)
+        self._blue_tool_calls = []
+        worker_events = self._make_loop_event_handler("blue", self._blue_tool_calls)
+        system_prompt, tools = build_blue_orchestrator(
+            self.blue_state, ctx, on_worker_event=worker_events
+        )
         snapshot = await self.blue_state.snapshot()
         task_prompt = render_task_prompt(
             "investigate_alerts", "blue_inv_001",
@@ -234,7 +256,6 @@ class ControllerV2:
         if prompt:
             task_prompt += "\n\nCustom task: " + prompt
         self._blue_stop.clear()
-        self._blue_tool_calls = []
         self._log_timeline("round_start", "blue", {"scenario": scenario.get("name", "")})
         await self.event_bus.publish(Event(
             type="round_start", side="blue",
@@ -259,16 +280,7 @@ class ControllerV2:
         stop_event: asyncio.Event,
     ) -> None:
         tc_list = self._red_tool_calls if side == "red" else self._blue_tool_calls
-
-        async def on_event(event: dict) -> None:
-            etype = event.get("type", "event")
-            if etype == "tool_call":
-                tc_data = {"name": event.get("name", ""), "arguments": event.get("args", {}), "args": event.get("args", {}), "tool_call_id": event.get("tool_call_id"), "step": event.get("step")}
-                tc_list.append(tc_data)
-                self._log_timeline("tool_call", side, tc_data)
-            await self.event_bus.publish(Event(
-                type=etype, side=side, data=event, timestamp=time.time(),
-            ))
+        on_event = self._make_loop_event_handler(side, tc_list)
 
         config = AgentLoopConfig(max_steps=max_steps, max_tokens=DEFAULT_MAX_TOKENS)
         try:
@@ -301,6 +313,29 @@ class ControllerV2:
             },
             timestamp=time.time(),
         ))
+
+    def _make_loop_event_handler(self, side: str, tc_list: list):
+        async def on_event(event: dict) -> None:
+            etype = event.get("type", "event")
+            data = dict(event)
+            if etype == "tool_call":
+                tc_data = {
+                    "name": data.get("name", ""),
+                    "arguments": data.get("args", {}),
+                    "args": data.get("args", {}),
+                    "tool_call_id": data.get("tool_call_id"),
+                    "step": data.get("step"),
+                    "agent": data.get("agent") or data.get("worker"),
+                }
+                tc_list.append(tc_data)
+                self._log_timeline("tool_call", side, tc_data)
+            elif etype in {"thinking", "tool_output", "callback", "tool_removed"}:
+                self._log_timeline(etype, side, data)
+            await self.event_bus.publish(Event(
+                type=etype, side=side, data=data, timestamp=time.time(),
+            ))
+
+        return on_event
     async def stop_all(self) -> None:
         self._stopped.set()
         self._red_stop.set()

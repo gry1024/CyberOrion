@@ -75,6 +75,69 @@ def test_sessions_list(client: TestClient) -> None:
     assert mtimes == sorted(mtimes, reverse=True)
 
 
+def test_sessions_list_hides_empty_partial_directories(tmp_path: Path,
+                                                       monkeypatch) -> None:
+    import server as server_mod
+
+    logs = tmp_path / "logs"
+    empty = logs / "session_20990101_000010"
+    valid = logs / "session_20990101_000011"
+    empty.mkdir(parents=True)
+    valid.mkdir()
+    (empty / "timeline.jsonl").write_text(
+        '{"type":"session_start"}\n', encoding="utf-8")
+    (valid / "metrics.json").write_text(
+        '{"blue_score": 88, "red_score": 12}', encoding="utf-8")
+    (valid / "report.md").write_text("# replay", encoding="utf-8")
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+
+    ids = [item["id"] for item in server_mod._scan_sessions()]
+
+    assert valid.name in ids
+    assert empty.name not in ids
+
+
+def test_demo_registry_prefers_richer_sessions(tmp_path: Path,
+                                              monkeypatch) -> None:
+    import server as server_mod
+
+    logs = tmp_path / "logs"
+    rich_red = logs / "session_20990101_000020"
+    poor_red = logs / "session_20990101_000021"
+    rich_traffic = logs / "session_20990101_000022"
+    poor_traffic = logs / "session_20990101_000023"
+    for path in (rich_red, poor_red, rich_traffic, poor_traffic):
+        path.mkdir(parents=True)
+        (path / "report.md").write_text("# demo", encoding="utf-8")
+        (path / "timeline.jsonl").write_text("{}\n{}\n{}\n", encoding="utf-8")
+        (path / "metrics.json").write_text("{}", encoding="utf-8")
+
+    (rich_red / "metrics.json").write_text(
+        '{"scenario_type": "ad_domain", "red_score": 92, "blue_score": 68, '
+        '"red_tools_used": 17, "blue_tools_used": 10, "total_events": 81}',
+        encoding="utf-8")
+    (poor_red / "metrics.json").write_text(
+        '{"scenario_type": "ad_domain", "red_score": 100, "blue_score": 100, '
+        '"red_tools_used": 1, "blue_tools_used": 1, "total_events": 3}',
+        encoding="utf-8")
+    (rich_traffic / "metrics.json").write_text(
+        '{"type": "traffic_analysis", "pipeline_stages": 4, '
+        '"pipeline_tool_calls": 7, "alerts_total": 10, "attck_techniques": 8, '
+        '"traffic_events": 14, "total_events": 21}',
+        encoding="utf-8")
+    (poor_traffic / "metrics.json").write_text(
+        '{"type": "traffic_analysis", "pipeline_stages": 1, '
+        '"pipeline_tool_calls": 1, "alerts_total": 1, "attck_techniques": 1, '
+        '"traffic_events": 1, "total_events": 3}',
+        encoding="utf-8")
+
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+    server_mod._refresh_demo_registry()
+
+    assert server_mod._DEMO_REGISTRY["red_adversary"] == rich_red.name
+    assert server_mod._DEMO_REGISTRY["traffic_analysis"] == rich_traffic.name
+
+
 def test_report_path_traversal_rejected(client: TestClient) -> None:
     # Anything not matching ^session_\d{8}_\d{6}$ -> 400, never touches disk.
     for bad in ("..%2F..%2Fserver", "session_x", "session_20260721",

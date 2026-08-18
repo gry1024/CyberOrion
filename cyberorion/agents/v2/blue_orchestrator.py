@@ -13,7 +13,7 @@ dispatch_* 的 handler 内部：构建对应 worker 的 system_prompt + tools，
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from ...core.agent_loop import ToolDef, run_agent_loop
 from ...core.op_state import OpState
@@ -145,6 +145,7 @@ def _make_dispatch_handler(
     task_type: str,
     state: OpState,
     ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
 ):
     """构造 dispatch handler：构建 worker -> 渲染任务 -> run_agent_loop -> 写回状态。"""
 
@@ -164,8 +165,21 @@ def _make_dispatch_handler(
         except Exception:  # noqa: BLE001
             snapshot = None
         user_prompt = render_task_prompt(task_type, task_id, {"task": task_text}, snapshot)
+        async def relay_worker_event(event: dict[str, Any]) -> None:
+            if on_worker_event is None:
+                return
+            child_event = dict(event)
+            child_event.setdefault("agent", task_type)
+            child_event.setdefault("worker", task_type)
+            result = on_worker_event(child_event)
+            if hasattr(result, "__await__"):
+                await result
+
         try:
-            outcome = await run_agent_loop(system_prompt, user_prompt, worker_tools)
+            outcome = await run_agent_loop(
+                system_prompt, user_prompt, worker_tools,
+                on_event=relay_worker_event,
+            )
         except Exception as exc:  # noqa: BLE001
             await state.add_timeline_event(f"blue_dispatch_{task_type}_error", str(exc)[:300])
             return f"ERROR: worker 执行失败: {exc}"
@@ -210,7 +224,11 @@ def _callback_tooldefs() -> list[ToolDef]:
     ]
 
 
-def _build_orchestrator_tools(state: OpState, ctx: dict) -> list[ToolDef]:
+def _build_orchestrator_tools(
+    state: OpState,
+    ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
+) -> list[ToolDef]:
     """组装 orchestrator 全部工具：查询 + 分派 + complete_investigation + 回调。"""
     tools: list[ToolDef] = []
     for name, desc, fn in _QUERY_DEFS:
@@ -220,7 +238,10 @@ def _build_orchestrator_tools(state: OpState, ctx: dict) -> list[ToolDef]:
     for name, build_fn, task_type, desc in _DISPATCH_DEFS:
         tools.append(ToolDef(name=name, description=desc,
                              input_schema=_DISPATCH_SCHEMA,
-                             handler=_make_dispatch_handler(name, build_fn, task_type, state, ctx)))
+                             handler=_make_dispatch_handler(
+                                 name, build_fn, task_type, state, ctx,
+                                 on_worker_event,
+                             )))
     tools.append(ToolDef(
         name="complete_investigation",
         description="声明本次蓝队调查完成，提交最终总结与发现清单；成功后请立即调用 task_complete。",
@@ -242,10 +263,14 @@ def _assemble_orchestrator_prompt(ctx: dict) -> str:
     return prompt + _context_block(ctx)
 
 
-def build_blue_orchestrator(state: OpState, ctx: dict) -> tuple[str, list[ToolDef]]:
+def build_blue_orchestrator(
+    state: OpState,
+    ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
+) -> tuple[str, list[ToolDef]]:
     """构建蓝队 orchestrator agent。"""
     prompt = _assemble_orchestrator_prompt(ctx)
-    tools = _build_orchestrator_tools(state, ctx)
+    tools = _build_orchestrator_tools(state, ctx, on_worker_event)
     return prompt, tools
 
 

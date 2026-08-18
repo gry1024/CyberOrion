@@ -12,7 +12,7 @@ dispatch_* 的 handler 内部：构建对应 worker 的 system_prompt + tools，
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from ...core.agent_loop import ToolDef, run_agent_loop
 from ...core.op_state import OpState
@@ -39,9 +39,18 @@ _DISPATCH_SCHEMA: dict[str, Any] = {
         "task": {
             "type": "string",
             "description": "分派给 worker 的任务描述：目标、意图、预期产出。",
-        }
+        },
+        "target_ip": {"type": "string", "description": "Target IP address."},
+        "target": {"type": "string", "description": "Target IP or hostname."},
+        "domain": {"type": "string", "description": "Target or credential domain."},
+        "username": {"type": "string", "description": "Credential username."},
+        "technique": {"type": "string", "description": "Requested technique/tool family."},
+        "priority": {"type": "integer", "description": "Task priority, lower is earlier."},
+        "vuln_id": {"type": "string", "description": "Vulnerability id for privesc tasks."},
+        "listener_ip": {"type": "string", "description": "Relay/listener IP for coercion tasks."},
+        "techniques": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["task"],
+    "required": [],
 }
 
 _COMPLETE_SCHEMA: dict[str, Any] = {
@@ -200,13 +209,25 @@ def _make_dispatch_handler(
     task_type: str,
     state: OpState,
     ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
 ):
     """构造 dispatch handler：构建 worker -> 渲染任务 -> run_agent_loop -> 写回状态。"""
 
     async def handler(**kwargs: Any) -> Any:
         task = str(kwargs.get("task", "")).strip()
         if not task:
-            return f"ERROR: {dispatch_name} 缺少 task 参数"
+            facts = []
+            for key in ("technique", "target_ip", "target", "domain", "username",
+                        "vuln_id", "listener_ip", "techniques", "priority"):
+                value = kwargs.get(key)
+                if value not in (None, "", []):
+                    facts.append(f"{key}={value}")
+            task = (
+                f"{dispatch_name} requested with " + ", ".join(facts)
+                if facts else ""
+            )
+        if not task:
+            return f"ERROR: {dispatch_name} missing task or actionable parameters"
         # 构建 worker 的 system_prompt 与工具
         try:
             system_prompt, worker_tools = build_fn(state, ctx)
@@ -223,9 +244,22 @@ def _make_dispatch_handler(
         user_prompt = render_task_prompt(
             task_type, task_id, {"task": task_text}, snapshot
         )
+        async def relay_worker_event(event: dict[str, Any]) -> None:
+            if on_worker_event is None:
+                return
+            child_event = dict(event)
+            child_event.setdefault("agent", task_type)
+            child_event.setdefault("worker", task_type)
+            result = on_worker_event(child_event)
+            if hasattr(result, "__await__"):
+                await result
+
         # 执行 worker 循环
         try:
-            outcome = await run_agent_loop(system_prompt, user_prompt, worker_tools)
+            outcome = await run_agent_loop(
+                system_prompt, user_prompt, worker_tools,
+                on_event=relay_worker_event,
+            )
         except Exception as exc:  # noqa: BLE001
             await state.add_timeline_event(
                 f"dispatch_{task_type}_error", str(exc)[:300]
@@ -281,7 +315,11 @@ def _callback_tooldefs() -> list[ToolDef]:
     ]
 
 
-def _build_orchestrator_tools(state: OpState, ctx: dict) -> list[ToolDef]:
+def _build_orchestrator_tools(
+    state: OpState,
+    ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
+) -> list[ToolDef]:
     """组装 orchestrator 全部工具：查询 + 分派 + complete_operation + 回调。"""
     tools: list[ToolDef] = []
     # 查询工具
@@ -301,7 +339,9 @@ def _build_orchestrator_tools(state: OpState, ctx: dict) -> list[ToolDef]:
                 name=name,
                 description=desc,
                 input_schema=_DISPATCH_SCHEMA,
-                handler=_make_dispatch_handler(name, build_fn, task_type, state, ctx),
+                handler=_make_dispatch_handler(
+                    name, build_fn, task_type, state, ctx, on_worker_event
+                ),
             )
         )
     # 收尾工具
@@ -333,11 +373,13 @@ def _assemble_orchestrator_prompt(ctx: dict) -> str:
 
 
 def build_red_orchestrator(
-    state: OpState, ctx: dict
+    state: OpState,
+    ctx: dict,
+    on_worker_event: Callable[[dict[str, Any]], Any] | None = None,
 ) -> tuple[str, list[ToolDef]]:
     """构建红队 orchestrator agent。"""
     prompt = _assemble_orchestrator_prompt(ctx)
-    tools = _build_orchestrator_tools(state, ctx)
+    tools = _build_orchestrator_tools(state, ctx, on_worker_event)
     return prompt, tools
 
 

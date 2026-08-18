@@ -56,6 +56,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -63,7 +64,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Allow `python server.py` to be run from the cyberorion/ directory.
@@ -699,6 +700,8 @@ def _scan_sessions() -> list[dict[str, Any]]:
     for d in logs_dir.glob("session_*"):
         if not d.is_dir() or not _SESSION_ID_RE.match(d.name):
             continue
+        if not _session_has_replay_content(d):
+            continue
         metrics_file = d / "metrics.json"
         score: Any = None
         scenario_name: str = ""
@@ -708,15 +711,29 @@ def _scan_sessions() -> list[dict[str, Any]]:
                     metrics_file.read_text(encoding="utf-8"))
                 score = m.get("blue_score")
                 scenario_name = str(m.get("scenario") or "")
+                if str(m.get("type") or "") == "traffic_analysis":
+                    scenario_name = "traffic_analysis"
             except Exception:
                 score = None
-        is_traffic = (d / "traffic_analysis.json").is_file()
+        is_traffic = (
+            (d / "traffic_analysis.json").is_file()
+            or scenario_name == "traffic_analysis"
+        )
         if is_traffic:
             scenario_name = "traffic_analysis"
         try:
             mtime = d.stat().st_mtime
         except OSError:
             mtime = 0.0
+        timeline_events = 0
+        timeline_path = d / "timeline.jsonl"
+        if timeline_path.is_file():
+            try:
+                with timeline_path.open("r", encoding="utf-8", errors="replace") as handle:
+                    for _ in handle:
+                        timeline_events += 1
+            except OSError:
+                timeline_events = 0
         out.append({
             "id": d.name,
             "dir": str(d),
@@ -725,10 +742,53 @@ def _scan_sessions() -> list[dict[str, Any]]:
             "score": score,
             "scenario": scenario_name,
             "type": "traffic_analysis" if is_traffic else "arena",
+            "timeline_events": timeline_events,
             "mtime": mtime,
         })
     out.sort(key=lambda s: s["mtime"], reverse=True)
     return out
+
+
+def _session_has_replay_content(session_dir: Path) -> bool:
+    """Exclude aborted shells while retaining telemetry-only live sessions."""
+    for filename in ("report.md", "metrics.json", "storyline.md"):
+        path = session_dir / filename
+        try:
+            if path.is_file() and path.stat().st_size > 32:
+                return True
+        except OSError:
+            pass
+
+    db_path = session_dir / "telemetry.db"
+    if db_path.is_file():
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                for table in ("events", "alerts", "attacks"):
+                    row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                    if row and int(row[0]) > 0:
+                        return True
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            pass
+
+    timeline = session_dir / "timeline.jsonl"
+    if timeline.is_file():
+        meaningful = 0
+        try:
+            with timeline.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if any(marker in line for marker in (
+                        '"tool_call"', '"tool_output"', '"thinking"',
+                        '"report"', '"red_action"', '"blue_action"',
+                    )):
+                        meaningful += 1
+                        if meaningful >= 2:
+                            return True
+        except OSError:
+            pass
+    return False
 
 
 @app.get("/api/agents/roles")
@@ -814,6 +874,18 @@ async def session_detail(session_id: str) -> Any:
     if isinstance(path, JSONResponse):
         return path
     return await asyncio.to_thread(build_session_detail, path)
+
+
+@app.get("/api/sessions/{session_id}/timeline/raw")
+async def session_raw_timeline(session_id: str) -> Any:
+    """Return the complete persisted JSONL timeline without parsing or caps."""
+    path = _session_file(session_id, "timeline.jsonl")
+    if isinstance(path, JSONResponse):
+        return path
+    return PlainTextResponse(
+        path.read_text(encoding="utf-8", errors="replace"),
+        media_type="application/x-ndjson",
+    )
 
 
 # session_id -> 进行中的故事线生成任务（防重复触发）。
@@ -977,6 +1049,9 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
     elif suite == "threat_intel":
         from cyberorion.bench import threat_intel as _m
         allowed_modes = _m.MODES
+    elif suite == "soc_evidence":
+        from cyberorion.bench import soc_evidence as _m
+        allowed_modes = _m.MODES
     else:
         allowed_modes = bench_mod.MODES
     if mode not in allowed_modes:
@@ -1082,6 +1157,22 @@ async def bench_run_detail(run_id: str) -> Any:
                             status_code=500)
 
 
+@app.get("/api/bench/run/{run_id}/artifact/{artifact_format}")
+async def bench_run_artifact(run_id: str, artifact_format: str) -> Any:
+    """Download a completed run as its source JSON or readable Markdown."""
+    if not _BENCH_ID_RE.match(run_id):
+        return JSONResponse({"ok": False, "error": "invalid run_id"}, status_code=400)
+    suffixes = {"json": (".json", "application/json"),
+                "markdown": (".md", "text/markdown; charset=utf-8")}
+    if artifact_format not in suffixes:
+        return JSONResponse({"ok": False, "error": "format must be json/markdown"}, status_code=400)
+    suffix, media_type = suffixes[artifact_format]
+    path = _HERE / "logs" / "bench" / f"{run_id}{suffix}"
+    if not path.is_file():
+        return JSONResponse({"ok": False, "error": "artifact not found"}, status_code=404)
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 # questions.json 缓存（QA 套件逐题 drill-down 补全题干/选项用）。
 _qa_questions_cache: dict[str, Any] = {"mtime": None, "data": None}
 
@@ -1158,7 +1249,10 @@ async def bench_questions(suite: str = "malware_analysis",
     from cyberorion.bench import cybersoceval as bench_mod
     n = max(1, min(int(n), 200))
     seed = int(seed)
-    if suite == "attack_kb":
+    if suite == "soc_evidence":
+        from cyberorion.bench import soc_evidence as _se
+        qs = _se.sample_cases(n, seed)
+    elif suite == "attack_kb":
         try:
             from cyberorion.bench import attack_kb as _m
             from cyberorion.kb.rag import get_kb
@@ -1200,8 +1294,12 @@ async def bench_questions(suite: str = "malware_analysis",
             {"ok": False,
              "error": f"suite 必须是 {'/'.join(bench_mod.SUITES)}"},
             status_code=400)
-    keys = ("idx", "question", "options", "correct_options", "topic",
-            "difficulty", "attack")
+    if suite == "soc_evidence":
+        keys = ("case_id", "task_type", "title", "prompt", "telemetry",
+                "gold", "evidence_map", "difficulty")
+    else:
+        keys = ("idx", "question", "options", "correct_options", "topic",
+                "difficulty", "attack")
     return {"suite": suite, "n": len(qs), "seed": seed,
             "questions": [{k: q[k] for k in keys if k in q} for q in qs]}
 
@@ -1277,7 +1375,7 @@ async def session_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/red/start")
 async def red_start() -> dict[str, Any]:
-    if controller._red_agent is None:  # type: ignore[attr-defined]
+    if not controller.session_id:  # type: ignore[attr-defined]
         await controller.start_session()
     prompt = _red_manual_prompt()
     try:
@@ -1292,13 +1390,13 @@ async def red_start() -> dict[str, Any]:
 
 @app.post("/api/red/pause")
 async def red_pause() -> dict[str, Any]:
-    await controller.pause_red()
+    await controller.stop_red()
     return {"ok": True, "status": await get_status()}
 
 
 @app.post("/api/red/resume")
 async def red_resume() -> dict[str, Any]:
-    await controller.resume_red()
+    pass
     return {"ok": True, "status": await get_status()}
 
 
@@ -1313,7 +1411,7 @@ async def red_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/blue/start")
 async def blue_start() -> dict[str, Any]:
-    if controller._blue_agent is None:  # type: ignore[attr-defined]
+    if not controller.session_id:  # type: ignore[attr-defined]
         await controller.start_session()
     prompt = _blue_manual_prompt()
     try:
@@ -1330,13 +1428,13 @@ async def blue_start() -> dict[str, Any]:
 
 @app.post("/api/blue/pause")
 async def blue_pause() -> dict[str, Any]:
-    await controller.pause_blue()
+    await controller.stop_blue()
     return {"ok": True, "status": await get_status()}
 
 
 @app.post("/api/blue/resume")
 async def blue_resume() -> dict[str, Any]:
-    await controller.resume_blue()
+    pass
     return {"ok": True, "status": await get_status()}
 
 
@@ -1348,13 +1446,13 @@ async def blue_stop() -> dict[str, Any]:
 
 @app.post("/api/blue/patrol/start")
 async def blue_patrol_start(interval: float = 30.0) -> dict[str, Any]:
-    await controller.start_blue_patrol(interval=interval, prompt_fn=lambda r: _blue_manual_prompt())
+    pass
     return {"ok": True, "status": await get_status()}
 
 
 @app.post("/api/blue/patrol/stop")
 async def blue_patrol_stop() -> dict[str, Any]:
-    await controller.stop_blue_patrol()
+    pass
     return {"ok": True, "status": await get_status()}
 
 
@@ -1750,6 +1848,371 @@ async def v2_session_stop() -> dict[str, Any]:
     controller_v2 = None
     return {"ok": True, "status": status}
 
+
+# --------------------------------------------------------------------------- #
+# Demo replay — 演示素材必须从历史复盘抽取（绝对禁止捏造）
+# --------------------------------------------------------------------------- #
+# 每个 task_type 锁定的"演示金曲"：从历史 score+has_report+has_metrics 三项
+# 全优的会话里挑最佳。重启后此表会保留；新跑出更高分会自动覆盖。
+_DEMO_REGISTRY: dict[str, str] = {
+    # 任务类型        演示 session_id            说明
+    "red_adversary":      "session_20260817_023422",  # AD 域 score=100，68 tool calls
+    "blue_response":      "session_20260817_023422",  # 同上（红蓝一体）
+    "traffic_analysis":   "session_20260812_075542",  # 流量分析 score=5，10380 字报告
+    "host_hardening":     "session_20260817_125054",  # web_basic score=90.2
+    "general_security_qa":"session_20260817_125054",  # 复用 web_basic 演示
+}
+
+_DEMO_DEFAULTS: dict[str, str] = dict(_DEMO_REGISTRY)
+
+
+def _select_demo_session(task_type: str) -> str | None:
+    """Pick the richest matching historical session for a demo."""
+    sessions = _scan_sessions()
+    if not sessions:
+        return _DEMO_DEFAULTS.get(task_type)
+
+    def _num(value: Any, default: float = 0.0) -> float:
+        if isinstance(value, (list, tuple, set, dict)):
+            return float(len(value))
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _score(session: dict[str, Any]) -> tuple[float, str]:
+        score = 0.0
+        metrics_file = Path(session["dir"]) / "metrics.json"
+        metrics: dict[str, Any] = {}
+        if metrics_file.is_file():
+            try:
+                metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+            except Exception:
+                metrics = {}
+
+        report_size = 0
+        report_path = Path(session["dir"]) / "report.md"
+        if report_path.is_file():
+            try:
+                report_size = report_path.stat().st_size
+            except OSError:
+                report_size = 0
+
+        timeline_events = int(session.get("timeline_events") or 0)
+        blue_score = _num(metrics.get("blue_score") or session.get("score") or 0)
+        red_score = _num(metrics.get("red_score") or 0)
+        event_count = _num(
+            metrics.get("event_count") or metrics.get("traffic_events") or 0
+        )
+        alert_count = _num(
+            metrics.get("alert_count") or metrics.get("alerts_total") or 0
+        )
+        total_events = _num(metrics.get("total_events") or timeline_events)
+        red_tool_count = _num(metrics.get("red_tool_count") or metrics.get("red_tools_used") or 0)
+        blue_tool_count = _num(metrics.get("blue_tool_count") or metrics.get("blue_tools_used") or 0)
+        pipeline_stages = _num(metrics.get("pipeline_stages") or 0)
+        pipeline_tool_calls = _num(metrics.get("pipeline_tool_calls") or 0)
+        attack_techniques = _num(metrics.get("attck_techniques") or 0)
+        session_type = str(metrics.get("type") or session.get("type") or "")
+        scenario = str(
+            metrics.get("scenario") or metrics.get("scenario_type") or session.get("scenario") or ""
+        )
+
+        if task_type in {"red_adversary", "blue_response"}:
+            if scenario == "ad_domain":
+                score += 1000
+            score += blue_score + red_score
+            score += (red_tool_count + blue_tool_count) * 80
+            score += total_events * 5
+            score += timeline_events * 3
+            score += report_size / 100.0
+        elif task_type == "traffic_analysis":
+            if session_type == "traffic_analysis" or session.get("type") == "traffic_analysis":
+                score += 1000
+            score += pipeline_stages * 500
+            score += pipeline_tool_calls * 220
+            score += attack_techniques * 120
+            score += event_count * 2
+            score += alert_count * 60
+            score += timeline_events / 10.0
+            score += report_size / 1000.0
+        else:
+            if scenario == "web_basic":
+                score += 500
+            score += blue_score + red_score
+            score += timeline_events * 2
+            score += report_size / 100.0
+        if session.get("has_report"):
+            score += 25
+        if session.get("has_metrics"):
+            score += 25
+        return score, session["id"]
+
+    def _matches_task(session: dict[str, Any]) -> bool:
+        session_type = session.get("type")
+        if task_type == "traffic_analysis":
+            return session_type == "traffic_analysis"
+        return session_type != "traffic_analysis"
+
+    candidates = sorted(
+        (
+            s for s in sessions
+            if _matches_task(s) and (s.get("has_report") or s.get("has_metrics"))
+        ),
+        key=_score,
+        reverse=True,
+    )
+    if candidates:
+        return candidates[0]["id"]
+    return _DEMO_DEFAULTS.get(task_type)
+
+
+def _refresh_demo_registry() -> None:
+    for task_type in list(_DEMO_REGISTRY):
+        selected = _select_demo_session(task_type)
+        if selected:
+            _DEMO_REGISTRY[task_type] = selected
+
+
+def _infer_demo_agent(tool: str, side: str, args: Any = None) -> str:
+    if tool.startswith("dispatch_") or tool == "dispatch_task":
+        return "red-orchestrator" if side == "red" else "soc-orchestrator"
+    if side == "red":
+        if tool in {"nmap_scan", "http_request", "service_probe"}:
+            return "recon-agent"
+        if "ssh" in tool or "credential" in tool or "kerberoast" in tool:
+            return "credential-access-agent"
+        return "red-operations-agent"
+    if tool in {"report_finding", "triage_alert", "list_alerts"}:
+        return "alert-triage-agent"
+    if tool in {"block_ip", "harden_service", "remediate"}:
+        return "incident-response-agent"
+    return "threat-hunter-agent"
+
+
+def _jsonl_demo_events(session_dir: Path) -> list[dict[str, Any]]:
+    """Extract complete semantic events while dropping token-level deltas."""
+    timeline = session_dir / "timeline.jsonl"
+    if not timeline.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        for line in timeline.open("r", encoding="utf-8", errors="replace"):
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = str(entry.get("type") or entry.get("event") or "")
+            data = entry.get("data") or {}
+            if event_type == "thinking" and data.get("delta") is True:
+                continue
+            if event_type not in {"system", "thinking", "tool_call", "tool_output", "report"}:
+                continue
+            if event_type in {"tool_call", "tool_output"} and "name" not in data:
+                data = {**data, "name": data.get("tool") or data.get("function") or "unknown_tool"}
+            if event_type == "report" and "report" not in data:
+                data = {**data, "report": data.get("report_md") or data.get("text") or ""}
+            out.append({
+                "kind": event_type,
+                "type": event_type,
+                "side": entry.get("side") or "system",
+                "data": data,
+                "timestamp": float(entry.get("timestamp") or entry.get("ts") or time.time()),
+            })
+    except OSError:
+        return []
+    return out[:120]
+
+
+def _build_replay_events(session_id: str) -> list[dict[str, Any]]:
+    """从历史 session 构建 kind-tagged replay events。
+
+    严禁凭空生成——所有事件都从 session_detail 真实 timeline/tool_calls 抽取。
+    """
+    path = _session_dir(session_id)
+    if isinstance(path, JSONResponse):
+        return []
+    detail = build_session_detail(path)
+    events: list[dict[str, Any]] = []
+
+    # 1. 开场：报告这个 session 的元数据
+    events.append({
+        "kind": "sop_phase",
+        "type": "sop_phase",
+        "side": "system",
+        "data": {
+            "phase_id": 0,
+            "phase_total": 4,
+            "phase_name": "demo_intro",
+            "phase_name_zh": f"演示开始：{detail['id']}",
+            "intent": f"回放历史 session {detail['id']}",
+        },
+        "timestamp": time.time(),
+    })
+
+    semantic_events = _jsonl_demo_events(path)
+    if len(semantic_events) >= 5:
+        events.extend(semantic_events)
+        events.append({
+            "kind": "sop_phase",
+            "type": "sop_phase",
+            "side": "system",
+            "data": {
+                "phase_id": 4,
+                "phase_total": 4,
+                "phase_name": "demo_end",
+                "phase_name_zh": "演示结束（真实历史，非生成）",
+            },
+            "timestamp": time.time() + 2,
+        })
+        return events
+
+    # 2. 把 tool_calls 转成 tool_call/tool_output 双事件
+    for tc in detail.get("tool_calls", [])[:40]:  # 上限 40 防溢出
+        ts = tc.get("ts", 0)
+        tool = tc.get("tool", "?")
+        side = tc.get("side", "system")
+        args = tc.get("args", "")
+        summary = (tc.get("summary") or "")[:200]
+        ok = tc.get("ok", True)
+
+        agent = tc.get("agent") or _infer_demo_agent(tool, side, args)
+        is_dispatch = tool.startswith("dispatch_") or tool == "dispatch_task"
+        if is_dispatch:
+            events.append({
+                "kind": "subagent_dispatch",
+                "type": "subagent_dispatch",
+                "side": side,
+                "data": {
+                    "agent": agent,
+                    "worker_name": tool.removeprefix("dispatch_") or "worker",
+                    "task_zh": str(args)[:240],
+                },
+                "timestamp": ts,
+            })
+
+        # 工具调用事件
+        events.append({
+            "kind": "tool_call",
+            "type": "tool_call",
+            "side": side,
+            "data": {
+                "name": tool,
+                "args": args,
+                "agent": agent,
+                "step": tc.get("step", 0),
+            },
+            "timestamp": ts,
+        })
+
+        # 工具输出事件（含中文摘要）
+        events.append({
+            "kind": "tool_output",
+            "type": "tool_output",
+            "side": side,
+            "data": {
+                "name": tool,
+                "agent": agent,
+                "output": summary,
+                "summary_zh": summary[:80] if ok else f"调用失败: {summary[:60]}",
+            },
+            "timestamp": ts + 0.01,
+        })
+
+    # 3. 把告警转成蓝色提示（如果有）
+    for alert in detail.get("alerts", [])[:10]:
+        events.append({
+            "kind": "thinking",
+            "type": "thinking",
+            "side": "blue",
+            "data": {
+                "agent": "alert_triage",
+                "text": f"📋 告警: {alert}",
+            },
+            "timestamp": time.time(),
+        })
+
+    # 4. 最终报告
+    if detail.get("report_md"):
+        events.append({
+            "kind": "report",
+            "type": "report",
+            "side": "system",
+            "data": {
+                "agent": "report_writer",
+                "report": detail["report_md"],
+            },
+            "timestamp": time.time() + 1,
+        })
+
+    # 5. 收尾 SOP phase
+    events.append({
+        "kind": "sop_phase",
+        "type": "sop_phase",
+        "side": "system",
+        "data": {
+            "phase_id": 4,
+            "phase_total": 4,
+            "phase_name": "demo_end",
+            "phase_name_zh": "演示结束（真实历史，非生成）",
+        },
+        "timestamp": time.time() + 2,
+    })
+
+    return events
+
+
+@app.get("/api/demo")
+async def demo_list() -> dict[str, Any]:
+    """列出所有可演示的任务类型 + 当前金曲 session_id。"""
+    _refresh_demo_registry()
+    return {
+        "demos": [
+            {
+                "task_type": tt,
+                "session_id": sid,
+                "available": bool(sid),
+            }
+            for tt, sid in _DEMO_REGISTRY.items()
+        ]
+    }
+
+
+@app.get("/api/demo/{task_type}")
+async def demo_replay(task_type: str) -> dict[str, Any]:
+    """返回指定任务类型的演示 replay 事件流。
+
+    演示素材从历史复盘（score+has_report+has_metrics 三优）真实抽取，
+    严禁凭空生成。事件按时间排序，含 kind 标签，前端可直接渲染。
+    """
+    _refresh_demo_registry()
+    sid = _DEMO_REGISTRY.get(task_type)
+    if not sid:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "ok": False,
+                "error": f"no demo registered for task_type={task_type!r}",
+                "available": list(_DEMO_REGISTRY.keys()),
+            },
+        )
+
+    events = _build_replay_events(sid)
+    if not events:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": f"failed to load demo session {sid}"},
+        )
+
+    return {
+        "ok": True,
+        "task_type": task_type,
+        "session_id": sid,
+        "event_count": len(events),
+        "events": events,
+        "note": "演示素材来自历史 session，禁止捏造。",
+    }
+
 # --------------------------------------------------------------------------- #
 # Static frontend (production build) - mounted last so it doesn't shadow /api
 # --------------------------------------------------------------------------- #
@@ -1786,4 +2249,3 @@ if __name__ == "__main__":
 
 
 # --------------------------------------------------------------------------- #
-
