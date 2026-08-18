@@ -47,7 +47,7 @@ class SessionRunner:
     def __init__(self) -> None:
         self._sessions: dict[str, _V2Session] = {}
 
-    async def start_session(self, scenario_name: str = "ad_domain") -> str:
+    async def start_session(self, scenario_name: str = "web_basic") -> str:
         """启动新会话：加载场景 → 创建控制器 → 启动红蓝 → 返回 session_id。
 
         红蓝 orchestrator 并发运行，各自独立的 agent loop。

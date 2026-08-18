@@ -148,6 +148,6 @@ def build_blue_turn_prompt(round_num, ledger_snapshot):
         "  2. 上报: report_finding（带 evidence 与 confidence），triage_alert 研判\n"
         "  3. 处置: 确认恶意后 block_ip / harden_service\n"
         "  4. 复查: 处置后再跑检测工具验证\n\n"
-        "铁律：每条结论必须有 evidence；confidence 诚实给；不知道就说不知道；\n"
+        "输出要求：确认性判断需说明依据；证据不足时标注不确定，并说明下一步调查动作；\n"
         "用 MITRE ATT&CK 技术编号标注（T1110/T1190/T1059/T1505.003/T1078）。"
     )

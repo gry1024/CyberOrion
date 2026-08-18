@@ -85,7 +85,7 @@ class ControllerV2:
 
     async def start_session(self, scenario=None) -> None:
         if scenario is None:
-            scenario = "ad_domain"
+            scenario = "web_basic"
         if isinstance(scenario, str):
             import yaml
             from ..scenarios.loader import SCENARIOS_DIR

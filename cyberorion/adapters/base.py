@@ -52,7 +52,7 @@ class RedVsBlueAdapter(Adapter):
 
         # 加载场景
         try:
-            await controller.start_session(spec.scenario or "ad_domain")
+            await controller.start_session(spec.scenario or "web_basic")
         except FileNotFoundError as exc:
             yield {
                 "kind": EventKind.ERROR.value,

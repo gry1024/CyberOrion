@@ -171,7 +171,7 @@ _ROLE_SPECS: dict[str, dict[str, Any]] = {
   3. 遇到不熟悉的攻击模式先 search_attack_kb 查 ATT&CK 知识库，
      用 lookup_technique 确认技术编号（如 T1110 暴力破解、
      T1505.003 Web Shell、T1078 合法账户、T1190 利用公开漏洞）。
-研判结论必须给出：攻击技术编号、受害主机、攻击来源 IP（如日志可见）、
+研判输出包括：攻击技术编号、受害主机、攻击来源 IP（如日志可见）、
 失陷程度（尝试中/已成功/已建立持久化）与处置建议。
 """ + _CONCLUSION_BLOCK,
     },

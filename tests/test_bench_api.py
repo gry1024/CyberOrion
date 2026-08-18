@@ -151,6 +151,34 @@ class TestBenchAPI:
             "suite": "attack_kb", "mode": "sc", "n": 2})
         assert r.status_code == 400
 
+    def test_soc_evidence_accepts_three_research_arms(
+            self, client: TestClient, fake_bench) -> None:
+        for mode in ("base", "rag", "agent"):
+            r = client.post("/api/bench/run", json={
+                "suite": "soc_evidence", "mode": mode, "n": 2})
+            assert r.status_code == 200, (mode, r.text)
+            state = _wait_done(r.json()["run_id"])
+            assert state["suite"] == "soc_evidence"
+
+    def test_soc_evidence_preview_is_not_multiple_choice(
+            self, client: TestClient) -> None:
+        r = client.get("/api/bench/questions?suite=soc_evidence&n=2&seed=42")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["n"] == 2
+        assert data["questions"][0]["telemetry"]
+        assert "options" not in data["questions"][0]
+
+    def test_bench_json_artifact_download(self, client: TestClient,
+                                          fake_bench) -> None:
+        started = client.post("/api/bench/run", json={"n": 1, "mode": "base"})
+        run_id = started.json()["run_id"]
+        _wait_done(run_id)
+        r = client.get(f"/api/bench/run/{run_id}/artifact/json")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.json()["run_id"] == run_id
+
     def test_bench_questions_preview(self, client: TestClient) -> None:
         from cyberorion.bench import cybersoceval as bench_mod
         if not Path(bench_mod.DEFAULT_QUESTIONS).is_file():

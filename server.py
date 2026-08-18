@@ -138,18 +138,16 @@ _session_summary: dict[str, Any] = {}
 # Prompt builders for manual one-shot triggers
 # --------------------------------------------------------------------------- #
 def _red_manual_prompt() -> str:
-    """Prompt for a single red team attack run triggered from the UI.
-
-    P3: round-scoped generic prompt. No tool menu, no leaked creds/flags —
-    the red agent runs its own recon -> exploit -> claim_success loop.
-    """
+    """Prompt for a single red team run triggered from the UI."""
     round_num = session_state.get_session("round", 0) + 1
     session_state.update_session("round", round_num)
-    history = controller._red_history  # type: ignore[attr-defined]
-    prev = history[-1][:600] if history else "(no prior attack)"
-
-    from cyberorion.agent import build_red_turn_prompt
-    return build_red_turn_prompt(round_num, prev)
+    return (
+        f"=== 红方 CTF 授权演练 #{round_num} ===\n"
+        "目标只限当前 web_basic 靶场中列出的本地容器和映射端口。"
+        "按顺序执行：1) 枚举目标与服务；2) 针对 DVWA、weak_ssh、Log4Shell "
+        "选择可用工具验证弱点；3) 将成功登录、命令执行或 flag 线索整理成发现；"
+        "4) 避免破坏性动作，达到可验证战果后收尾。"
+    )
 
 
 def _blue_manual_prompt() -> str:
@@ -167,20 +165,13 @@ def _blue_manual_prompt() -> str:
         f"=== 蓝队（CyberOrion）防御巡逻 #{round_num} ===\n"
         "你是蓝队指挥官，对红队行动一无所知，只能组织团队靠遥测证据发现攻击。\n\n"
         f"历史台账（仅供参考）:\n{ledger_str}\n\n"
-        "组织一次防御巡逻（时间预算有限，每个角色一件事只派一次）：\n"
-        "STEP 1 - 【同一回合内】用两次独立的 dispatch_task 并行派遣 watcher\n"
-        "         （日志/网络/进程/文件基线全面巡查）和 hunter（失陷排查：\n"
-        "         文件篡改+可疑进程）——并行派遣会并发执行，无需等待。\n"
-        "STEP 2 - 对 watcher/hunter 报出的可疑点与 list_alerts 中的告警，派遣\n"
-        "         analyst 研判定性；简单明了的威胁可直接定性。\n"
-        "STEP 3 - 威胁一确认【立即】亲自 report_finding 上报（host/technique/\n"
-        "         verdict/confidence/evidence，technique 用 ATT&CK 编号），\n"
-        "         不要等处置完成才上报。\n"
-        "STEP 4 - 派遣 responder 处置（封禁来源/加固服务/清除后门与\n"
-        "         webshell）；有失陷痕迹时加派 hunter 清理现场。\n"
-        "STEP 5 - 处置后派 watcher 复查受害主机，确认威胁已消除，\n"
-        "         最后输出中文防御总结。\n\n"
-        "铁律：每条结论必须有 evidence；confidence 诚实给；不知道就说不知道。"
+        "组织一次防御巡逻（只调用当前工具列表中存在的 v2 工具）：\n"
+        "STEP 1 - 先调用 get_alerts 和 get_investigation_summary 建立态势。\n"
+        "STEP 2 - 调用 dispatch_triage 分派分诊子 Agent，提取 IoC、主机和严重性。\n"
+        "STEP 3 - 调用 dispatch_threat_hunter 做日志/检测/进程/文件深挖与 ATT&CK 映射。\n"
+        "STEP 4 - 若存在多主机关联，再调用 dispatch_lateral_analyst；若高危或需处置，调用 dispatch_escalation。\n"
+        "STEP 5 - 调用 complete_investigation 汇总，再用 task_complete 输出中文防御总结。\n\n"
+        "输出要求：每个确认判断都说明依据；证据不足时标注不确定，并给出下一步调查动作。"
     )
 
 
@@ -1754,7 +1745,7 @@ def _sse(ev: dict) -> str:
 # 与旧版 /api/* 端点并存，互不影响。
 # --------------------------------------------------------------------------- #
 @app.post("/api/v2/session/start")
-async def v2_start_session(scenario: str = "ad_domain") -> dict[str, Any]:
+async def v2_start_session(scenario: str = "web_basic") -> dict[str, Any]:
     """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id.
 
     注意：simulate 参数已移除（REFACTOR_M1 D1）。仅支持 live 模式，需要 Docker 靶场。
@@ -2038,7 +2029,7 @@ def _jsonl_demo_events(session_dir: Path) -> list[dict[str, Any]]:
             if event_type not in {"system", "thinking", "tool_call", "tool_output", "report"}:
                 continue
             if event_type in {"tool_call", "tool_output"} and "name" not in data:
-                data = {**data, "name": data.get("tool") or data.get("function") or "unknown_tool"}
+                data = {**data, "name": data.get("tool") or data.get("function") or "tool_event"}
             if event_type == "report" and "report" not in data:
                 data = {**data, "report": data.get("report_md") or data.get("text") or ""}
             out.append({

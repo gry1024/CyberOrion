@@ -1,5 +1,6 @@
 // App — Kimi 式布局：左侧 240px 侧边栏 + 主内容区
 // 视图切换由侧边栏驱动；作战台 = 双栏红蓝流式输出（Kimi chat 风格）。
+//
 import { useState } from 'react'
 import { ArenaProvider } from './arena'
 import type { ViewKey } from './types'
@@ -16,6 +17,7 @@ import { Toaster } from './components/Toaster'
 
 export default function App() {
   const [view, setView] = useState<ViewKey>('arena')
+
   return (
     <ArenaProvider>
       <div className="flex h-full overflow-hidden">

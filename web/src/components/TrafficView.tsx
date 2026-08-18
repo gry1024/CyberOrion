@@ -5,6 +5,7 @@
 // 单「开始分析」按钮 → SSE 同时驱动左右两栏。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { useDemoReplay } from '../demoReplay'
 import { pushToast } from '../toasts'
 import { ChatStream } from './ChatStream'
 import type { FlowAlert, FlowEvent, ThoughtStep, TrafficStatus } from '../types'
@@ -38,6 +39,7 @@ function capped(prev: ThoughtStep[], step: ThoughtStep): ThoughtStep[] {
 }
 
 export function TrafficView() {
+  const demo = useDemoReplay('traffic_analysis')
   const [status, setStatus] = useState<TrafficStatus | null>(null)
   const [source, setSource] = useState<string>('synthetic')
   const [csvFile, setCsvFile] = useState<string>('')
@@ -127,8 +129,9 @@ export function TrafficView() {
           break
         }
         case 'tool_call': {
-          const tool = String(d.tool ?? '')
-          const args = String(d.args ?? '')
+          const tool = String(d.tool ?? d.name ?? d.function ?? '')
+          const argsValue = d.args ?? d.arguments ?? ''
+          const args = typeof argsValue === 'string' ? argsValue : JSON.stringify(argsValue)
           lastTool.current[agent ?? 'rule_engine'] = { tool, args }
           delete openThinking.current[agent ?? 'rule_engine']
           setSteps((p) =>
@@ -137,9 +140,10 @@ export function TrafficView() {
           break
         }
         case 'tool_output': {
-          const output = String(d.output ?? '')
+          const output = String(d.output ?? d.result ?? '')
           const tk = agent ?? 'rule_engine'
-          const { tool } = lastTool.current[tk] ?? { tool: '' }
+          const { tool: previousTool } = lastTool.current[tk] ?? { tool: '' }
+          const tool = previousTool || String(d.tool ?? d.name ?? d.function ?? '')
           delete openThinking.current[tk]
           setSteps((p) =>
             capped(p, { id: nextId(), kind: 'tool_output', tool, output, agent, timestamp: ts }),
@@ -198,6 +202,7 @@ export function TrafficView() {
       return
     }
     setRunning(true)
+    demo.clear()
     setSteps([])
     setEvents([])
     setAlerts([])
@@ -234,6 +239,10 @@ export function TrafficView() {
   }, [alerts])
 
   const ready = status?.ready ?? true
+  const playDemo = () => void demo.play().catch((error) => {
+    pushToast(`演示启动失败：${error instanceof Error ? error.message : String(error)}`, { title: '流量分析' })
+  })
+  const shownSteps = demo.steps.length || demo.playing ? demo.steps : steps
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -475,18 +484,27 @@ export function TrafficView() {
             <button
               className="btn btn-primary ml-auto"
               onClick={handleStart}
-              disabled={!ready}
+              disabled={!ready || demo.playing}
               style={{ height: 24, fontSize: 11.5 }}
             >
               {running ? '■ 停止' : '▶ 开始分析'}
+            </button>
+            <button
+              className="btn"
+              onClick={playDemo}
+              disabled={running || demo.playing}
+              style={{ height: 24, fontSize: 11.5 }}
+              title={demo.sessionId || '回放真实历史分析日志'}
+            >
+              {demo.playing ? '演示中' : '演示'}
             </button>
           </div>
 
           {/* ChatStream 流式渲染 */}
           <ChatStream
             side="blue"
-            steps={steps}
-            running={running}
+            steps={shownSteps}
+            running={running || demo.playing}
             accent="blue"
             emptyTitle="多 agent 流量研判"
             emptyDesc="点击「开始分析」启动 4 阶段流水线：规则检测 → 语义分析 → 攻击链重建 → 报告生成"

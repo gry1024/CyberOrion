@@ -242,10 +242,9 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
         side = str(entry.get("side") or "system")
         d = entry.get("data") or {}
         if event in ("session_start", "session_started"):
-            title = f"Session Start ({d.get('scenario', d.get('session_name', ''))})"
+            title = event
         elif event in ("session_end", "session_ended"):
-            w = d.get("winner", "")
-            title = f"Session End - Winner: {w}" if w else "Session End"
+            title = event
         elif event in ("round_start", "round_started"):
             title = f"{side.upper()} Round Start"
         elif event in ("round_end", "round_ended"):
@@ -271,7 +270,11 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
         elif event == "thinking":
             detail = str(d.get("text") or "")[:300]
         else:
-            detail = str(d.get("output") or d.get("description") or d.get("summary") or "")[:300]
+            detail = str(
+                d.get("output") or d.get("description") or
+                d.get("summary") or d.get("scenario") or
+                entry.get("session_id") or ""
+            )[:300]
         items.append({
             "ts": float(entry.get("ts") or 0),
             "kind": "event",
@@ -367,8 +370,15 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
         except Exception:
             metrics = None
 
+    session_type = "traffic_analysis" if (
+        (session_dir / "traffic_analysis.json").is_file()
+        or (isinstance(metrics, dict)
+            and metrics.get("type") == "traffic_analysis")
+    ) else "arena"
+
     return {
         "id": session_id,
+        "session_type": session_type,
         "has_report": (session_dir / "report.md").is_file(),
         "has_metrics": metrics_file.is_file(),
         "metrics": metrics,

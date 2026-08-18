@@ -377,27 +377,28 @@ export interface TelemetryEventRow {
 }
 
 export interface ScoreMetrics {
-  window_sec: number
-  totals: {
+  type?: 'arena' | 'traffic_analysis'
+  window_sec?: number
+  totals?: {
     attacks_total: number
     attacks_verified: number
     alerts: number
     alerts_malicious: number
   }
-  tp: number
-  fn: number
-  fp: number
-  detection_rate: number
-  fp_rate: number
+  tp?: number
+  fn?: number
+  fp?: number
+  detection_rate?: number
+  fp_rate?: number
   mttd_sec: number | null
-  detections: Array<Record<string, unknown>>
-  missed: Array<Record<string, unknown>>
-  false_positives: Array<Record<string, unknown>>
-  per_technique: Record<string, { attacks: number; detected: number; detection_rate: number }>
-  per_target: Record<string, { attacks: number; detected: number; detection_rate: number }>
-  response: { total: number; responded: number; response_rate: number }
-  blue_score: number
-  red_score: number
+  detections?: Array<Record<string, unknown>>
+  missed?: Array<Record<string, unknown>>
+  false_positives?: Array<Record<string, unknown>>
+  per_technique?: Record<string, { attacks: number; detected: number; detection_rate: number }>
+  per_target?: Record<string, { attacks: number; detected: number; detection_rate: number }>
+  response?: { total: number; responded: number; response_rate: number }
+  blue_score?: number
+  red_score?: number
   // Traffic-analysis optional fields
   event_count?: number
   alert_count?: number
@@ -442,6 +443,7 @@ export interface SessionToolCall {
 
 export interface SessionDetail {
   id: string
+  session_type: 'arena' | 'traffic_analysis'
   has_report: boolean
   has_metrics: boolean
   metrics: ScoreMetrics | null
@@ -603,6 +605,7 @@ export interface HostStatus {
 export type BenchMode =
   | 'base'
   | 'rag'
+  | 'agent'
   | 'rag_fs'
   | 'sc'
   | 'sc_base'
@@ -610,12 +613,16 @@ export type BenchMode =
 
 /** Bench suites — run_id format `<ts>_<suite>_<mode>_n<n>`; old runs default
  * to malware_analysis server-side. */
-export type BenchSuite = 'malware_analysis' | 'attack_kb' | 'threat_intel'
+export type BenchSuite = 'soc_evidence' | 'malware_analysis' | 'attack_kb' | 'threat_intel'
 
 export const BENCH_SUITES: Record<
   BenchSuite,
   { label: string; hint: string; deprecated?: boolean }
 > = {
+  soc_evidence: {
+    label: 'SOC 证据评测',
+    hint: '开放式告警研判、攻击链重建与响应规划；衡量证据引用、ATT&CK F1、工具效率和安全性',
+  },
   malware_analysis: {
     label: 'CyberSOCEval · 恶意软件分析',
     hint: '多选知识问答，衡量通用安全知识',
@@ -632,11 +639,12 @@ export const BENCH_SUITES: Record<
 
 /** Comparison arm: 纯 LLM (vanilla/base) vs CyberOrion 框架 (framework/rag).
  * 框架有效性对比的两臂：同 seed 同批题同模型，分差即框架增益。 */
-export type BenchArm = 'bare' | 'framework'
+export type BenchArm = 'bare' | 'rag' | 'framework'
 
 export function armOfMode(mode: BenchMode): BenchArm | null {
   if (mode === 'base') return 'bare'
-  if (mode === 'rag') return 'framework'
+  if (mode === 'rag') return 'rag'
+  if (mode === 'agent') return 'framework'
   return null // legacy experiment modes — excluded from comparisons
 }
 
@@ -645,6 +653,10 @@ export const BENCH_ARMS: Record<
   BenchSuite,
   { bare: { mode: BenchMode; label: string }; framework: { mode: BenchMode; label: string } }
 > = {
+  soc_evidence: {
+    bare: { mode: 'base', label: 'Plain LLM' },
+    framework: { mode: 'agent', label: 'CyberOrion Agent' },
+  },
   malware_analysis: {
     bare: { mode: 'base', label: '纯 LLM · base' },
     framework: { mode: 'rag', label: 'CyberOrion 框架 · rag' },
@@ -664,6 +676,7 @@ export function armLabelOf(mode: BenchMode): string {
   const arm = armOfMode(mode)
   if (arm === 'framework') return 'CyberOrion 框架'
   if (arm === 'bare') return '纯 LLM'
+  if (arm === 'rag') return 'LLM + RAG'
   return mode
 }
 
@@ -690,6 +703,19 @@ export interface BenchScores {
   llm_errors?: number
   by_difficulty: Record<string, BenchGroupScore>
   by_topic: Record<string, BenchGroupScore>
+  task_success?: number
+  detection_f1?: number
+  attack_f1?: number
+  evidence_grounding?: number
+  unsupported_claim_rate?: number
+  response_completeness?: number
+  unsafe_action_rate?: number
+  tool_call_validity?: number
+  useful_action_ratio?: number
+  confidence_intervals?: Record<string, [number, number]>
+  failure_taxonomy?: Record<string, number>
+  avg_latency_ms?: number
+  estimated_tokens?: number
 }
 
 /** Headline metric of a finished run (exact-match accuracy), as a 0..1
@@ -752,6 +778,41 @@ export interface BenchResultItem {
   parse_ok: boolean
   exact: boolean
   jaccard: number
+}
+
+export interface EvidenceTelemetry {
+  id: string
+  source: string
+  ts: string
+  event: string
+}
+
+export interface EvidenceTraceEvent {
+  seq: number
+  agent: string
+  event: string
+  tool?: string | null
+  target?: string
+  status: string
+  useful: boolean
+}
+
+export interface EvidenceBenchResult {
+  idx: number
+  case_id: string
+  task_type: string
+  title: string
+  difficulty: string
+  prompt: string
+  telemetry: EvidenceTelemetry[]
+  gold: Record<string, unknown>
+  prediction: Record<string, unknown>
+  agent_trace: EvidenceTraceEvent[]
+  metrics: Record<string, number>
+  failure_tags: string[]
+  parse_ok: boolean
+  latency_ms: number
+  estimated_tokens: number
 }
 
 /** GET /api/bench/run/{run_id} — full detail incl. per-question results. */

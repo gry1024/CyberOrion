@@ -314,8 +314,9 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
           break
         }
         case 'tool_call': {
-          const tool = String(d.tool ?? '')
-          const args = String(d.args ?? '')
+          const tool = String(d.tool ?? d.name ?? d.function ?? '')
+          const argsValue = d.args ?? d.arguments ?? ''
+          const args = typeof argsValue === 'string' ? argsValue : JSON.stringify(argsValue)
           lastTool.current[ev.side] = { tool, args }
           // Thinking resumes after a tool call — the next delta opens a fresh
           // bubble below the tool rows instead of growing the pre-call one.
@@ -352,8 +353,9 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
           break
         }
         case 'tool_output': {
-          const output = String(d.output ?? '')
-          const { tool, args } = lastTool.current[ev.side]
+          const output = String(d.output ?? d.result ?? '')
+          const { tool: previousTool, args } = lastTool.current[ev.side]
+          const tool = previousTool || String(d.tool ?? d.name ?? d.function ?? '')
           delete openThinking.current[ev.side][agent ?? 'orchestrator']
           const step: ThoughtStep = {
             id: nextId('s'),
@@ -693,7 +695,12 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
       if (closed) return
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
       try {
-        ws = new WebSocket(`${proto}://${window.location.host}${import.meta.env.BASE_URL}ws`)
+        // BASE_URL is "./" for sub-path deployment. Resolving against the
+        // current document keeps both /ws and /cyberorion/ws correct and
+        // avoids malformed hosts such as "example.com.".
+        const wsUrl = new URL('ws', window.location.href)
+        wsUrl.protocol = `${proto}:`
+        ws = new WebSocket(wsUrl)
       } catch {
         schedule()
         return

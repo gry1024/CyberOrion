@@ -8,6 +8,7 @@ import { useArena } from '../arena'
 import { pushToast } from '../toasts'
 import type {
   BenchMode,
+  BenchArm,
   BenchQuestionPreview,
   BenchResultItem,
   BenchRunDetail,
@@ -25,6 +26,7 @@ import { BenchBarChart } from './BenchBarChart'
 import { BenchDetailDrawer } from './BenchDetail'
 import { MarkdownView } from './MarkdownView'
 import { Modal } from './Modal'
+import { EvidenceBenchmarkPanel } from './EvidenceBenchmarkPanel'
 import { BENCH_REPORTS } from '../benchReports'
 
 // ---------------------------------------------------------------------------
@@ -51,7 +53,7 @@ function suiteOf(r: { suite?: BenchSuite }): BenchSuite {
   return r.suite ?? 'malware_analysis'
 }
 
-function armOf(r: BenchRunSummary): 'bare' | 'framework' | null {
+function armOf(r: BenchRunSummary): BenchArm | null {
   return armOfMode(r.mode)
 }
 
@@ -92,6 +94,10 @@ const OVERVIEW_VERDICT: Record<
   BenchSuite,
   { gain: string; note: string }
 > = {
+  soc_evidence: {
+    gain: '开放式证据评测',
+    note: '任务成功、证据引用、ATT&CK F1 与工具效率分别计分',
+  },
   malware_analysis: {
     gain: '框架增益 +9.6pt',
     note: '报告证据注入：平均得分 39.0% → 48.6%',
@@ -519,12 +525,13 @@ function QuestionPreviewModal({
 // ---------------------------------------------------------------------------
 
 const N_OPTIONS: Record<BenchSuite, number[]> = {
+  soc_evidence: [4, 8],
   malware_analysis: [20, 50, 100],
   attack_kb: [20, 50, 100],
   threat_intel: [20, 50, 100],
 }
 
-const RUNNABLE_SUITES: BenchSuite[] = ['malware_analysis', 'attack_kb', 'threat_intel']
+const RUNNABLE_SUITES: BenchSuite[] = ['soc_evidence', 'malware_analysis', 'attack_kb', 'threat_intel']
 
 function PillGroup<T extends string | number>({
   label,
@@ -567,9 +574,9 @@ function PillGroup<T extends string | number>({
 
 function RunCard({ onStarted }: { onStarted: () => void }) {
   const { benchLive } = useArena()
-  const [suite, setSuite] = useState<BenchSuite>('malware_analysis')
-  const [n, setN] = useState(20)
-  const [mode, setMode] = useState<BenchMode>(BENCH_ARMS.malware_analysis.framework.mode)
+  const [suite, setSuite] = useState<BenchSuite>('soc_evidence')
+  const [n, setN] = useState(8)
+  const [mode, setMode] = useState<BenchMode>('agent')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -609,7 +616,14 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
         <PillGroup label="题量" value={n} onChange={setN}
           options={N_OPTIONS[suite].map((v) => ({ value: v, label: String(v) }))} />
         <PillGroup label="臂" value={mode} onChange={setMode}
-          options={([BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework] as const).map((a) => ({ value: a.mode, label: a.label }))} />
+          options={(suite === 'soc_evidence'
+            ? [
+                { mode: 'base' as BenchMode, label: 'Plain LLM' },
+                { mode: 'rag' as BenchMode, label: 'LLM + RAG' },
+                { mode: 'agent' as BenchMode, label: 'CyberOrion Agent' },
+              ]
+            : [BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework]
+          ).map((a) => ({ value: a.mode, label: a.label }))} />
         <button onClick={start} disabled={busy} className="btn btn-primary">
           {busy ? '启动中…' : '开始测试'}
         </button>
@@ -644,7 +658,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
 // ---------------------------------------------------------------------------
 
 function SuiteBadge({ suite }: { suite: BenchSuite }) {
-  const short = suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
+  const short = suite === 'soc_evidence' ? '证据' : suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
   return (
     <span className="rounded px-1.5 py-px text-[9.5px]" style={{ background: 'var(--color-overlay)', color: 'var(--color-fg-3)' }}>
       {short}
@@ -822,6 +836,8 @@ export function BenchmarkView() {
         </div>
 
         <RunCard onStarted={load} />
+
+        <EvidenceBenchmarkPanel runs={merged} />
 
         <OverviewStrip runs={merged} />
 

@@ -284,10 +284,12 @@ def _red_role_tools(role: AgentRole) -> list[ToolDefinition]:
     from .red_tool_catalog import RED_ROLE_TOOLS_PART_A  # noqa: WPS433
     from .red_tool_catalog_b import RED_ROLE_TOOLS_PART_B  # noqa: WPS433
     from .red_tool_catalog_c import RED_ROLE_TOOLS_PART_C  # noqa: WPS433
+    from .red_tool_catalog_d import RED_ROLE_TOOLS_PART_D  # noqa: WPS433
     merged: dict[AgentRole, list[ToolDefinition]] = {}
     merged.update(RED_ROLE_TOOLS_PART_A)
     merged.update(RED_ROLE_TOOLS_PART_B)
     merged.update(RED_ROLE_TOOLS_PART_C)
+    merged.update(RED_ROLE_TOOLS_PART_D)
     return list(merged.get(role, []))
 
 

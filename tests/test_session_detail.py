@@ -124,6 +124,7 @@ class TestBuildDetail:
     def test_shape_and_sources(self, session_dir: Path) -> None:
         d = build_session_detail(session_dir)
         assert d["id"] == SID
+        assert d["session_type"] == "arena"
         assert d["has_report"] is True and d["has_metrics"] is True
         assert d["metrics"]["blue_score"] == 80
         assert d["report_md"].startswith("# 报告")
@@ -191,6 +192,21 @@ class TestBuildDetail:
                                     "attacks": 0, "verified": 0}
         assert detail["timeline"] == [] and detail["tool_calls"] == []
 
+    def test_traffic_session_type_comes_from_metrics(self, tmp_path: Path) -> None:
+        d = tmp_path / "logs" / "session_20990101_000003"
+        d.mkdir(parents=True)
+        (d / "metrics.json").write_text(json.dumps({
+            "type": "traffic_analysis",
+            "event_count": 370,
+            "alert_count": 5,
+        }), encoding="utf-8")
+        (d / "traffic_analysis.json").write_text("{}", encoding="utf-8")
+
+        detail = build_session_detail(d)
+
+        assert detail["session_type"] == "traffic_analysis"
+        assert detail["metrics"]["event_count"] == 370
+
 
 # --------------------------------------------------------------------------- #
 # HTTP 端点
@@ -212,6 +228,14 @@ def test_detail_endpoint(client: TestClient) -> None:
     assert len(d["tool_calls"]) >= 5
     assert len(d["timeline"]) >= 5
     assert d["metrics"]["blue_score"] == 80
+
+
+def test_raw_timeline_endpoint_preserves_complete_log(client: TestClient) -> None:
+    r = client.get(f"/api/sessions/{SID}/timeline/raw")
+    assert r.status_code == 200
+    assert "session_started" in r.text
+    assert "red_action" in r.text
+    assert "{bad json line" in r.text
 
 
 def test_detail_invalid_id_400(client: TestClient) -> None:

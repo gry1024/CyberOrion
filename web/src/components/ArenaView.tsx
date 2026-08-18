@@ -1,17 +1,21 @@
-// ArenaView — 作战舱（Cursor 式：平铺双栏，无卡片）
-// 顶部标题栏含 v1/v2 模式切换；中部红/蓝双栏；底部控制板。
-// v2 模式：多角色架构（红 7 worker + orch / 蓝 4 worker + orch），独立 v2 控制按钮。
-import { useState } from 'react'
+// ArenaView — 作战舱（正文优先：靶机透明、红蓝双流、底部控制）。
+import { useEffect, useState } from 'react'
 import { useArena } from '../arena'
 import { api } from '../api'
+import { useDemoReplay } from '../demoReplay'
 import { pushToast } from '../toasts'
 import { ChatStream } from './ChatStream'
 import { DispatchGraph } from './DispatchGraph'
-import { OpsConsole } from './OpsConsole'
+import { Modal } from './Modal'
+import type { ScenarioDetail } from '../types'
 
-/** v2 作战控制条：会话/红蓝编排器启停。 */
-function V2Console() {
-  const { status, refreshStatus } = useArena()
+function BattleConsole({ onDemo, onStart, demoPlaying, demoSession }: {
+  onDemo: () => void
+  onStart: () => void
+  demoPlaying: boolean
+  demoSession: string
+}) {
+  const { status, refreshStatus, clearSteps } = useArena()
   const [busy, setBusy] = useState(false)
   const active = status.session_active
   const redRun = status.red_running
@@ -22,7 +26,7 @@ function V2Console() {
     try {
       await fn()
     } catch (e) {
-      pushToast(`${label}失败：${e instanceof Error ? e.message : String(e)}`, { title: 'v2 作战台' })
+        pushToast(`${label}失败：${e instanceof Error ? e.message : String(e)}`, { title: '作战台' })
     } finally {
       setBusy(false)
       void refreshStatus()
@@ -30,90 +34,154 @@ function V2Console() {
   }
 
   const startAll = () => void call(async () => {
-    if (!active) await api.startV2Session()
-    await api.startV2Red()
-    await api.startV2Blue()
-  }, 'v2 一键开始')
+    onStart()
+    clearSteps('red')
+    clearSteps('blue')
+    if (!active) await api.sessionStart()
+    await api.redStart()
+    await api.blueStart()
+  }, '一键开始')
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {!active ? (
-        <button className="btn btn-primary" disabled={busy} onClick={startAll}>v2 一键开始</button>
+        <button className="btn btn-primary" disabled={busy || demoPlaying} onClick={startAll}>开始</button>
       ) : (
-        <button className="btn btn-danger" disabled={busy} onClick={() => void call(api.stopV2Session, '停止 v2 会话')}>停止</button>
+        <button className="btn btn-danger" disabled={busy} onClick={() => void call(api.sessionStop, '停止会话')}>停止</button>
       )}
+      <button className="btn" disabled={busy || active || demoPlaying} onClick={onDemo}>
+        {demoPlaying ? '演示中' : '演示'}
+      </button>
       {active && (
         <>
-          <button className="btn" disabled={busy || redRun} onClick={() => void call(api.startV2Red, 'v2 红方')}>红方 ▶</button>
-          <button className="btn" disabled={busy || !redRun} onClick={() => void call(api.stopV2Red, 'v2 红方')}>红方 ■</button>
-          <button className="btn" disabled={busy || blueRun} onClick={() => void call(api.startV2Blue, 'v2 蓝方')}>蓝方 ▶</button>
-          <button className="btn" disabled={busy || !blueRun} onClick={() => void call(api.stopV2Blue, 'v2 蓝方')}>蓝方 ■</button>
+          <button className="btn" disabled={busy || redRun} onClick={() => void call(api.redStart, '红方')}>红方 ▶</button>
+          <button className="btn" disabled={busy || !redRun} onClick={() => void call(api.redStop, '红方')}>红方 ■</button>
+          <button className="btn" disabled={busy || blueRun} onClick={() => void call(api.blueStart, '蓝方')}>蓝方 ▶</button>
+          <button className="btn" disabled={busy || !blueRun} onClick={() => void call(api.blueStop, '蓝方')}>蓝方 ■</button>
         </>
       )}
-      <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>v2 多角色架构</span>
+      <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
+        {demoSession ? `演示日志 ${demoSession}` : 'CTF 靶场 · 红蓝协同'}
+      </span>
     </div>
   )
 }
 
 export function ArenaView() {
   const { status, scenario, redSteps, blueSteps } = useArena()
-  const [v2, setV2] = useState(false)
+  const demo = useDemoReplay('red_adversary')
+  const [scenarioOpen, setScenarioOpen] = useState(false)
+  const [scenarioDetail, setScenarioDetail] = useState<ScenarioDetail | null>(null)
   const sceneName = scenario?.name || status.scenario || '默认场景'
+  useEffect(() => {
+    let stale = false
+    api.getScenarioInfo().then((value) => {
+      if (!stale) setScenarioDetail(value)
+    }).catch(() => {})
+    return () => { stale = true }
+  }, [sceneName])
+  const playDemo = () => void demo.play().catch((error) => {
+    pushToast(`演示启动失败：${error instanceof Error ? error.message : String(error)}`, { title: '作战台' })
+  })
+  const clearDemo = () => demo.clear()
+  const shownRedSteps = demo.redSteps.length || demo.playing ? demo.redSteps : redSteps
+  const shownBlueSteps = demo.blueSteps.length || demo.playing ? demo.blueSteps : blueSteps
+  const targets = scenarioDetail?.targets ?? scenario?.targets ?? []
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* 场景标题 + v1/v2 模式切换 */}
+      {/* Single production architecture: no legacy version selector. */}
       <div className="flex flex-none items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: 'var(--color-hairline)' }}>
         <span className="text-[12.5px] font-semibold" style={{ color: 'var(--color-fg)' }}>作战舱</span>
         <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>{sceneName}</span>
-        {/* v1/v2 模式切换器 */}
-        <div className="ml-2 flex items-center gap-px rounded" style={{ background: 'var(--color-panel-2)' }}>
-          <button
-            className="rounded px-2 py-0.5 text-[10.5px] transition-colors"
-            style={{ background: !v2 ? 'var(--color-overlay)' : 'transparent', color: !v2 ? 'var(--color-fg)' : 'var(--color-fg-3)' }}
-            onClick={() => setV2(false)}
-          >v1</button>
-          <button
-            className="rounded px-2 py-0.5 text-[10.5px] transition-colors"
-            style={{ background: v2 ? 'var(--color-overlay)' : 'transparent', color: v2 ? 'var(--color-fg)' : 'var(--color-fg-3)' }}
-            onClick={() => setV2(true)}
-          >v2 多角色</button>
-        </div>
+        <span className="ml-2 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>MULTI-AGENT DEFENSE</span>
+        <button className="btn ml-2" onClick={() => setScenarioOpen(true)} style={{ height: 22, fontSize: 11 }}>
+          靶机信息
+        </button>
         <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
           红 {status.red_running ? '●' : '○'} · 蓝 {status.blue_running ? '●' : '○'}
         </span>
       </div>
 
-      {/* 红蓝双栏：左 40%、右 60%，中间 1px 分隔线 */}
+      <div className="flex flex-none gap-2 overflow-x-auto border-b px-3 py-2" style={{ borderColor: 'var(--color-hairline)' }}>
+        {targets.map((target) => (
+          <button
+            key={target.name}
+            className="min-w-[190px] border px-2 py-1 text-left"
+            style={{ borderColor: 'var(--color-hairline)', background: 'var(--color-bg-2)' }}
+            onClick={() => setScenarioOpen(true)}
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[11px]" style={{ color: 'var(--color-fg)' }}>{target.name}</span>
+              <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{target.ip || 'localhost'}</span>
+            </div>
+            <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
+              {target.services.map((svc) => `${svc.proto}:${svc.host_port}->${svc.container_port}`).join(' · ')}
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-col" style={{ flex: '0 0 40%', minHeight: 0 }}>
+        <div className="flex min-w-0 flex-col" style={{ flex: '0 0 48%', minHeight: 0 }}>
           <ChatStream
             side="red"
-            steps={redSteps}
-            running={Boolean(status.red_running)}
+            steps={shownRedSteps}
+            running={Boolean(status.red_running) || demo.playing}
             accent="red"
             emptyTitle="红方未启动"
-            emptyDesc={v2 ? 'v2 红队 7 worker：recon→credential_access→cracker→acl→privesc→lateral→coercion，由 orchestrator 编排。' : '点击下方开始，红队将自动完成侦察/枚举/漏洞利用与权限提升。'}
+            emptyDesc="红队由 orchestrator 编排侦察、凭据访问、提权与横向移动 Agent。"
           />
         </div>
         <div className="w-px flex-none" style={{ background: 'var(--color-hairline)' }} />
         <div className="flex min-w-0 flex-1 flex-col" style={{ minHeight: 0 }}>
-          <DispatchGraph v2={v2} />
+          <DispatchGraph v2 />
           <ChatStream
             side="blue"
-            steps={blueSteps}
-            running={Boolean(status.blue_running)}
+            steps={shownBlueSteps}
+            running={Boolean(status.blue_running) || demo.playing}
             accent="blue"
             emptyTitle="蓝方监控面板"
-            emptyDesc={v2 ? 'v2 蓝队 4 worker：triage/threat_hunter/lateral_analyst/escalation_triage + SOC orchestrator。' : '哨兵 watcher 持续轮询检测，分析师 analyst 解析日志，处置 responder 执行封禁。'}
+            emptyDesc="SOC 指挥官派遣分诊、威胁狩猎、横向分析与升级处置 Agent。"
           />
         </div>
       </div>
 
-      {/* 控制板：v1 用 OpsConsole，v2 用 V2Console */}
       <div className="flex-none border-t px-3 py-1.5" style={{ borderColor: 'var(--color-hairline)' }}>
-        {v2 ? <V2Console /> : <OpsConsole />}
+        <BattleConsole onDemo={playDemo} onStart={clearDemo} demoPlaying={demo.playing} demoSession={demo.sessionId} />
       </div>
+      {scenarioOpen && scenarioDetail && (
+        <Modal title={`靶场信息 · ${scenarioDetail.name}`} onClose={() => setScenarioOpen(false)} width="w-[920px]">
+          <div className="space-y-4 text-[12px]" style={{ color: 'var(--color-fg-2)' }}>
+            <p>{scenarioDetail.description || 'CTF 风格授权靶场：只允许攻击本页列出的本地容器、IP 与宿主映射端口。'}</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              {scenarioDetail.targets.map((target) => (
+                <section key={target.name} className="border p-3" style={{ borderColor: 'var(--color-hairline)', background: 'var(--color-bg)' }}>
+                  <h3 className="font-mono text-[13px]" style={{ color: 'var(--color-fg)' }}>{target.name}</h3>
+                  <div className="mt-1 grid grid-cols-[90px_1fr] gap-y-1 font-mono text-[11px]">
+                    <span style={{ color: 'var(--color-fg-4)' }}>容器</span><span>{target.container}</span>
+                    <span style={{ color: 'var(--color-fg-4)' }}>内网 IP</span><span>{target.ip || '-'}</span>
+                    <span style={{ color: 'var(--color-fg-4)' }}>服务</span>
+                    <span>{target.services.map((svc) => `${svc.name}/${svc.proto} 宿主:${svc.host_port} → 容器:${svc.container_port}`).join('；')}</span>
+                    <span style={{ color: 'var(--color-fg-4)' }}>日志源</span>
+                    <span>{Object.entries(target.logs).map(([k, v]) => `${k}: ${v}`).join('；') || '-'}</span>
+                  </div>
+                </section>
+              ))}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <section>
+                <h3 className="mb-1 text-[12px] font-semibold" style={{ color: 'var(--color-fg)' }}>红方任务</h3>
+                <ul className="list-disc space-y-1 pl-5">{scenarioDetail.red_objectives.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+              <section>
+                <h3 className="mb-1 text-[12px] font-semibold" style={{ color: 'var(--color-fg)' }}>蓝方任务</h3>
+                <ul className="list-disc space-y-1 pl-5">{scenarioDetail.blue_objectives.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

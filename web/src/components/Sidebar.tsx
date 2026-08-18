@@ -1,5 +1,9 @@
 // Sidebar — Cursor/VSCode 式左侧边栏（208px，平铺列表导航）
 // 顶部：品牌；「新建会话」= 列表首项；分组导航；底部极简状态。
+//
+// 新增：每个任务入口都有「演示」按钮，回放历史 session 的真实事件流
+// （绝对禁止凭空生成 —— 后端 /api/demo/{task_type} 从历史 score+has_report
+// +has_metrics 三优的 session 抽取事件）。
 import { useState } from 'react'
 import { useArena } from '../arena'
 import { api } from '../api'
@@ -14,7 +18,7 @@ const NAV: { key: ViewKey; label: string }[] = [
   { key: 'bench', label: '基准测试' },
   { key: 'history', label: '历史复盘' },
   { key: 'hostguard', label: '主机卫士' },
-  { key: 'skills', label: '\u6280\u80fd\u6a21\u5757' },
+  { key: 'skills', label: '技能模块' },
   { key: 'kb', label: '知识库' },
   { key: 'docs', label: '框架文档' },
 ]
@@ -82,7 +86,7 @@ export function Sidebar({
         {NAV.map((n) => (
           <button
             key={n.key}
-            className={`sidebar-item relative ${view === n.key ? 'sidebar-item-active' : ''}`}
+            className={`sidebar-item ${view === n.key ? 'sidebar-item-active' : ''}`}
             onClick={() => onView(n.key)}
           >
             {n.label}

@@ -82,6 +82,12 @@ async function get(path: string): Promise<unknown> {
   return r.json()
 }
 
+async function getText(path: string): Promise<string> {
+  const r = await fetch(url(path))
+  if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`)
+  return r.text()
+}
+
 export const api = {
   getStatus: () => get('/api/status') as Promise<ControllerStatus>,
   getScenario: () => get('/api/scenario') as Promise<ScenarioInfo>,
@@ -102,11 +108,34 @@ export const api = {
     get(`/api/sessions/${id}/metrics`) as Promise<ScoreMetrics>,
   getSessionDetail: (id: string) =>
     get(`/api/sessions/${id}/detail`) as Promise<SessionDetail>,
+  getSessionRawTimeline: (id: string) =>
+    getText(`/api/sessions/${id}/timeline/raw`),
   getStoryline: (id: string) =>
     get(`/api/sessions/${id}/storyline`) as Promise<StorylineResult>,
   /** 202 {status:"generating"} when a generation is queued/in flight. */
   generateStoryline: (id: string, force = false) =>
     post(`/api/sessions/${id}/storyline`, force ? { force: true } : {}) as Promise<StorylineResult>,
+
+  // ---- demo replay (演示回放，素材来自历史 session，禁止捏造) ----
+  listDemos: () =>
+    get('/api/demo') as Promise<{
+      demos: Array<{ task_type: string; session_id: string; available: boolean }>
+    }>,
+  getDemo: (taskType: string) =>
+    get(`/api/demo/${taskType}`) as Promise<{
+      ok: boolean
+      task_type: string
+      session_id: string
+      event_count: number
+      events: Array<{
+        kind: string
+        type?: string
+        side: string
+        data: Record<string, unknown>
+        timestamp: number
+      }>
+      note?: string
+    }>,
 
   getKbStats: () => get('/api/kb/stats') as Promise<KbStats>,
   getKbTactics: () => get('/api/kb/tactics') as Promise<KbTactic[]>,
@@ -199,8 +228,8 @@ export const api = {
   },
 
   // ---- v2 multi-role architecture API (controller_v2.py) ----
-  /** Start v2 session (default scenario ad_domain, AD domain red-team vs blue-team). */
-  startV2Session: (scenario: string = 'ad_domain') =>
+  /** Start v2 session (default scenario web_basic, CTF-style red-team vs blue-team). */
+  startV2Session: (scenario: string = 'web_basic') =>
     post('/api/v2/session/start', { scenario }) as Promise<{
       ok: boolean
       session_id?: string

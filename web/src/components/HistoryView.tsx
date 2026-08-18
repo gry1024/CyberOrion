@@ -191,7 +191,11 @@ function StatCell({ label, value, tone = 'text-text-1' }: {
 
 function BattleStats({ detail }: { detail: SessionDetail }) {
   const m: ScoreMetrics | null = detail.metrics
-  const isTraffic = detail.id.includes('traffic') || (detail.alerts.length > 0 && detail.attacks.length === 0 && detail.counts.attacks === 0)
+  const isTraffic = detail.session_type === 'traffic_analysis'
+  const pct = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(0)}%` : '--'
+  const fixed = (value: unknown, digits = 1, suffix = '') =>
+    typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : '--'
   return (
     <section className="panel flex-none overflow-hidden">
       <div className="flex divide-x divide-hairline overflow-x-auto">
@@ -205,10 +209,10 @@ function BattleStats({ detail }: { detail: SessionDetail }) {
         <StatCell label="处置/事件" value={String(detail.counts.events)} tone="text-success" />
         {m && !isTraffic && (
           <>
-            <StatCell label="检出率" value={`${(m.detection_rate * 100).toFixed(0)}%`} />
-            <StatCell label="MTTD" value={m.mttd_sec != null ? `${m.mttd_sec.toFixed(1)}s` : '--'} />
-            <StatCell label="蓝队分" value={m.blue_score.toFixed(1)} tone="text-success" />
-            <StatCell label="红队分" value={m.red_score.toFixed(1)} tone="text-attacker" />
+            <StatCell label="检出率" value={pct(m.detection_rate)} />
+            <StatCell label="MTTD" value={fixed(m.mttd_sec, 1, 's')} />
+            <StatCell label="蓝队分" value={fixed(m.blue_score)} tone="text-success" />
+            <StatCell label="红队分" value={fixed(m.red_score)} tone="text-attacker" />
           </>
         )}
         {m && isTraffic && (
@@ -427,7 +431,32 @@ function ToolCallsTab({ rows }: { rows: SessionToolCall[] }) {
 // session detail (right side)
 // ---------------------------------------------------------------------------
 
-type DetailTab = 'duel' | 'timeline' | 'tools' | 'report'
+type DetailTab = 'duel' | 'timeline' | 'tools' | 'report' | 'raw'
+
+function RawLogTab({ sessionId }: { sessionId: string }) {
+  const [raw, setRaw] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setRaw('')
+    setError('')
+    api.getSessionRawTimeline(sessionId).then(setRaw).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : '完整日志不可用')
+    })
+  }, [sessionId])
+
+  if (error) return <div className="p-4 text-[11px] text-attacker">{error}</div>
+  if (!raw) return <div className="p-4 text-[11px] text-text-3">读取完整日志中…</div>
+  return (
+    <div className="terminal-shell min-h-full">
+      <div className="terminal-titlebar">
+        <span>RAW://{sessionId}/timeline.jsonl</span>
+        <span>{raw.split('\n').filter(Boolean).length} lines</span>
+      </div>
+      <pre className="m-0 overflow-auto whitespace-pre-wrap p-3 font-mono text-[10px] leading-5 text-[#aeb8c2]">{raw}</pre>
+    </div>
+  )
+}
 
 function SessionDetailView({ session }: { session: SessionInfo }) {
   const [detail, setDetail] = useState<SessionDetail | null>(null)
@@ -449,12 +478,14 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
     ? [
         { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
         { key: 'report', label: '报告' },
+        { key: 'raw', label: '完整日志' },
       ]
     : [
         { key: 'duel', label: '红蓝对垒' },
         { key: 'timeline', label: `时间线 ${detail ? detail.timeline.length : ''}` },
         { key: 'tools', label: `工具调用 ${detail ? detail.tool_calls.length : ''}` },
         { key: 'report', label: '报告' },
+        { key: 'raw', label: '完整日志' },
       ]
 
   return (
@@ -487,6 +518,7 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
               {tab === 'duel' && <DuelTimeline detail={detail} />}
               {tab === 'timeline' && <TimelineTab rows={detail.timeline} />}
               {tab === 'tools' && <ToolCallsTab rows={detail.tool_calls} />}
+              {tab === 'raw' && <RawLogTab sessionId={session.id} />}
               {tab === 'report' &&
                 (detail.report_md ? (
                   <div className="p-5">
@@ -547,7 +579,7 @@ function SessionListItem({
         <span className="truncate font-mono text-[11px] text-text-1">{s.id}</span>
         {s.score != null && (
           <span className="ml-auto flex-none rounded border border-success/40 px-1 py-px font-mono text-[9px] tabular-nums text-success">
-            {s.score.toFixed(1)}
+            {typeof s.score === 'number' && Number.isFinite(s.score) ? s.score.toFixed(1) : '--'}
           </span>
         )}
       </div>
