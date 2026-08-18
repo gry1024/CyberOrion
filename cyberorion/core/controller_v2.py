@@ -177,13 +177,20 @@ class ControllerV2:
             with open(metrics_path, "w", encoding="utf-8") as f:
                 _json.dump(metrics, f, ensure_ascii=False, indent=2)
 
-            # Auto-generate storyline.md (LLM battle recap) after session ends.
-            try:
-                from ..storyline import generate_storyline
-                await asyncio.to_thread(generate_storyline, self._session_dir)
-                print(f"[controller_v2] Auto-generated storyline for {self.session_id}")
-            except Exception as _e:
-                print(f"[controller_v2] Storyline auto-gen failed: {_e}")
+            # Auto-generate storyline.md in the background. Stop requests must
+            # return quickly; report generation can take minutes with remote LLMs.
+            session_dir = self._session_dir
+            session_id = self.session_id
+
+            async def _generate_storyline_bg() -> None:
+                try:
+                    from ..storyline import generate_storyline
+                    await asyncio.to_thread(generate_storyline, session_dir)
+                    print(f"[controller_v2] Auto-generated storyline for {session_id}")
+                except Exception as _e:
+                    print(f"[controller_v2] Storyline auto-gen failed: {_e}")
+
+            asyncio.create_task(_generate_storyline_bg())
 
         return report
     async def start_red(
