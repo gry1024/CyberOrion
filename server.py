@@ -59,7 +59,7 @@ import re
 import sqlite3
 import time
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -1563,7 +1563,7 @@ def _traffic_analysis_timeout(payload: dict) -> float:
         timeout = float(raw)
     except (TypeError, ValueError):
         timeout = 90.0
-    return max(1.0, timeout)
+    return max(0.01, timeout)
 
 
 def _build_traffic_fallback_report(
@@ -1788,17 +1788,25 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         except Exception:
             pass
         _fallback_reason = ""
+        _pipeline_iter = run_traffic_analysis_pipeline(events)
+        _deadline = time.monotonic() + analysis_timeout
         try:
-            async with asyncio.timeout(analysis_timeout):
-                async for ev in run_traffic_analysis_pipeline(events):
-                    ev_type = ev.get("type", "")
-                    if ev_type == "report":
-                        _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
-                    elif ev_type == "report_chunk":
-                        _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
-                    yield _sse(ev)
-        except TimeoutError:
-            _fallback_reason = f"LLM 分析流水线超过 {analysis_timeout:.0f}s 未完成，已切换模板兜底"
+            while True:
+                _remaining = _deadline - time.monotonic()
+                if _remaining <= 0:
+                    raise asyncio.TimeoutError
+                try:
+                    ev = await asyncio.wait_for(anext(_pipeline_iter), timeout=_remaining)
+                except StopAsyncIteration:
+                    break
+                ev_type = ev.get("type", "")
+                if ev_type == "report":
+                    _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
+                elif ev_type == "report_chunk":
+                    _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
+                yield _sse(ev)
+        except asyncio.TimeoutError:
+            _fallback_reason = f"LLM 分析流水线超过 {analysis_timeout:g}s 未完成，已切换模板兜底"
             yield _sse({"type": "system", "side": "system",
                         "data": {"text": f"⚠ {_fallback_reason}"},
                         "timestamp": time.time()})
@@ -1807,6 +1815,9 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             yield _sse({"type": "system", "side": "system",
                         "data": {"text": f"⚠ {_fallback_reason}"},
                         "timestamp": time.time()})
+        finally:
+            with suppress(Exception):
+                await asyncio.wait_for(_pipeline_iter.aclose(), timeout=1.0)
 
         if not "".join(_traffic_report_parts).strip():
             _fallback_report = _build_traffic_fallback_report(
@@ -1933,7 +1944,11 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 },
             })
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _sse(ev: dict) -> str:

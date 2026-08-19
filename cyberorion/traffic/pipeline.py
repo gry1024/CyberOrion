@@ -73,6 +73,30 @@ def _build_client() -> tuple[Any, str]:
     return AsyncOpenAI(**kwargs), model_name
 
 
+def _load_kb_context(summary: str, techniques: list[str]) -> tuple[str, list[str]]:
+    """同步加载 ATT&CK KB 摘要；调用方负责放到线程中执行。"""
+    from cyberorion.kb.rag import get_kb
+
+    kb = get_kb()
+    kb_results = []
+    seen_ids = set()
+    for tid in techniques[:5]:
+        doc = kb.lookup(tid)
+        if doc and doc["id"] not in seen_ids:
+            seen_ids.add(doc["id"])
+            det = (doc.get("detection") or doc.get("description") or "")[:200]
+            kb_results.append(f"- {doc['id']} {doc.get('name','')}: {det}")
+    search_q = " ".join(techniques[:3]) if techniques else re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff\s]", " ", summary)[:120]
+    for d in kb.search(search_q, k=3):
+        if d["id"] not in seen_ids:
+            seen_ids.add(d["id"])
+            det = (d.get("detection") or d.get("description") or "")[:200]
+            kb_results.append(f"- {d['id']} {d.get('name','')}: {det}")
+    if not kb_results:
+        return "", []
+    return "\n\n== 知识库 RAG 检索结果（ATT&CK 技术详情）==\n" + "\n".join(kb_results), kb_results
+
+
 async def _stream_llm(
     client: Any,
     model: str,
@@ -208,28 +232,14 @@ async def _stage_semantic_analysis(
 
     # ---- RAG: 检索知识库，注入 ATT&CK 技术详情 ----
     kb_context = ""
+    techniques = list(stats.get("techniques", {}).keys())
     try:
-        from cyberorion.kb.rag import get_kb
-        kb = get_kb()
-        techniques = list(stats.get("techniques", {}).keys())
-        kb_results = []
-        seen_ids = set()
-        for tid in techniques[:5]:
-            doc = kb.lookup(tid)
-            if doc and doc["id"] not in seen_ids:
-                seen_ids.add(doc["id"])
-                det = (doc.get("detection") or doc.get("description") or "")[:200]
-                kb_results.append(f"- {doc['id']} {doc.get('name','')}: {det}")
-        search_q = " ".join(techniques[:3]) if techniques else re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff\s]", " ", summary)[:120]
-        for d in kb.search(search_q, k=3):
-            if d["id"] not in seen_ids:
-                seen_ids.add(d["id"])
-                det = (d.get("detection") or d.get("description") or "")[:200]
-                kb_results.append(f"- {d['id']} {d.get('name','')}: {det}")
+        kb_context, kb_results = await asyncio.to_thread(_load_kb_context, summary, techniques)
         if kb_results:
-            kb_context = "\n\n== 知识库 RAG 检索结果（ATT&CK 技术详情）==\n" + "\n".join(kb_results)
             yield _ev_tool_call(agent, "search_attack_kb", f"techniques={techniques[:5]}")
             yield _ev_tool_output(agent, "search_attack_kb", "\n".join(kb_results[:6]))
+    except asyncio.CancelledError:
+        raise
     except Exception:
         pass  # KB 不可用时不阻断流程
 

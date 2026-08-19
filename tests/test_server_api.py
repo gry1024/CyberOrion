@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -277,6 +278,7 @@ def test_traffic_analyze_timeout_yields_fallback_report_and_completes(
 
     monkeypatch.setattr(pipeline, "run_traffic_analysis_pipeline", hanging_pipeline)
 
+    started = time.monotonic()
     with client.stream(
         "POST",
         "/api/traffic/analyze",
@@ -284,12 +286,68 @@ def test_traffic_analyze_timeout_yields_fallback_report_and_completes(
     ) as response:
         assert response.status_code == 200
         events = _parse_sse_events("".join(response.iter_text()))
+    elapsed = time.monotonic() - started
 
     event_types = [event.get("type") for event in events]
+    assert elapsed < 0.5
     assert "report" in event_types
     assert "complete" in event_types
+    system_text = "\n".join(
+        str(event.get("data", {}).get("text", ""))
+        for event in events
+        if event.get("type") == "system"
+    )
+    assert "超过" in system_text
+    assert "AttributeError" not in system_text
 
     report = next(event for event in events if event.get("type") == "report")
     assert report["data"]["fallback"] is True
     for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
         assert section in report["data"]["report"]
+
+
+def test_traffic_analyze_timeout_interrupts_blocking_kb_lookup(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Synchronous KB work must not prevent the SSE timeout fallback."""
+    import cyberorion.kb.rag as rag
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    class EmptyKB:
+        def lookup(self, _technique):
+            return None
+
+        def search(self, _query, k=3):
+            return []
+
+    def slow_get_kb():
+        time.sleep(1.2)
+        return EmptyKB()
+
+    async def no_llm(*_args, **_kwargs):
+        pipeline._stream_llm.full = ""
+        if False:
+            yield {}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+    monkeypatch.setattr(rag, "get_kb", slow_get_kb)
+    monkeypatch.setattr(pipeline, "_build_client", lambda: (object(), "test-model"))
+    monkeypatch.setattr(pipeline, "_stream_llm", no_llm)
+
+    started = time.monotonic()
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 120, "analysis_timeout_sec": 0.05},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.8
+    assert any(event.get("type") == "report" for event in events)
+    assert any(event.get("type") == "complete" for event in events)
