@@ -277,6 +277,27 @@ def test_raw_timeline_endpoint_synthesizes_when_jsonl_missing(
     assert "timeline.jsonl not found" not in r.text
 
 
+def test_sessions_list_counts_synthesized_timeline(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    sid = "session_20990101_000003"
+    d = tmp_path / "logs" / sid
+    d.mkdir(parents=True)
+    (d / "metrics.json").write_text(
+        json.dumps({"red_score": 0, "blue_score": 25, "scenario": "web_basic"}),
+        encoding="utf-8",
+    )
+    (d / "report.md").write_text("# 裁判报告\n无 JSONL 的旧会话", encoding="utf-8")
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+
+    with TestClient(app) as c:
+        r = c.get("/api/sessions")
+
+    assert r.status_code == 200
+    row = next(item for item in r.json() if item["id"] == sid)
+    assert row["timeline_events"] == 2
+
+
 def test_detail_invalid_id_400(client: TestClient) -> None:
     r = client.get("/api/sessions/not-a-session/detail")
     assert r.status_code == 400

@@ -621,7 +621,16 @@ export function HistoryView() {
   const load = useCallback(() => {
     api
       .getSessions()
-      .then(setSessions)
+      .then((nextSessions) => {
+        setSessions(nextSessions)
+        setSelected((current) => {
+          if (nextSessions.length === 0) return null
+          if (current && nextSessions.some((session) => session.id === current.id)) {
+            return current
+          }
+          return nextSessions[0]
+        })
+      })
       .catch(() => setSessions([]))
   }, [])
 

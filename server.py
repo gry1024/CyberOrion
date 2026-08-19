@@ -728,15 +728,7 @@ def _scan_sessions() -> list[dict[str, Any]]:
             mtime = d.stat().st_mtime
         except OSError:
             mtime = 0.0
-        timeline_events = 0
-        timeline_path = d / "timeline.jsonl"
-        if timeline_path.is_file():
-            try:
-                with timeline_path.open("r", encoding="utf-8", errors="replace") as handle:
-                    for _ in handle:
-                        timeline_events += 1
-            except OSError:
-                timeline_events = 0
+        timeline_events = _count_replay_events(d, metrics_file)
         out.append({
             "id": d.name,
             "dir": str(d),
@@ -750,6 +742,38 @@ def _scan_sessions() -> list[dict[str, Any]]:
         })
     out.sort(key=lambda s: s["mtime"], reverse=True)
     return out
+
+
+def _count_replay_events(session_dir: Path, metrics_file: Path) -> int:
+    """Count visible replay events, including synthesized artifact fallback."""
+    timeline_path = session_dir / "timeline.jsonl"
+    if timeline_path.is_file():
+        try:
+            with timeline_path.open("r", encoding="utf-8", errors="replace") as handle:
+                return sum(1 for _ in handle)
+        except OSError:
+            return 0
+    db_path = session_dir / "telemetry.db"
+    if db_path.is_file():
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                total = 0
+                for table in ("events", "alerts", "attacks"):
+                    row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                    total += int(row[0] or 0) if row else 0
+                if total > 0:
+                    return total
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error):
+            pass
+    count = 0
+    if metrics_file.is_file():
+        count += 1
+    if (session_dir / "report.md").is_file():
+        count += 1
+    return count
 
 
 def _read_summary(session_dir: Path) -> dict[str, Any]:
