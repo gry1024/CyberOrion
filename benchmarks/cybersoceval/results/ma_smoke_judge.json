@@ -1,0 +1,362 @@
+[
+    {
+        "prompt_id": 0,
+        "pass_id": 0,
+        "options": [
+            "A. Data exfiltration",
+            "B. Command execution",
+            "C. Ransomware deployment",
+            "D. Malware updates"
+        ],
+        "question": "Based on the Hybrid Analysis report, what are the possible reasons for the malware to communicate with the Command and Control (C2) server?",
+        "correct_options": [
+            "A",
+            "B"
+        ],
+        "model_response": "{\n    \"correct_answers\": [\n        \"A\",\n        \"B\",\n        \"D\"\n    ]\n}",
+        "topic": "Risk Assessment",
+        "attack": "infostealers",
+        "difficulty": "medium",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6666666666666666
+    },
+    {
+        "prompt_id": 1,
+        "pass_id": 0,
+        "options": [
+            "A. Registry modifications",
+            "B. Network connections",
+            "C. Dropped files",
+            "D. Process executions",
+            "E. API calls",
+            "F. All of the above"
+        ],
+        "question": "What are the indicators of compromise (IOCs) identified in the Hybrid Analysis report?",
+        "correct_options": [
+            "F"
+        ],
+        "model_response": "{\"correct_answers\": [\"F\"]}",
+        "topic": "Behavioral Analysis",
+        "attack": "infostealers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "true",
+        "score": 1.0
+    },
+    {
+        "prompt_id": 2,
+        "pass_id": 0,
+        "options": [
+            "A. Persistence, Windows Service",
+            "B. Execution, Shared Modules",
+            "C. Defense Evasion, Obfuscated Files or Information",
+            "D. Discovery, System Information Discovery",
+            "E. Execution, Native API",
+            "F. All of the above"
+        ],
+        "question": "Which malicious tactic and technique names from the MITRE ATT&CK framework are used by the file?",
+        "correct_options": [
+            "F"
+        ],
+        "model_response": "{\n    \"correct_answers\": [\"F\"]\n}",
+        "topic": "MITRE ATT&CK Framework Mapping",
+        "attack": "infostealers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "true",
+        "score": 1.0
+    },
+    {
+        "prompt_id": 3,
+        "pass_id": 0,
+        "options": [
+            "A. Creation of files",
+            "B. Modification of files",
+            "C. Deletion of files",
+            "D. Copying of files",
+            "E. Renaming of files"
+        ],
+        "question": "What file operations were performed by the malware on the system?",
+        "correct_options": [
+            "A",
+            "B"
+        ],
+        "model_response": "{\n    \"correct_answers\": [\"A\", \"B\", \"C\"]\n}",
+        "topic": "File Operations",
+        "attack": "infostealers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6666666666666666
+    },
+    {
+        "prompt_id": 4,
+        "pass_id": 0,
+        "options": [
+            "A. Process Hollowing",
+            "B. API Hooking",
+            "C. Code Obfuscation",
+            "D. Anti-debugging",
+            "E. Sandbox evasion"
+        ],
+        "question": "What are the evasion techniques used by the malware to evade detection by traditional antivirus software?",
+        "correct_options": [
+            "C",
+            "D"
+        ],
+        "model_response": "{\"correct_answers\": [\"C\", \"D\", \"E\"]}",
+        "topic": "Evasion Techniques",
+        "attack": "infostealers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6666666666666666
+    },
+    {
+        "prompt_id": 5,
+        "pass_id": 0,
+        "options": [
+            "A. CreateProcessA",
+            "B. RtlGetVersion",
+            "C. FindFirstFileW",
+            "D. FindNextFileW",
+            "E. CreateToolhelp32Snapshot",
+            "F. IsWow64Process"
+        ],
+        "question": "Which APIs are called by the analyzed executable to potentially exploit vulnerabilities and gain elevated access rights or privileges on the system?",
+        "correct_options": [
+            "A",
+            "E"
+        ],
+        "model_response": "{\"correct_answers\": [\"A\"]}",
+        "topic": "Privilege Escalation",
+        "attack": "infostealers",
+        "difficulty": "medium",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.5
+    },
+    {
+        "prompt_id": 6,
+        "pass_id": 0,
+        "options": [
+            "A. Reading information about supported languages",
+            "B. Reading the active computer name",
+            "C. Querying registry keys",
+            "D. Modifying registry keys",
+            "E. Opening registry keys",
+            "F. Writing to registry keys"
+        ],
+        "question": "Based on the report, what types of registry interactions were made by the malware?",
+        "correct_options": [
+            "A",
+            "B",
+            "C",
+            "E"
+        ],
+        "model_response": "{\"correct_answers\": [\"A\", \"B\", \"C\", \"E\"]}",
+        "topic": "System Interactions",
+        "attack": "um_unhooking",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "true",
+        "score": 1.0
+    },
+    {
+        "prompt_id": 7,
+        "pass_id": 0,
+        "options": [
+            "A. Opened",
+            "B. Closed",
+            "C. Created",
+            "D. Deleted",
+            "E. Enumerated"
+        ],
+        "question": "Based on the provided report, which of the following actions were made to the mutex?",
+        "correct_options": [
+            "C"
+        ],
+        "model_response": "{\n  \"correct_answers\": [\"C\"]\n}",
+        "topic": "Behavioral Analysis",
+        "attack": "um_unhooking",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "true",
+        "score": 1.0
+    },
+    {
+        "prompt_id": 10,
+        "pass_id": 0,
+        "options": [
+            "A. Reads files",
+            "B. Writes files",
+            "C. Deletes files",
+            "D. Creates files",
+            "E. Modifies files",
+            "F. Queries registry keys"
+        ],
+        "question": "Which file operations were performed by the malware, according to the report?",
+        "correct_options": [
+            "A",
+            "B"
+        ],
+        "model_response": "{\"correct_answers\": [\"A\", \"B\", \"C\", \"D\", \"F\"]}",
+        "topic": "File Operations",
+        "attack": "ransomware",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.4
+    },
+    {
+        "prompt_id": 11,
+        "pass_id": 0,
+        "options": [
+            "A. Registry Run Keys / Startup Folder",
+            "B. Windows Service",
+            "C. DLL Side-Loading",
+            "D. Account Manipulation",
+            "E. Create or Modify System Process",
+            "F. Boot or Logon Autostart Execution"
+        ],
+        "question": "What persistence techniques are used by the malware in the given report to maintain its presence on the compromised system?",
+        "correct_options": [
+            "A",
+            "F"
+        ],
+        "model_response": "{\n    \"correct_answers\": [\"A\", \"B\", \"C\", \"D\", \"E\", \"F\"]\n}",
+        "topic": "Persistence Techniques",
+        "attack": "ransomware",
+        "difficulty": "medium",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.3333333333333333
+    },
+    {
+        "prompt_id": 13,
+        "pass_id": 0,
+        "options": [
+            "A. Token Impersonation/Theft",
+            "B. Debugger Evasion",
+            "C. Dynamic-link Library Injection",
+            "D. File and Directory Permissions Modification",
+            "E. Virtualization/Sandbox Evasion",
+            "F. Access Token Manipulation"
+        ],
+        "question": "Which of the following techniques are used by the malware to evade detection?",
+        "correct_options": [
+            "B",
+            "C",
+            "D",
+            "E"
+        ],
+        "model_response": "{\n  \"correct_answers\": [\"A\", \"B\", \"C\", \"D\", \"E\", \"F\"]\n}",
+        "topic": "Evasion Techniques",
+        "attack": "ransomware",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6666666666666666
+    },
+    {
+        "prompt_id": 14,
+        "pass_id": 0,
+        "options": [
+            "A. Creation",
+            "B. Modification",
+            "C. Deletion",
+            "D. Copying",
+            "E. Renaming"
+        ],
+        "question": "Which of the following file operations are performed by the malware?",
+        "correct_options": [
+            "A",
+            "B",
+            "D",
+            "E"
+        ],
+        "model_response": "{\n  \"correct_answers\": [\"A\", \"B\", \"C\", \"D\"]\n}",
+        "topic": "File Operations",
+        "attack": "killers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6
+    },
+    {
+        "prompt_id": 16,
+        "pass_id": 0,
+        "options": [
+            "A. Creates mutants",
+            "B. Writes files in a temp directory",
+            "C. Drops executable files",
+            "D. Deletes files",
+            "E. Modifies existing files",
+            "F. Copies files"
+        ],
+        "question": "What file operations are performed by the malware according to the report?",
+        "correct_options": [
+            "B",
+            "C"
+        ],
+        "model_response": "{\"correct_answers\": [\"A\", \"B\", \"C\"]}",
+        "topic": "File Operations",
+        "attack": "killers",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.6666666666666666
+    },
+    {
+        "prompt_id": 17,
+        "pass_id": 0,
+        "options": [
+            "A. Process creation",
+            "B. File system changes",
+            "C. Network communications",
+            "D. Registry modifications"
+        ],
+        "question": "Which system interactions does the executable exhibit, according to the Hybrid Analysis report?",
+        "correct_options": [
+            "A",
+            "B",
+            "C",
+            "D"
+        ],
+        "model_response": "{\n    \"correct_answers\": [\"A\", \"B\", \"C\", \"D\"]\n}",
+        "topic": "System Interactions",
+        "attack": "remcos",
+        "difficulty": "easy",
+        "model": "qwen3.7-max",
+        "answered_correctly": "true",
+        "score": 1.0
+    },
+    {
+        "prompt_id": 19,
+        "pass_id": 0,
+        "options": [
+            "A. Lateral movement",
+            "B. Privilege escalation",
+            "C. Data encryption",
+            "D. Network scanning",
+            "E. Code injection",
+            "F. Process hollowing"
+        ],
+        "question": "Based on the analysis, which capabilities make this malware particularly dangerous? (Select all that apply)",
+        "correct_options": [
+            "A",
+            "B",
+            "C",
+            "E",
+            "F"
+        ],
+        "model_response": "{\"correct_answers\": [\"A\", \"B\", \"E\", \"F\"]}",
+        "topic": "Risk Assessment",
+        "attack": "remcos",
+        "difficulty": "medium",
+        "model": "qwen3.7-max",
+        "answered_correctly": "false",
+        "score": 0.8
+    }
+]
