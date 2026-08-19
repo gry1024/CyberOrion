@@ -148,6 +148,37 @@ class Controller:
             scenario_model = None
         return build_blue_team(scenario_model)
 
+    @staticmethod
+    def _run_agent_isolated(
+        event_bus: EventBus,
+        side: str,
+        agent: Agent,
+        prompt: str,
+        max_turns: int,
+        timeout: int,
+        stop_event: asyncio.Event,
+        agent_label: str | None = None,
+    ) -> dict[str, Any]:
+        """Run CAI in a worker thread so SDK/model stalls never freeze FastAPI."""
+
+        class EventBusProxy:
+            async def publish(self, event: Event) -> None:
+                event_bus.publish_sync(event)
+
+        async def run() -> dict[str, Any]:
+            runner = AgentRunner(EventBusProxy(), side, agent_label=agent_label)
+            return await runner.run(
+                agent,
+                prompt,
+                max_turns=max_turns,
+                timeout=timeout,
+                pause_event=None,
+                stop_event=stop_event,
+                task_registry=None,
+            )
+
+        return asyncio.run(run())
+
     def set_scenario(self, name: str) -> None:
         """选择下一次会话使用的场景。"""
         if self.store is not None:
@@ -173,13 +204,16 @@ class Controller:
         ))
 
         async def run() -> None:
-            runner = AgentRunner(self.event_bus, "red")
             try:
-                result = await runner.run(
-                    agent, prompt, max_turns=30, timeout=900,
-                    pause_event=self._red_paused,
+                result = await asyncio.to_thread(
+                    self._run_agent_isolated,
+                    self.event_bus,
+                    "red",
+                    agent,
+                    prompt,
+                    30,
+                    900,
                     stop_event=self._stop_red,
-                    task_registry=self._red_stream_tasks,
                 )
                 output = result.get("output", "")
                 self._red_history.append(output)
@@ -230,13 +264,17 @@ class Controller:
         ))
 
         async def run() -> None:
-            runner = AgentRunner(self.event_bus, "blue", agent_label="orchestrator")
             try:
-                result = await runner.run(
-                    agent, prompt, max_turns=14, timeout=900,
-                    pause_event=self._blue_paused,
+                result = await asyncio.to_thread(
+                    self._run_agent_isolated,
+                    self.event_bus,
+                    "blue",
+                    agent,
+                    prompt,
+                    14,
+                    900,
                     stop_event=self._stop_blue,
-                    task_registry=self._blue_stream_tasks,
+                    agent_label="orchestrator",
                 )
                 output = result.get("output", "")
                 self._blue_history.append(output)

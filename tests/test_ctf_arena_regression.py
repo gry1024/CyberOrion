@@ -167,3 +167,28 @@ def test_red_start_returns_immediately_while_session_bootstraps(monkeypatch) -> 
         assert calls == ["start_session", "session_ready", "start_red"]
 
     asyncio.run(run())
+
+
+def test_agent_runner_blocking_work_does_not_freeze_controller(monkeypatch) -> None:
+    from cyberorion.core import controller as controller_mod
+    from cyberorion.core.controller import Controller
+
+    async def blocking_run(*_args, **_kwargs) -> dict:
+        time.sleep(0.2)
+        return {"output": "done", "tool_calls": [], "trace_items": []}
+
+    monkeypatch.setattr(controller_mod.AgentRunner, "run", blocking_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        agent = SimpleNamespace(name="fake-red")
+        await controller.start_red(agent=agent, prompt="test")
+
+        started = time.monotonic()
+        await asyncio.sleep(0.01)
+        elapsed = time.monotonic() - started
+        await controller.stop_red()
+
+        assert elapsed < 0.05
+
+    asyncio.run(run())
