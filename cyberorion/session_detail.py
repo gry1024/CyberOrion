@@ -163,7 +163,7 @@ def _tool_calls_from_jsonl(entries: list[dict]) -> list[dict]:
                 try: args = json.dumps(args, ensure_ascii=False, default=str)
                 except: args = str(args)
             tid = d.get("tool_call_id") or ""
-            calls.append({"ts": float(entry.get("ts") or 0), "side": side, "tool": d.get("name") or "unknown", "args": str(args)[:200], "ok": True, "summary": output_map.get(tid, "")})
+            calls.append({"ts": float(entry.get("ts") or 0), "side": side, "tool": d.get("tool") or d.get("name") or "unknown", "args": str(args)[:200], "ok": True, "summary": output_map.get(tid, "")})
     return calls
 
 
@@ -251,9 +251,9 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
             o = d.get("outcome", d.get("reason", ""))
             title = f"{side.upper()} Round End - {o}" if o else f"{side.upper()} Round End"
         elif event == "tool_call":
-            title = f"{side.upper()} tool: {d.get('name', '')}"
+            title = f"{side.upper()} tool: {d.get('tool') or d.get('name') or ''}"
         elif event == "tool_output":
-            title = f"{side.upper()} output: {d.get('name', '')}"
+            title = f"{side.upper()} output: {d.get('tool') or d.get('name') or ''}"
         elif event == "thinking":
             title = f"{side.upper()} thinking"
         else:
@@ -281,6 +281,57 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
             "side": side,
             "title": title,
             "detail": detail,
+            "technique": "",
+            "success": None,
+        })
+    return items
+
+
+def _timeline_from_artifacts(
+    session_dir: Path,
+    session_id: str,
+    session_type: str,
+    metrics: Any,
+    report_md: str | None,
+) -> list[dict]:
+    """Fallback timeline for valid sessions without telemetry/timeline JSONL."""
+    try:
+        ts = session_dir.stat().st_mtime
+    except OSError:
+        ts = 0.0
+    items: list[dict] = []
+    if isinstance(metrics, dict):
+        if session_type == "traffic_analysis":
+            events = metrics.get("traffic_events") or metrics.get("total_events") or 0
+            alerts = metrics.get("alerts_total") or metrics.get("alert_count") or 0
+            detail = f"traffic_events={events}, alerts={alerts}"
+            title = "流量分析指标"
+        else:
+            blue = metrics.get("blue_score", "-")
+            red = metrics.get("red_score", "-")
+            detail = f"red_score={red}, blue_score={blue}"
+            title = "红蓝对抗指标"
+        items.append({
+            "ts": ts,
+            "kind": "event",
+            "side": "system",
+            "title": title,
+            "detail": _clip(detail),
+            "technique": "",
+            "success": None,
+        })
+    if report_md:
+        first_line = next(
+            (line.strip("# ").strip() for line in report_md.splitlines()
+             if line.strip()),
+            "历史报告",
+        )
+        items.append({
+            "ts": ts + 0.001,
+            "kind": "event",
+            "side": "system",
+            "title": _clip(first_line, 120),
+            "detail": _clip(report_md, 300),
             "technique": "",
             "success": None,
         })
@@ -345,13 +396,6 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
         _tool_calls_from_jsonl(jsonl_entries),
         _tool_calls_from_db(attacks, alerts, responses),
     )
-    timeline = _timeline_from_db(attacks, alerts, events) \
-        + _timeline_from_jsonl(jsonl_entries)
-    timeline.sort(key=lambda x: float(x["ts"]))
-    # Cap timeline to prevent frontend freeze on huge sessions.
-    if len(timeline) > MAX_TIMELINE:
-        timeline = timeline[-MAX_TIMELINE:]
-
     def _read(filename: str) -> "str | None":
         path = session_dir / filename
         if not path.is_file():
@@ -376,14 +420,27 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
             and metrics.get("type") == "traffic_analysis")
     ) else "arena"
 
+    report_md = _read("report.md")
+    storyline_md = _read("storyline.md")
+    timeline = _timeline_from_db(attacks, alerts, events) \
+        + _timeline_from_jsonl(jsonl_entries)
+    if not timeline:
+        timeline = _timeline_from_artifacts(
+            session_dir, session_id, session_type, metrics, report_md,
+        )
+    timeline.sort(key=lambda x: float(x["ts"]))
+    # Cap timeline to prevent frontend freeze on huge sessions.
+    if len(timeline) > MAX_TIMELINE:
+        timeline = timeline[-MAX_TIMELINE:]
+
     return {
         "id": session_id,
         "session_type": session_type,
         "has_report": (session_dir / "report.md").is_file(),
         "has_metrics": metrics_file.is_file(),
         "metrics": metrics,
-        "report_md": _read("report.md"),
-        "storyline_md": _read("storyline.md"),
+        "report_md": report_md,
+        "storyline_md": storyline_md,
         "timeline": timeline,
         "tool_calls": tool_calls,
         "alerts": alerts,

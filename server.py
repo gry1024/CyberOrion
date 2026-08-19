@@ -893,12 +893,51 @@ async def session_detail(session_id: str) -> Any:
 
 @app.get("/api/sessions/{session_id}/timeline/raw")
 async def session_raw_timeline(session_id: str) -> Any:
-    """Return the complete persisted JSONL timeline without parsing or caps."""
-    path = _session_file(session_id, "timeline.jsonl")
-    if isinstance(path, JSONResponse):
-        return path
+    """Return persisted JSONL timeline, or synthesize it from session detail."""
+    session_path = _session_dir(session_id)
+    if isinstance(session_path, JSONResponse):
+        return session_path
+    path = session_path / "timeline.jsonl"
+    if path.is_file():
+        return PlainTextResponse(
+            path.read_text(encoding="utf-8", errors="replace"),
+            media_type="application/x-ndjson",
+        )
+    detail = await asyncio.to_thread(build_session_detail, session_path)
+    lines: list[str] = []
+    for item in detail.get("timeline") or []:
+        lines.append(json.dumps({
+            "ts": item.get("ts"),
+            "type": item.get("kind") or "event",
+            "side": item.get("side") or "system",
+            "data": {
+                "title": item.get("title") or "",
+                "detail": item.get("detail") or "",
+                "technique": item.get("technique") or "",
+                "success": item.get("success"),
+            },
+        }, ensure_ascii=False, default=str))
+    for call in detail.get("tool_calls") or []:
+        lines.append(json.dumps({
+            "ts": call.get("ts"),
+            "type": "tool_call",
+            "side": call.get("side") or "system",
+            "data": {
+                "tool": call.get("tool") or "unknown",
+                "args": call.get("args") or "",
+                "ok": call.get("ok"),
+                "summary": call.get("summary") or "",
+            },
+        }, ensure_ascii=False, default=str))
+    if not lines and detail.get("report_md"):
+        lines.append(json.dumps({
+            "ts": time.time(),
+            "type": "report",
+            "side": "system",
+            "data": {"report": detail.get("report_md")},
+        }, ensure_ascii=False, default=str))
     return PlainTextResponse(
-        path.read_text(encoding="utf-8", errors="replace"),
+        "\n".join(lines) + ("\n" if lines else ""),
         media_type="application/x-ndjson",
     )
 

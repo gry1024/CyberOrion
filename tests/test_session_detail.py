@@ -238,6 +238,45 @@ def test_raw_timeline_endpoint_preserves_complete_log(client: TestClient) -> Non
     assert "{bad json line" in r.text
 
 
+def test_detail_synthesizes_timeline_without_jsonl(tmp_path: Path) -> None:
+    sid = "session_20990101_000001"
+    d = tmp_path / "logs" / sid
+    d.mkdir(parents=True)
+    (d / "metrics.json").write_text(
+        json.dumps({"red_score": 75, "blue_score": 25}),
+        encoding="utf-8",
+    )
+    (d / "report.md").write_text("# 最小 CTF 报告\nSSH 弱口令 verified", encoding="utf-8")
+
+    detail = build_session_detail(d)
+
+    assert detail["timeline"]
+    assert any("红蓝对抗指标" in item["title"] for item in detail["timeline"])
+    assert any("最小 CTF 报告" in item["title"] for item in detail["timeline"])
+
+
+def test_raw_timeline_endpoint_synthesizes_when_jsonl_missing(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    sid = "session_20990101_000002"
+    d = tmp_path / "logs" / sid
+    d.mkdir(parents=True)
+    (d / "metrics.json").write_text(
+        json.dumps({"type": "traffic_analysis", "traffic_events": 42, "alerts_total": 10}),
+        encoding="utf-8",
+    )
+    (d / "report.md").write_text("# 流量分析报告\nCritical alerts", encoding="utf-8")
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+
+    with TestClient(app) as c:
+        r = c.get(f"/api/sessions/{sid}/timeline/raw")
+
+    assert r.status_code == 200
+    assert "流量分析指标" in r.text
+    assert "流量分析报告" in r.text
+    assert "timeline.jsonl not found" not in r.text
+
+
 def test_detail_invalid_id_400(client: TestClient) -> None:
     r = client.get("/api/sessions/not-a-session/detail")
     assert r.status_code == 400

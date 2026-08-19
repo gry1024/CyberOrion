@@ -251,6 +251,11 @@ def test_scripted_red_workflow_verifies_weak_ssh(monkeypatch, tmp_path: Path) ->
             await asyncio.wait_for(task, timeout=2)
             assert controller.get_status()["red_history_count"] == 1
             assert "SSH 弱口令" in controller._red_history[-1]
+            attacks = controller.store.query_attacks(limit=10)
+            assert any(
+                row["action"] == "ssh_bruteforce" and row["success"]
+                for row in attacks
+            )
         finally:
             await controller.stop_session()
 

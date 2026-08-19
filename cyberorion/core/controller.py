@@ -479,6 +479,18 @@ class Controller:
             {"tool": "tcp_probe", "output": tcp_detail},
         )
         tool_calls.append({"tool": "tcp_probe", "result": tcp_detail})
+        if self.ground_truth is not None:
+            try:
+                self.ground_truth.record(
+                    target="weak_ssh",
+                    technique="T1046",
+                    action="nmap_scan",
+                    success=tcp_open,
+                    evidence=tcp_detail,
+                    recon=True,
+                )
+            except Exception:
+                pass
         if self._stop_red.is_set():
             return {"output": "RED SCRIPT: stopped after recon", "tool_calls": tool_calls, "trace_items": trace_items}
 
@@ -540,6 +552,17 @@ class Controller:
                 auth_driver_errors.append(pexpect_out)
 
         if success:
+            if self.ground_truth is not None:
+                try:
+                    self.ground_truth.record(
+                        target="weak_ssh",
+                        technique="T1110",
+                        action="ssh_bruteforce",
+                        success=True,
+                        evidence=success[:500],
+                    )
+                except Exception:
+                    pass
             _ledger_set(
                 "SSH-WEAK-PASSWORD",
                 "verified",
@@ -564,6 +587,17 @@ class Controller:
                 f"{', '.join(f'{user}:***' for user, _ in credential_pairs[:4])}; "
                 f"auth_driver={'; '.join(auth_driver_errors[-2:])[:180] or 'password auth failed'}"
             )
+            if self.ground_truth is not None:
+                try:
+                    self.ground_truth.record(
+                        target="weak_ssh",
+                        technique="T1110",
+                        action="ssh_bruteforce",
+                        success=False,
+                        evidence=evidence[:500],
+                    )
+                except Exception:
+                    pass
             _ledger_set(
                 "SSH-WEAK-PASSWORD",
                 "configured",
