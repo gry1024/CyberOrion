@@ -257,7 +257,7 @@ python scripts/run_bench.py --n 100 --mode both --suite threat_intel
 python scripts/run_bench.py --n 30 --mode base --suite attack_kb
 ```
 
-结果落盘 `logs/bench/<run_id>.json`（逐题 gold/pred/原始回答）+ `<run_id>.md`
+结果落盘并随仓库上传：`logs/bench/<run_id>.json`（逐题 gold/pred/原始回答）+ `<run_id>.md`
 （可读报告）。
 
 ### 6.3 UI 运行与核对

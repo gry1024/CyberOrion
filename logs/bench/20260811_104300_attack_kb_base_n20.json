@@ -1,0 +1,437 @@
+{
+ "run_id": "20260811_104300_attack_kb_base_n20",
+ "suite": "attack_kb",
+ "suite_desc": "ATT&CK 知识库访问能力测试（knowledge-access MCQ，答案在 KB 中）",
+ "mode": "base",
+ "arm": "bare",
+ "thinking": "disabled",
+ "n": 20,
+ "seed": 42,
+ "model": "deepseek-v4-flash",
+ "rag_top_k": 0,
+ "pool_size": 629,
+ "started_at": 1786416174.2780242,
+ "finished_at": 1786416180.262004,
+ "elapsed_sec": 6.0,
+ "scores": {
+  "n": 20,
+  "correct_mc_pct": 0.7,
+  "avg_score": 0.7,
+  "parse_fail": 0,
+  "llm_errors": 0,
+  "by_difficulty": {
+   "knowledge": {
+    "n": 20,
+    "correct_mc_pct": 0.7,
+    "avg_score": 0.7
+   }
+  },
+  "by_topic": {
+   "credential-access": {
+    "n": 2,
+    "correct_mc_pct": 0.5,
+    "avg_score": 0.5
+   },
+   "defense-impairment": {
+    "n": 2,
+    "correct_mc_pct": 0.5,
+    "avg_score": 0.5
+   },
+   "discovery": {
+    "n": 4,
+    "correct_mc_pct": 0.75,
+    "avg_score": 0.75
+   },
+   "exfiltration": {
+    "n": 2,
+    "correct_mc_pct": 0.5,
+    "avg_score": 0.5
+   },
+   "lateral-movement": {
+    "n": 2,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "persistence": {
+    "n": 3,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "resource-development": {
+    "n": 1,
+    "correct_mc_pct": 0.0,
+    "avg_score": 0.0
+   },
+   "stealth": {
+    "n": 4,
+    "correct_mc_pct": 0.75,
+    "avg_score": 0.75
+   }
+  }
+ },
+ "results": [
+  {
+   "idx": 25,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1018",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Execution of network enumeration utilities (e.g., net.exe, ping.exe, tracert.exe) in short successio」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "这段摘录描述的是执行网络枚举工具（如 net.exe、ping.exe、tracert.exe）来发现网络结构或主机信息。  \n- T1018 是“远程系统发现”，涉及用工具发现远程系统。  \n- T1046 是“网络服务发现”，通常包括端口扫描或服务枚举，不完全匹配工具列表。  \n- T1069.001 是“权限组发现（本地）”，不匹配。  \n- T1057 是“进程发现”，不匹配。  \n- T1049 是“系统网络连接发现”，通常用 netstat 等查看连接，也不完全匹配。  \n\n“net.exe”常被用于发现网络共享、域信息或远程系统，更贴合 T1018。但摘录中明确提到“network enumeration utilities”且含 ping、tracert，这更倾向“远程系统发现”（T1018）。然而选项中 T1018 是 A，但题目要求选对应技术编号。标准 ATT&CK 中 T1018 描述是“远程系统发现”，常用工具包括 net.exe 等，ping/tracert 也可用于此目的。因此选 A。\n\n但注意：摘录中“in short succession”可能暗示批量执行，仍属于 T1018。故最终答案为 A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 27,
+   "topic": "exfiltration",
+   "difficulty": "knowledge",
+   "attack": "T1020.001",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Configuration changes to virtual TAP/mirror policies that forward traffic to unapproved destinations」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "这段描述提到“virtual TAP/mirror policies”配置更改，将流量转发到未批准的“目的地”。这涉及通过镜像或TAP技术将数据从网络转发到别处，与数据外渗（exfiltration）相关但并非通过标准命令控制通道。\n\n- T1041 是“通过命令和控制通道外渗”，不符合。\n- T1011.001 是“通过物理介质外渗”，不符合。\n- T1048.002 是“通过对称加密的非标准端口外渗”，不匹配。\n- T1020 是“自动收集数据外渗”，也不匹配环境更改。\n- 最接近的是“通过网络镜像/流量复制进行外渗”的变体，但选项中没有完全对应的，唯有 T1020.001 可能指“传输协议镜像”相关，但更准确地说，这更符合 T1020 家族中的“自动数据外渗”中的网络镜像方法。\n\n经过分析，最匹配的是 T1020.001（通过镜像的自动收集）。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 30,
+   "topic": "lateral-movement",
+   "difficulty": "knowledge",
+   "attack": "T1021.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「An SMB-based remote file share access followed by lateral movement actions such as remote service cr」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "该摘录描述的是通过SMB（Server Message Block）进行的远程文件共享访问，随后发生横向移动操作，如远程服务创建。在ATT&CK中，T1021是“远程服务”，其子技术中，T1021.001是“远程桌面协议”，T1021.002是“SMB/Windows管理共享”，T1021.004是“分布式组件对象模型（DCOM）”，T1021.006是“Windows远程管理（WinRM）”。这里明确提到SMB，而T1021.002正好对应SMB/Windows管理共享的远程服务利用。因此最匹配的是T1021.002。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 32,
+   "topic": "lateral-movement",
+   "difficulty": "knowledge",
+   "attack": "T1021.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「SSH login from a remote system (via sshd), followed by user context execution of suspicious binaries」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题目中的描述提到“SSH login from a remote system (via sshd)”，这明确涉及SSH远程登录技术。在ATT&CK中，SSH相关的远程服务利用属于T1021（Remote Services）的子技术。  \n- T1021.001是Remote Desktop Protocol（RDP）  \n- T1021.002是SMB/Windows Admin Shares  \n- T1021.004是SSH  \n- T1021.005是VNC  \n因此，匹配SSH登录的是T1021.004。  \n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 89,
+   "topic": "exfiltration",
+   "difficulty": "knowledge",
+   "attack": "T1052",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects removable drive insertion followed by unusual file access, compression, or staging activity 」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "这段描述提到“可移动驱动插入”后出现“异常文件访问、压缩或暂存活动”，这符合通过可移动介质进行数据外传的检测特征。  \nT1052 是“Exfiltration Over Physical Medium”，其子技术 T1052.001 是“Exfiltration over USB”。  \n而 T1048 是“Exfiltration Over Alternative Protocol”，T1048.002 是其中的“Exfiltration Over Asymmetric Encrypted Non-C2 Protocol”，T1041 是“Exfiltration Over C2 Channel”。  \n描述明确指向物理介质（可移动驱动），因此应选 T1052.001。  \n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 95,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1053.006",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversarial abuse of systemd timers by correlating file creation/modification of .timer and 」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "systemd timers 属于计划任务/定时执行，具体是 Linux 的 cron 替代品。  \n在 ATT&CK 中，T1053 子技术：  \n- .003 是 crontab  \n- .002 是 at (Linux)  \n- .005 是 Windows 计划任务  \n- .006 是 systemd timers  \n\n因此对应 T1053.006。  \n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 104,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1055.009",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversary behavior where a process enumerates and modifies another process's memory using /p」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题目中的关键线索是“enumerates and modifies another process's memory using /p”。  \n`/p` 在此语境下很可能指 `process` 参数或某种进程操作，但更关键的是描述中“process injection”“process memory modification”以及“/p”这类命令行用法常见于 `T1055.013`（Process Injection: Process Doppelgänging）并不匹配；T1055.009 是 Proc Memory，T1055.004 是 Async Procedure Call，T1055.012 是 Process Hollowing。  \n然而 `/p` 在微软的工具如 `procdump` 或某些内存操作中常见于 `T1055.004` 的 APC 注入也可能用到，但“enumerates and modifies another process's memory”更直接对应 T1055.009（Process Injection: Process Memory），因为 T1055.009 专门指的是注入到进程内存并修改。  \n但题中“using /p”可能是 `Process Explorer` 或某工具的命令，实际上 T1055.004 使用 APC 时常有 `/p` 参数，但描述强调“enumerates and modifies ... memory”，更贴近 T1055.009。  \n不过官方定义：T1055.009 是“Process Injection: Proc Memory”，即通过直接读写目标进程内存实现注入；而 T1055.004 是“APC Injection”。`/p` 常见于 Sysinternals 的 `PsExec` 或 `pr",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 114,
+   "topic": "credential-access",
+   "difficulty": "knowledge",
+   "attack": "T1056.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects credential harvesting via userland API hooking (e.g., SetWindowsHookEx, IAT, or inline patch」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "这个检测描述提到“credential harvesting via userland API hooking”，并列举了如 SetWindowsHookEx、IAT 或 inline patch。这些属于在用户态通过挂钩 API 来截获凭据输入的技术。  \n在 ATT&CK 中，T1056 是“输入捕获”，其子技术包括：  \n- T1056.001 是键盘记录  \n- T1056.002 是GUI输入捕获（例如使用钩子或直接读取窗口消息）  \n- T1056.003 是Web门户捕获  \n- T1056.004 是凭证 API 挂钩（如通过系统函数挂钩在用户态捕获凭据）  \n\n这里的“userland API hooking”正好对应 T1056.004。  \n因此正确选项是 D。  \n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 142,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1070.009",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversary activity that removes persistence artifacts such as services, registry keys, sched」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "这段描述提到“removes persistence artifacts such as services, registry keys, schedule tasks”，这属于清除攻击者留下的持久化迹象，对应ATT&CK中T1070（Indicator Removal）下的子技术。  \nT1070.007是清除网络共享的痕迹，T1070.008是清除邮件痕迹，T1070.009是清除云实例痕迹，T1070.010是清除命令历史。  \n没有直接匹配“清除持久化”的特定子技术，但“删除持久化组件”本身通常被归入T1070（Indicator Removal）的通用类别。但选项有E（T1070）和具体子技术，题目似乎希望选最具体的，然而没有完全对应的子技术。  \n再查，T1070.009是“Clear Persistence”吗？实际上ATT&CK中，T1070.009是“Clear Persistence”吗？记忆里T1070.009是“Clear Persistence”技术，但官方编号是T1070.009？确认真实：T1070.009是“Clear Persistence”，属于Indicator Removal下的子技术。  \n所以描述匹配T1070.009。\n\n但选项里没有单独列，只有D是T1070.009。所以选D。\n\n然而，再确认：T1070.009确实是“Clear Persistence”。因此答案是D。\n\n但注意选项B是T1070.008，C是T1070.010，A是007，D是009，E是父类。描述明确“removes persistence artifacts”，所以最对应009。  \n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 223,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1135",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Process or script enumerates network shares via CLI (net view/net share, PowerShell Get-SmbShare/WMI」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "该描述提到“enumulates network shares via CLI”以及相关命令，这属于发现远程系统或网络共享的行为。在ATT&CK中，枚举网络共享对应的是T1135（Network Share Discovery），而非T1049（系统网络连接发现）、T1046（网络服务发现）等。因此正确答案是B。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 228,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1137",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Office-based persistence via Office template macros, Outlook forms/rules/homepage, or registry-persi」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题目中的描述提到“Office-based persistence via Office template macros, Outlook forms/rules/homepage, or registry-persi”，这对应的是Office应用启动项（Office Application Startup）技术，其子技术包括Outlook Forms（T1137.001）、Outlook Home Page（T1137.003）、Outlook Rules（T1137.004）等。但描述中“registry-persi”缺失部分很可能是“registry persistence”，但这里明确列出的是“Office template macros”，这属于T1137.001（Office Template Macros）的子技术。不过，题目中提到了“Outlook forms/rules/homepage”，如果整体看，这个描述最可能指T1137（Office Application Startup）本身，因为它是这些子技术的父技术，但题目问的是最可能对应哪个编号。  \n选项中有T1137、T1137.001、T1137.002、T1137.003、T1137.006。  \nT1137.002是Office Test（Outlook）？实际上T1137.002是Outlook Forms（是的，T1137.001是Outlook Forms，T1137.002是Outlook Home Page？让我回忆：T1137的细分：T1137.001是Office Template Macros，T1137.002是Outlook Home Page，T1137.003是Outlook Forms，T1137.004是Outlook Rules，T1137.005是Outlook ",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 238,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1176.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Adversary installs or side-loads an IDE extension (VS Code, IntelliJ/JetBrains, Eclipse) or enables 」",
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "C"
+   ],
+   "raw": "该描述提到了“安装或侧载一个IDE扩展”（如VS Code、IntelliJ/JetBrains、Eclipse），这属于在受害者的开发环境中植入恶意软件或后门。在MITRE ATT&CK中，这对应的是“浏览器扩展”或“应用扩展”技术，但具体到IDE扩展属于更广泛的“软件附加组件或插件”类别。通常，该技术编号是T1176（浏览器扩展），而IDE扩展可能被归类于其子技术，但题目中选项有T1176基础编号和两个子编号。考虑到描述明确提IDE扩展，且没有特定子编号的证据，通常T1176本身指代浏览器或应用扩展，而子编号T1176.001和T1176.002分别指“浏览器扩展”和“应用/软件扩展”？实际上，T1176.002是“应用扩展”，正对应IDE插件。但题目选项中有B（T1176）和C（T1176.002）。根据MITRE知识库，T1176是“浏览器扩展”，而T1176.002是“应用扩展”（包括IDE），所以正确答案应为C。但题干中摘录截断，最后有“enables ”，可能是指启用集成开发环境扩展。为了严谨，MITRE明确将IDE扩展列为T1176.002。因此最终选C。\n\n但选项中有B、C、D，需要判断。根据官方定义，T1176.002是“应用扩展”，涵盖IDE插件。所以答案选C。\n\nANSWER: [\"C\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 250,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1201",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Cause→effect chain: (1) a user or service spawns a shell/PowerShell that queries local/domain passwo」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "这段描述提到“用户或服务启动shell/PowerShell查询本地/域密码”，这关联到发现或收集凭据相关行为。  \n选项C是账户发现（域账户），D是系统所有者/用户发现，B是键盘记录（不太匹配），A是密码策略发现，E是进程发现。  \n“查询密码”更可能指向密码策略发现（T1201）或凭据访问，但此处强调“密码查询”，结合常见ATT&CK映射，查询密码策略是T1201。不过描述中“权限”更可能指用户发现，但“密码”一词让T1201更贴切。  \n\n严格考虑，查询本地/域密码可能指获取密码哈希或策略，但最直接对应是密码策略发现（T1201）。  \n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 281,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1218.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Execution of InstallUtil.exe from .NET framework directories with arguments specifying non-standard 」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "InstallUtil.exe 是 Microsoft .NET Framework 自带的工具，攻击者常利用其执行恶意代码，属于“Signed Binary Proxy Execution”下的子技术。  \n非标准参数执行 InstallUtil.exe 对应的是 T1218.004（InstallUtil），而其他选项分别对应 Mshta、Regsvr32 等。  \n因此正确答案是 A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 432,
+   "topic": "credential-access",
+   "difficulty": "knowledge",
+   "attack": "T1555.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects suspicious memory access attempts targeting the `securityd` process. Observes tools invoking」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "题目提到检测针对 `securityd` 进程的可疑内存访问尝试，并观察工具调用。`securityd` 是 macOS 上处理钥匙串（Keychain）访问的守护进程。针对它的内存访问通常与窃取钥匙串凭据相关，对应 ATT&CK 技术是“Credentials from Password Stores”的子技术“Keychain”，其编号是 T1555.001。所以正确答案是 E。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 517,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1574.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detection focuses on adversaries placing or modifying malicious dylibs in locations searched by legi」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "该检测描述提到“dylibs”和“locations searched by legitimate”，这指的是在 macOS 或 iOS 上利用动态库搜索路径或环境变量进行劫持，属于“DLL Search Order Hijacking”的子技术。其中，针对 macOS 的 dylib 劫持通常对应 T1574.001（DLL Search Order Hijacking），因为该子技术涵盖动态库搜索顺序劫持。其他选项如 .004、.006、.007、.008 分别对应不同的劫持方式（如 .dylib 特定变体或 .plugin 等），但此处描述更宽泛且直接指向搜索顺序修改。\n\n因此正确答案是 B。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 558,
+   "topic": "defense-impairment",
+   "difficulty": "knowledge",
+   "attack": "T1599.001",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Defenders may observe unauthorized or anomalous changes to NAT configurations, including the additio」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "这段摘录提到的是“对NAT配置的未授权或异常更改”，这属于网络基础设施被篡改的范畴。在MITRE ATT&CK中，T1599是“网络地址转换”，而T1599.001是其中的一个子技术（“更改NAT配置”）。摘录中明确提到“NAT配置”的更改，最匹配的应该是T1599.001，而不是更宽泛的T1599。因此正确答案是E。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 574,
+   "topic": "resource-development",
+   "difficulty": "knowledge",
+   "attack": "T1608.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「If infrastructure or patterns in the malicious web content utilized to deliver a [Drive-by Compromis」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "这段摘录提到“malicious web content utilized to deliver a Drive-by Compromise”，涉及攻击者准备交付恶意内容的Web基础设施，对应的是“Stage Capabilities”战术下的“Upload Malware”或“Upload Tool”等子技术。  \nT1608.001是Upload Malware，T1608.002是Upload Tool，T1608.004是Upload Malware（备用？），T1608.005是Link to Malware，T1608.006是Link to Tool。  \n这里明确是“web content”用于交付，且说“utilized to deliver”，更符合“Upload Malware”（T1608.001）或“Link to Malware”（T1608.005）。但摘录强调“web content”本身是恶意内容，通常指攻击者先上传恶意文件或代码到Web服务器，而T1608.001更直接匹配“上传恶意软件”。  \n根据常见分类，Drive-by Compromise的交付常涉及上传恶意代码到受控站点，因此选A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 604,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1673",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Monitor for execution of hypervisor management commands such as `esxcli vm process list` or `vim-cmd」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "这个描述提到监控执行hypervisor管理命令，如`esxcli vm process list`或`vim-cmd`，这些命令用于查看虚拟机进程列表，属于进程发现（Process Discovery）的范畴。在ATT&CK中，进程发现的编号是T1057。因此最匹配的是E选项。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 616,
+   "topic": "defense-impairment",
+   "difficulty": "knowledge",
+   "attack": "T1685.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Cloud API events where logging services are stopped, deleted, or modified in a way that disables aud」",
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "这段描述提到“Cloud API events where logging services are stopped, deleted, or modified in a way that disables auditing”，这属于攻击者禁用或削弱云环境日志记录的行为，在ATT&CK中对应的是“Impair Defenses”下的子技术“Disable Cloud Logging”。  \n在MITRE ATT&CK中，T1685是“Impair Defenses”，其子技术包括：  \n- .001: Disable or Modify Tools  \n- .002: Disable Windows Event Logging  \n- .003: Impair Command History Logging  \n- .004: Disable Cloud Logging  \n\n因此该描述对应的是T1685.004。  \n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  }
+ ],
+ "llm_errors": 0,
+ "error": null,
+ "status": "done"
+}

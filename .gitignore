@@ -17,10 +17,16 @@ logs/*.log
 # Workspaces (agent-generated debug scripts, not part of the product)
 workspaces/
 
-# Logs: ignore raw benchmark JSON + timestamped temp sessions;
-# keep bench reports (.md) and session_r8_demo/
-logs/bench/*.json
+# Logs: keep benchmark JSON/Markdown results for GitHub auditability;
+# ignore only timestamped temp sessions.
 logs/session_2026*/
+logs/test_runs/
+
+# Benchmark workspace safety: track curated fixtures/results, not copied venvs or nested clones.
+benchmarks/venv/
+benchmarks/**/.venv/
+benchmarks/**/.git/
+benchmarks/**/__pycache__/
 
 # OS / editor
 .DS_Store

@@ -1,6 +1,6 @@
 # CyberSOCEval 基准（bench/）
 
-对**自有 pipeline** 打分的 CyberSOCEval `malware_analysis` 基准 harness。代码：`cyberorion/bench/cybersoceval.py`；结果落盘 `logs/bench/<run_id>.json`。
+对**自有 pipeline** 打分的 CyberSOCEval `malware_analysis` 基准 harness。代码：`cyberorion/bench/cybersoceval.py`；结果落盘 `logs/bench/<run_id>.json`，并随仓库上传。
 
 > 为什么不直接用官方 runner：官方 runner 用 `response_format=json_object`，我们接入的 endpoint 会把 JSON schema 提示原样复读而不是作答（历史上 100 题里 23 题因此被判 INVALID）。本 harness 改为纯文本提示 + 容错解析，解析失败记 wrong 并单独统计 `parse_fail`。
 
@@ -8,7 +8,7 @@
 
 ## 1. 套件与题目
 
-- 数据集：`malware_analysis` 多选题（609 题），默认路径 `<cai-repo>/benchmarks/cybersoceval/PurpleLlama/CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/questions.json`；
+- 数据集：`malware_analysis` 多选题（609 题），默认路径 `<repo>/benchmarks/cybersoceval/PurpleLlama/CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/questions.json`；
 - 题目元数据：`topic` / `difficulty` / `attack`（所引用沙箱报告所属的恶意软件家族/类别，如 infostealers、ransomware、remcos）；
 - 采样：`sample_questions(questions, n, seed)` 固定 seed 确定性采样——**base 与 rag 回答同一批题目**，保证对比公平；
 - 单次 LLM 调用失败不中断整轮：记 `__LLM_ERROR__` 原文入库、该题记 wrong。
@@ -56,7 +56,7 @@ python scripts/run_bench.py --n 100 --mode rag --seed 42
 python scripts/run_bench.py --n 60  --mode rag_fs      # legacy 模式
 ```
 
-`--mode both` 的对比表以**框架有效性**为标题：同一批题目、同一模型，Δ（框架 − 纯 LLM）即框架增益。每次运行自动落盘 `logs/bench/<run_id>.md` 逐题报告（完整题干/选项/模型作答），CLI 末尾会打印路径。
+`--mode both` 的对比表以**框架有效性**为标题：同一批题目、同一模型，Δ（框架 − 纯 LLM）即框架增益。每次运行自动落盘 `logs/bench/<run_id>.json` 与 `logs/bench/<run_id>.md` 逐题报告（完整题干/选项/模型作答），CLI 末尾会打印路径；两类结果都纳入 GitHub。
 
 **UI**：`server.py` 起服后，Benchmark 标签页 → 运行卡片「题目预览」先看具体题目（按 seed 采样、标注正确答案）→ 选纯 LLM/框架两臂与题量 n → 实时进度（WS `bench` 事件）→ 历史结果表格 + 两臂对比柱状图（Δ 徽章）→ 点击行打开逐题详情抽屉（完整题干/选项/gold vs pred/模型原始回答）。
 

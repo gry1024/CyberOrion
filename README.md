@@ -42,21 +42,22 @@
 > 以下命令在本项目实际运行环境（WSL2 + Docker Desktop）逐条验证过。路径按实际部署写，照抄即可。
 
 > **目录约定**：本文档中 `<cai-repo>` 指 cyberorion 的**父目录**——即你 `git clone` 的位置。
-> cyberorion 依赖的外部资源（`.env` / `cai_env` / `benchmarks`）都放在这里，与 cyberorion 同级：
+> cyberorion 的密钥与虚拟环境放在仓库外；benchmark 题库和运行结果放在仓库内，保证 GitHub 可审计：
 >
 > ```
 > <cai-repo>/                    ← 你 clone 的父目录（任意路径均可）
 > ├── .env                       ← API key 等配置（§③ 创建）
 > ├── cai_env/                   ← Python 虚拟环境（§② 创建）
-> ├── benchmarks/                ← 基准数据集（可选，仅 bench 模块用）
 > └── cyberorion/                ← git clone 出来的本仓库
 >     ├── server.py
+>     ├── benchmarks/            ← 随仓库上传的 benchmark 题库/清单
+>     ├── logs/bench/            ← 随仓库上传的 benchmark JSON/Markdown 结果
 >     ├── .env.example
 >     └── ...
 > ```
 >
-> 默认零配置即可运行；如果你的 venv / benchmarks 在别处，设环境变量覆盖即可（见 [paths.py](cyberorion/paths.py)）：
-> `CAI_VENV` / `CICIDS_DIR` / `PURPLE_LLAMA_DIR` / `CVEBENCH_REPO`
+> 默认零配置即可运行；如果你的 venv / 完整第三方 benchmark 镜像在别处，设环境变量覆盖即可（见 [paths.py](cyberorion/paths.py)）：
+> `CAI_VENV` / `CAI_BENCHMARKS` / `CICIDS_DIR` / `PURPLE_LLAMA_DIR` / `CVEBENCH_REPO`
 
 ### ① 前置条件
 
@@ -141,7 +142,7 @@ python scripts/run_bench.py --n 100 --mode both --suite attack_kb
 python scripts/run_bench.py --n 100 --mode both --suite threat_intel
 ```
 
-结果落盘 `logs/bench/<run_id>.json`。当前实测（n=100 seed=42 deepseek-v4-flash，
+结果落盘 `logs/bench/<run_id>.json` 与 `logs/bench/<run_id>.md`，两者都纳入 GitHub。当前实测（n=100 seed=42 deepseek-v4-flash，
 Jaccard 平均得分）：attack_kb 51%→87%（+36pt）、malware_analysis 39.0%→48.6%
 （+9.6pt）、threat_intel ≈持平。完整结果史与局限见 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
 

@@ -3,21 +3,21 @@
 设计原则
 ========
 1. **仓库内路径**用 ``Path(__file__)`` 相对推导，永远不写死绝对路径；
-2. **仓库外路径**（venv / .env / benchmarks 数据集）通过环境变量覆盖，
-   默认值基于仓库根的父目录推导，合作者 clone 后零配置即可用；
+2. **仓库外路径**（venv / .env）通过环境变量覆盖，默认值基于仓库根的父目录推导；
+   **benchmark 题库与结果默认在仓库内**，确保 GitHub clone 后文档与代码一致；
 3. 所有路径都是 ``Path`` 对象，调用方按需 ``str()``。
 
 环境变量
 ========
 - ``CAI_VENV``         : Python 虚拟环境路径（默认 ``<cai-repo>/cai_env``）
 - ``CAI_ENV_FILE``     : .env 文件路径（默认 ``<cai-repo>/.env``）
-- ``CAI_BENCHMARKS``   : 基准数据集根目录（默认 ``<cai-repo>/benchmarks``）
+- ``CAI_BENCHMARKS``   : 基准数据集根目录（默认 ``<repo>/benchmarks``）
 - ``CICIDS_DIR``       : CICIDS2017 CSV 目录（默认 ``<repo>/cyberorion/traffic/data/cicids2017``）
-- ``PURPLE_LLAMA_DIR`` : PurpleLlama 仓库根（默认 ``<cai-repo>/benchmarks/cybersoceval/PurpleLlama``）
-- ``CVEBENCH_REPO``    : CVE-Bench 仓库路径（默认 ``<cai-repo>/benchmarks/cvebench/CVE-Bench``）
+- ``PURPLE_LLAMA_DIR`` : PurpleLlama 数据根（默认 ``<repo>/benchmarks/cybersoceval/PurpleLlama``）
+- ``CVEBENCH_REPO``    : CVE-Bench 仓库路径（默认 ``<repo>/benchmarks/cvebench/CVE-Bench``）
 
 其中 ``<repo>`` = cyberorion 仓库根（本文件所在目录上两级），
-``<cai-repo>`` = ``<repo>.parent``（含 ``.env`` / ``cai_env`` / ``benchmarks``）。
+``<cai-repo>`` = ``<repo>.parent``（含 ``.env`` / ``cai_env``）。
 """
 
 from __future__ import annotations
@@ -45,8 +45,9 @@ CAI_VENV_PYTHON: Path = CAI_VENV / "bin" / "python"
 # .env 配置文件（server.py / run.py 启动时自动加载）。
 ENV_FILE: Path = _env_path("CAI_ENV_FILE", CAI_ROOT / ".env")
 
-# 基准数据集根目录。
-BENCHMARKS_DIR: Path = _env_path("CAI_BENCHMARKS", CAI_ROOT / "benchmarks")
+# 基准题库/数据根目录。默认放在仓库内，保证 GitHub 文档引用的题库随代码上传；
+# 若本地有完整第三方数据镜像，可用 CAI_BENCHMARKS 覆盖。
+BENCHMARKS_DIR: Path = _env_path("CAI_BENCHMARKS", REPO_ROOT / "benchmarks")
 
 # CICIDS2017 流量数据集 CSV 目录（流量分析模块用）。
 CICIDS_DIR: Path = _env_path("CICIDS_DIR", REPO_ROOT / "cyberorion" / "traffic" / "data" / "cicids2017")

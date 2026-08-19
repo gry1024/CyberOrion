@@ -1,0 +1,437 @@
+{
+ "run_id": "20260808_232656_attack_kb_rag_n20",
+ "suite": "attack_kb",
+ "suite_desc": "ATT&CK 知识库访问能力测试（knowledge-access MCQ，答案在 KB 中）",
+ "mode": "rag",
+ "arm": "framework",
+ "thinking": "disabled",
+ "n": 20,
+ "seed": 42,
+ "model": "deepseek-v4-flash",
+ "rag_top_k": 3,
+ "pool_size": 629,
+ "started_at": 1786202811.7789402,
+ "finished_at": 1786202816.4487774,
+ "elapsed_sec": 4.7,
+ "scores": {
+  "n": 20,
+  "correct_mc_pct": 0.85,
+  "avg_score": 0.85,
+  "parse_fail": 0,
+  "llm_errors": 0,
+  "by_difficulty": {
+   "knowledge": {
+    "n": 20,
+    "correct_mc_pct": 0.85,
+    "avg_score": 0.85
+   }
+  },
+  "by_topic": {
+   "credential-access": {
+    "n": 2,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "defense-impairment": {
+    "n": 2,
+    "correct_mc_pct": 0.5,
+    "avg_score": 0.5
+   },
+   "discovery": {
+    "n": 4,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "exfiltration": {
+    "n": 2,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "lateral-movement": {
+    "n": 2,
+    "correct_mc_pct": 0.5,
+    "avg_score": 0.5
+   },
+   "persistence": {
+    "n": 3,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "resource-development": {
+    "n": 1,
+    "correct_mc_pct": 0.0,
+    "avg_score": 0.0
+   },
+   "stealth": {
+    "n": 4,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   }
+  }
+ },
+ "results": [
+  {
+   "idx": 25,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1018",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Execution of network enumeration utilities (e.g., net.exe, ping.exe, tracert.exe) in short successio」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "题目摘录提到“Execution of network enumeration utilities (e.g., net.exe, ping.exe, tracert.exe) in short successio”，这与知识库中T1018的检测要点完全一致：“Execution of network enumeration utilities (e.g., net.exe, ping.exe, tracert.exe) in short succession, often chained with lateral movement tools or system enumeration commands.”  \n因此正确选项是A. T1018。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 27,
+   "topic": "exfiltration",
+   "difficulty": "knowledge",
+   "attack": "T1020.001",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Configuration changes to virtual TAP/mirror policies that forward traffic to unapproved destinations」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "题干摘录提到“Configuration changes to virtual TAP/mirror policies that forward traffic to unapproved destinations”，这与知识库中 T1020.001 的检测要点完全一致：“Configuration changes to virtual TAP/mirror policies that forward traffic to unapproved destinations.” 因此，该技术编号应为 T1020.001，对应选项 E。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 30,
+   "topic": "lateral-movement",
+   "difficulty": "knowledge",
+   "attack": "T1021.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「An SMB-based remote file share access followed by lateral movement actions such as remote service cr」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题干摘录提到“SMB-based remote file share access followed by lateral movement actions...using ADMIN$ or C$ shares”，这与知识库中T1021.002的检测要点完全吻合。该条目是T1021.002，选项B对应此编号。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 32,
+   "topic": "lateral-movement",
+   "difficulty": "knowledge",
+   "attack": "T1021.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「SSH login from a remote system (via sshd), followed by user context execution of suspicious binaries」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题干摘录明确提到“SSH login from a remote system (via sshd), followed by user context execution of suspicious binaries”，这与知识库中 T1021.004 的检测要点完全一致。T1021.004 本身是 SSH 子技术，而非父技术 T1021 或其他端口（如 RDP、WinRM 等）。因此选 B。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 89,
+   "topic": "exfiltration",
+   "difficulty": "knowledge",
+   "attack": "T1052",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects removable drive insertion followed by unusual file access, compression, or staging activity 」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "题干摘录“Detects removable drive insertion followed by unusual file access, compression, or staging activity”与知识库中T1052条目的检测要点完全一致。T1052是独立技术条目，不是T1052.001或父技术T1052的子技术拆分场景，因此应选T1052本身，对应选项A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 95,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1053.006",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversarial abuse of systemd timers by correlating file creation/modification of .timer and 」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "题干摘录提到“systemd timers”以及“.timer”文件，这与知识库中T1053.006 Systemd Timers的检测要点完全一致。因此正确选项是E。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 104,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1055.009",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversary behavior where a process enumerates and modifies another process's memory using /p」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录明确提到“using /p”以及“process enumerates and modifies another process's memory via /proc/[pid]/maps and /proc/[pid]/mem files”，这与知识库中T1055.009的检测要点完全一致。因此正确选项是D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 114,
+   "topic": "credential-access",
+   "difficulty": "knowledge",
+   "attack": "T1056.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects credential harvesting via userland API hooking (e.g., SetWindowsHookEx, IAT, or inline patch」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录明确提到“credential harvesting via userland API hooking (e.g., SetWindowsHookEx, IAT, or inline patch”，这与知识库检索结果中T1056.004的检测要点完全一致。  \n因此正确选项是T1056.004，对应选项D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 142,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1070.009",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects adversary activity that removes persistence artifacts such as services, registry keys, sched」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录“Detects adversary activity that removes persistence artifacts such as services, registry keys, sched...”与知识库中T1070.009 Clear Persistence的检测要点完全对应，该条目明确描述删除持久化工件（服务、注册表键、计划任务等）。因此正确选项是D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 223,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1135",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Process or script enumerates network shares via CLI (net view/net share, PowerShell Get-SmbShare/WMI」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题干摘录提到“Process or script enumerates network shares via CLI (net view/net share, PowerShell Get-SmbShare/WMI)”，这与知识库中T1135的检测要点完全吻合（T1135检测要点开头即为此描述）。其他选项如T1070.005是断开共享连接，与枚举共享不符。因此选B。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 228,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1137",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Office-based persistence via Office template macros, Outlook forms/rules/homepage, or registry-persi」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录明确提到“Office-based persistence via Office template macros, Outlook forms/rules/homepage, or registry-persistent scripts”，这与知识库中 **T1137 Office Application Startup** 的检测要点完全一致，且摘录直接来自父技术 T1137 的描述，而不是其子技术（如 T1137.001 或其他子编号）。根据作答要求，若摘录与父技术条目本身匹配，应选父技术编号。\n\n因此正确答案是 D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 238,
+   "topic": "persistence",
+   "difficulty": "knowledge",
+   "attack": "T1176.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Adversary installs or side-loads an IDE extension (VS Code, IntelliJ/JetBrains, Eclipse) or enables 」",
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "C"
+   ],
+   "raw": "题干摘录是“Adversary installs or side-loads an IDE extension...”，与知识库检索结果中T1176.002的检测要点和描述完全一致。  \n按照要求，必须选该条目本身的编号，即T1176.002。  \n\nANSWER: [\"C\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 250,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1201",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Cause→effect chain: (1) a user or service spawns a shell/PowerShell that queries local/domain passwo」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "题干摘录提到了“queries local/domain password policy”，这与知识库中 T1201 Password Policy Discovery 的检测要点内容完全一致。其他选项如 T1124（账户发现）、T1087.002（用户目录发现子技术）、T1033（系统所有者/用户发现）、T1057（进程发现）均不匹配该具体描述。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 281,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1218.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Execution of InstallUtil.exe from .NET framework directories with arguments specifying non-standard 」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "题干摘录明确提到“Execution of InstallUtil.exe from .NET framework directories with arguments specifying non-standard”，这与知识库中 T1218.004 的检测要点完全一致。其他选项（如T1218.005、T1218.007等）在检索结果中未出现相关匹配内容。因此正确答案是A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 432,
+   "topic": "credential-access",
+   "difficulty": "knowledge",
+   "attack": "T1555.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detects suspicious memory access attempts targeting the `securityd` process. Observes tools invoking」",
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题干摘录提到“suspicious memory access attempts targeting the `securityd` process”以及“tools invoking process memory read operations”。  \n知识库检索结果中，T1555.002 的检测要点明确提到“Detects suspicious memory access attempts targeting the `securityd` process”和“Observes tools invoking process memory read operations”，与题干内容完全一致。  \n因此对应编号是 T1555.002。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 517,
+   "topic": "stealth",
+   "difficulty": "knowledge",
+   "attack": "T1574.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Detection focuses on adversaries placing or modifying malicious dylibs in locations searched by legi」",
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "raw": "题干摘录提到“Detection focuses on adversaries placing or modifying malicious dylibs in locations searched by legitimate applications”，这与知识库检索结果中 T1574.004 Dylib Hijacking 的检测要点完全一致（“Detection focuses on adversaries placing or modifying malicious dylibs in locations searched by legitimate applications”）。因此正确答案是 A。\n\nANSWER: [\"A\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 558,
+   "topic": "defense-impairment",
+   "difficulty": "knowledge",
+   "attack": "T1599.001",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Defenders may observe unauthorized or anomalous changes to NAT configurations, including the additio」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "E"
+   ],
+   "raw": "题干摘录提到“Defenders may observe unauthorized or anomalous changes to NAT configurations...”，这与知识库中 T1599.001 的检测要点完全一致（该条目明确描述 NAT 配置异常变化）。且题目要求选条目本身的编号，而不是父技术 T1599。  \n\n因此正确答案是 E。\n\nANSWER: [\"E\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 574,
+   "topic": "resource-development",
+   "difficulty": "knowledge",
+   "attack": "T1608.004",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「If infrastructure or patterns in the malicious web content utilized to deliver a [Drive-by Compromis」",
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录中的“If infrastructure or patterns in the malicious web content utilized to deliver a Drive-by Compromise”与知识库检索结果中T1608.004的“Detection”部分内容完全一致。因此对应编号是T1608.004，即选项D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  },
+  {
+   "idx": 604,
+   "topic": "discovery",
+   "difficulty": "knowledge",
+   "attack": "T1673",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Monitor for execution of hypervisor management commands such as `esxcli vm process list` or `vim-cmd」",
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "raw": "题干摘录提到检测“hypervisor management commands such as `esxcli vm process list` or `vim-cmd`”，这与知识库中T1673的检测要点完全一致（明确列出了这些命令用于枚举虚拟机的检测）。T1059.012虽然也涉及esxcli/vim-cmd，但其检测重点是停止VM、网络配置等，而非VM枚举。因此正确答案是T1673，对应选项D。\n\nANSWER: [\"D\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": true,
+   "jaccard": 1.0
+  },
+  {
+   "idx": 616,
+   "topic": "defense-impairment",
+   "difficulty": "knowledge",
+   "attack": "T1685.002",
+   "question": "以下检测描述摘录最可能对应哪一个 MITRE ATT&CK 技术编号？\n\n「Cloud API events where logging services are stopped, deleted, or modified in a way that disables aud」",
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "B"
+   ],
+   "raw": "题干摘录明确提到“Cloud API events where logging services are stopped, deleted, or modified in a way that disables audit visibility”，这与知识库中 T1685.002 的检测要点内容完全一致，且该条目是独立技术，不是父技术或子技术编号。因此正确答案是 B。\n\nANSWER: [\"B\"]",
+   "parse_ok": true,
+   "llm_error": false,
+   "exact": false,
+   "jaccard": 0.0
+  }
+ ],
+ "llm_errors": 0,
+ "error": null,
+ "status": "done"
+}

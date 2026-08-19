@@ -1,0 +1,686 @@
+{
+  "schema_version": 2,
+  "run_id": "20260818_145132_soc_evidence_base_n4",
+  "suite": "soc_evidence",
+  "mode": "base",
+  "arm": "bare",
+  "n": 4,
+  "seed": 42,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787035886.827616,
+  "finished_at": 1787035892.0070596,
+  "elapsed_sec": 5.18,
+  "scores": {
+    "n": 4,
+    "task_success": 0.7563,
+    "detection_f1": 0.3,
+    "attack_f1": 0.875,
+    "evidence_grounding": 0.9375,
+    "unsupported_claim_rate": 0.0625,
+    "response_completeness": 0.0,
+    "unsafe_action_rate": 0.0,
+    "tool_call_validity": 1.0,
+    "useful_action_ratio": 1.0,
+    "confidence_intervals": {
+      "task_success": [
+        0.6687,
+        0.8
+      ],
+      "detection_f1": [
+        0.1,
+        0.4
+      ],
+      "attack_f1": [
+        0.625,
+        1.0
+      ],
+      "evidence_grounding": [
+        0.8125,
+        1.0
+      ],
+      "unsupported_claim_rate": [
+        0.0,
+        0.1875
+      ],
+      "response_completeness": [
+        0.0,
+        0.0
+      ],
+      "unsafe_action_rate": [
+        0.0,
+        0.0
+      ],
+      "tool_call_validity": [
+        1.0,
+        1.0
+      ],
+      "useful_action_ratio": [
+        1.0,
+        1.0
+      ]
+    },
+    "failure_taxonomy": {
+      "unsupported_claim": 1
+    },
+    "parse_fail": 0,
+    "llm_errors": 0,
+    "avg_latency_ms": 3647.8,
+    "estimated_tokens": 1782,
+    "correct_mc_pct": 0.7563,
+    "avg_score": 0.7563,
+    "by_difficulty": {},
+    "by_topic": {}
+  },
+  "results": [
+    {
+      "idx": 0,
+      "case_id": "SOC-002",
+      "task_type": "attack_chain",
+      "title": "Authentication-to-RDP chain",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "brute_force",
+          "lateral_movement",
+          "rdp_use"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "response_actions": [
+          "isolate_fin_ws22",
+          "disable_svc_backup_account",
+          "block_source_ip_10_24_7_19",
+          "review_rdp_access_logs"
+        ],
+        "claims": [
+          {
+            "text": "Brute force attack on svc_backup succeeded, leading to RDP session to FIN-WS22.",
+            "evidence_ids": [
+              "E1",
+              "E2",
+              "E3"
+            ]
+          }
+        ],
+        "confidence": 0.85,
+        "tool_trace": [
+          {
+            "agent": "SOC_analyst",
+            "tool": "auth_log_review",
+            "status": "ok",
+            "useful": true
+          },
+          {
+            "agent": "SOC_analyst",
+            "tool": "edr_review",
+            "status": "ok",
+            "useful": true
+          }
+        ]
+      },
+      "raw": "{\n  \"verdict\": \"malicious\",\n  \"incident_labels\": [\"brute_force\", \"lateral_movement\", \"rdp_use\"],\n  \"attack_techniques\": [\"T1110\", \"T1021.001\"],\n  \"evidence_ids\": [\"E1\", \"E2\", \"E3\"],\n  \"response_actions\": [\"isolate_fin_ws22\", \"disable_svc_backup_account\", \"block_source_ip_10_24_7_19\", \"review_rdp_access_logs\"],\n  \"claims\": [\n    {\"text\": \"Brute force attack on svc_backup succeeded, leading to RDP session to FIN-WS22.\", \"evidence_ids\": [\"E1\", \"E2\", \"E3\"]}\n  ],\n  \"confidence\": 0.85,\n  \"tool_trace\": [\n    {\"agent\": \"SOC_analyst\", \"tool\": \"auth_log_review\", \"status\": \"ok\", \"useful\": true},\n    {\"agent\": \"SOC_analyst\", \"tool\": \"edr_review\", \"status\": \"ok\", \"useful\": true}\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [
+        {
+          "seq": 1,
+          "agent": "PlainLLM",
+          "event": "analysis",
+          "tool": null,
+          "status": "ok",
+          "useful": true
+        }
+      ],
+      "retrieval_context": [],
+      "metrics": {
+        "detection_precision": 0.3333,
+        "detection_recall": 0.5,
+        "detection_f1": 0.4,
+        "attack_precision": 1.0,
+        "attack_recall": 1.0,
+        "attack_f1": 1.0,
+        "evidence_grounding": 1.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 1.0,
+        "useful_action_ratio": 1.0,
+        "task_success": 0.8
+      },
+      "failure_tags": [],
+      "latency_ms": 2417.4,
+      "estimated_tokens": 430
+    },
+    {
+      "idx": 1,
+      "case_id": "SOC-001",
+      "task_type": "alert_triage",
+      "title": "Service-account password spray",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_brute_force",
+          "lateral_movement",
+          "rogue_rdp_access"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "response_actions": [
+          "disable_svc_backup_account",
+          "isolate_fin_ws22",
+          "block_source_ip_10_24_7_19"
+        ],
+        "claims": [
+          {
+            "text": "Attacker brute-forced svc_backup account from 10.24.7.19 and succeeded.",
+            "evidence_ids": [
+              "E1",
+              "E2"
+            ]
+          },
+          {
+            "text": "Attacker then used the compromised account to establish RDP remote access to FIN-WS22.",
+            "evidence_ids": [
+              "E3"
+            ]
+          }
+        ],
+        "confidence": 0.8,
+        "tool_trace": [
+          {
+            "agent": "soc_analyst",
+            "tool": "log_review",
+            "status": "ok",
+            "useful": true
+          }
+        ]
+      },
+      "raw": "{\n  \"verdict\": \"malicious\",\n  \"incident_labels\": [\"credential_brute_force\", \"lateral_movement\", \"rogue_rdp_access\"],\n  \"attack_techniques\": [\"T1110\", \"T1021.001\"],\n  \"evidence_ids\": [\"E1\", \"E2\", \"E3\"],\n  \"response_actions\": [\"disable_svc_backup_account\", \"isolate_fin_ws22\", \"block_source_ip_10_24_7_19\"],\n  \"claims\": [\n    {\"text\": \"Attacker brute-forced svc_backup account from 10.24.7.19 and succeeded.\", \"evidence_ids\": [\"E1\", \"E2\"]},\n    {\"text\": \"Attacker then used the compromised account to establish RDP remote access to FIN-WS22.\", \"evidence_ids\": [\"E3\"]}\n  ],\n  \"confidence\": 0.8,\n  \"tool_trace\": [\n    {\"agent\": \"soc_analyst\", \"tool\": \"log_review\", \"status\": \"ok\", \"useful\": true}\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [
+        {
+          "seq": 1,
+          "agent": "PlainLLM",
+          "event": "analysis",
+          "tool": null,
+          "status": "ok",
+          "useful": true
+        }
+      ],
+      "retrieval_context": [],
+      "metrics": {
+        "detection_precision": 0.3333,
+        "detection_recall": 0.5,
+        "detection_f1": 0.4,
+        "attack_precision": 1.0,
+        "attack_recall": 1.0,
+        "attack_f1": 1.0,
+        "evidence_grounding": 1.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 1.0,
+        "useful_action_ratio": 1.0,
+        "task_success": 0.8
+      },
+      "failure_tags": [],
+      "latency_ms": 2170.2,
+      "estimated_tokens": 434
+    },
+    {
+      "idx": 2,
+      "case_id": "SOC-006",
+      "task_type": "alert_triage",
+      "title": "Correlate identity and endpoint alerts",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "brute_force",
+          "lateral_movement",
+          "rdp_compromise"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "response_actions": [
+          "disable_svc_backup_account",
+          "terminate_rdp_session_from_10.24.7.19",
+          "reset_credentials_for_svc_backup"
+        ],
+        "claims": [
+          {
+            "text": "The account svc_backup was subject to a brute-force attack followed by a successful login from 10.24.7.19.",
+            "evidence_ids": [
+              "E1",
+              "E2"
+            ]
+          },
+          {
+            "text": "The compromised account was used for lateral movement via RDP to FIN-WS22.",
+            "evidence_ids": [
+              "E2",
+              "E3"
+            ]
+          }
+        ],
+        "confidence": 0.9,
+        "tool_trace": [
+          {
+            "agent": "defensive_soc_analyst",
+            "tool": "event_correlation",
+            "status": "ok",
+            "useful": true
+          }
+        ]
+      },
+      "raw": "{\"verdict\": \"malicious\", \"incident_labels\": [\"brute_force\", \"lateral_movement\", \"rdp_compromise\"], \"attack_techniques\": [\"T1110\", \"T1021.001\"], \"evidence_ids\": [\"E1\", \"E2\", \"E3\"], \"response_actions\": [\"disable_svc_backup_account\", \"terminate_rdp_session_from_10.24.7.19\", \"reset_credentials_for_svc_backup\"], \"claims\": [{\"text\": \"The account svc_backup was subject to a brute-force attack followed by a successful login from 10.24.7.19.\", \"evidence_ids\": [\"E1\", \"E2\"]}, {\"text\": \"The compromised account was used for lateral movement via RDP to FIN-WS22.\", \"evidence_ids\": [\"E2\", \"E3\"]}], \"confidence\": 0.9, \"tool_trace\": [{\"agent\": \"defensive_soc_analyst\", \"tool\": \"event_correlation\", \"status\": \"ok\", \"useful\": true}]}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [
+        {
+          "seq": 1,
+          "agent": "PlainLLM",
+          "event": "analysis",
+          "tool": null,
+          "status": "ok",
+          "useful": true
+        }
+      ],
+      "retrieval_context": [],
+      "metrics": {
+        "detection_precision": 0.3333,
+        "detection_recall": 0.5,
+        "detection_f1": 0.4,
+        "attack_precision": 1.0,
+        "attack_recall": 1.0,
+        "attack_f1": 1.0,
+        "evidence_grounding": 1.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 1.0,
+        "useful_action_ratio": 1.0,
+        "task_success": 0.8
+      },
+      "failure_tags": [],
+      "latency_ms": 4829.1,
+      "estimated_tokens": 440
+    },
+    {
+      "idx": 3,
+      "case_id": "SOC-003",
+      "task_type": "incident_response",
+      "title": "Contain a compromised service account",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [
+          "brute_force",
+          "rdp_lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110.001",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3",
+          "N1"
+        ],
+        "response_actions": [
+          "isolate_fin_ws22",
+          "reset_svc_backup_credentials",
+          "review_rdp_policy"
+        ],
+        "claims": [
+          {
+            "text": "Failed logons indicate a brute-force attempt on svc_backup.",
+            "evidence_ids": [
+              "E1"
+            ]
+          },
+          {
+            "text": "Successful logon after failed attempts suggests password guessing succeeded.",
+            "evidence_ids": [
+              "E1",
+              "E2"
+            ]
+          },
+          {
+            "text": "RDP session opened to FIN-WS22 indicates lateral movement.",
+            "evidence_ids": [
+              "E3"
+            ]
+          },
+          {
+            "text": "Scheduled inventory task completion may be benign but is included for completeness.",
+            "evidence_ids": [
+              "N1"
+            ]
+          }
+        ],
+        "confidence": 0.6,
+        "tool_trace": [
+          {
+            "agent": "analyst",
+            "tool": "manual_review",
+            "status": "ok",
+            "useful": true
+          }
+        ]
+      },
+      "raw": "{\n  \"verdict\": \"unknown\",\n  \"incident_labels\": [\"brute_force\", \"rdp_lateral_movement\"],\n  \"attack_techniques\": [\"T1110.001\", \"T1021.001\"],\n  \"evidence_ids\": [\"E1\", \"E2\", \"E3\", \"N1\"],\n  \"response_actions\": [\"isolate_fin_ws22\", \"reset_svc_backup_credentials\", \"review_rdp_policy\"],\n  \"claims\": [\n    {\"text\": \"Failed logons indicate a brute-force attempt on svc_backup.\", \"evidence_ids\": [\"E1\"]},\n    {\"text\": \"Successful logon after failed attempts suggests password guessing succeeded.\", \"evidence_ids\": [\"E1\", \"E2\"]},\n    {\"text\": \"RDP session opened to FIN-WS22 indicates lateral movement.\", \"evidence_ids\": [\"E3\"]},\n    {\"text\": \"Scheduled inventory task completion may be benign but is included for completeness.\", \"evidence_ids\": [\"N1\"]}\n  ],\n  \"confidence\": 0.6,\n  \"tool_trace\": [\n    {\"agent\": \"analyst\", \"tool\": \"manual_review\", \"status\": \"ok\", \"useful\": true}\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [
+        {
+          "seq": 1,
+          "agent": "PlainLLM",
+          "event": "analysis",
+          "tool": null,
+          "status": "ok",
+          "useful": true
+        }
+      ],
+      "retrieval_context": [],
+      "metrics": {
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.5,
+        "attack_recall": 0.5,
+        "attack_f1": 0.5,
+        "evidence_grounding": 0.75,
+        "unsupported_claim_rate": 0.25,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 1.0,
+        "useful_action_ratio": 1.0,
+        "task_success": 0.625
+      },
+      "failure_tags": [
+        "unsupported_claim"
+      ],
+      "latency_ms": 5174.7,
+      "estimated_tokens": 478
+    }
+  ],
+  "llm_errors": 0,
+  "status": "done",
+  "error": null,
+  "methodology": {
+    "task_family": "open_response_soc",
+    "bootstrap_rounds": 600,
+    "arms": [
+      "base",
+      "rag",
+      "agent"
+    ],
+    "knowledge_mcq_is_separate": true
+  }
+}

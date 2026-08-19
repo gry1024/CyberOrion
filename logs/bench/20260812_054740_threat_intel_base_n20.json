@@ -1,0 +1,520 @@
+{
+ "run_id": "20260812_054740_threat_intel_base_n20",
+ "suite": "threat_intel",
+ "mode": "base",
+ "arm": "bare",
+ "model": "deepseek-v4-flash",
+ "n": 20,
+ "seed": 42,
+ "elapsed_sec": 0.0,
+ "prompt_version": "ti-v1",
+ "scores": {
+  "n": 20,
+  "correct_mc_pct": 0.7,
+  "avg_score": 0.7,
+  "parse_fail": 0,
+  "llm_errors": 0,
+  "by_difficulty": {
+   "medium": {
+    "n": 20,
+    "correct_mc_pct": 0.7,
+    "avg_score": 0.7
+   }
+  },
+  "by_topic": {
+   "CISA": {
+    "n": 9,
+    "correct_mc_pct": 0.5556,
+    "avg_score": 0.5556
+   },
+   "CrowdStrike": {
+    "n": 7,
+    "correct_mc_pct": 0.7143,
+    "avg_score": 0.7143
+   },
+   "IC3": {
+    "n": 3,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   },
+   "NSA": {
+    "n": 1,
+    "correct_mc_pct": 1.0,
+    "avg_score": 1.0
+   }
+  }
+ },
+ "results": [
+  {
+   "idx": 25,
+   "question": "Given the threat actor's use of YARA rules to detect XEReverseShell and related DLLs, which detection strategy would most effectively identify related malicious activity while minimizing false positives?",
+   "options": [
+    "A) Analyzing system logs to identify patterns of malicious activity indicative of XEReverseShell and DLLs",
+    "B) Monitoring network traffic for suspicious connections to known C2 infrastructure associated with XEReverseShell",
+    "C) Implementing YARA rules with specific hashes and behavioral patterns to detect known malicious samples",
+    "D) Conducting regular system scans using antivirus software to detect and remove XEReverseShell and related malware",
+    "E) Using sandboxing to analyze unknown DLLs and executables for potential XEReverseShell behavior"
+   ],
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "C"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "YARA规则检测已知恶意样本的效力强，但需结合行为模式以降低误报。选项C直接利用YARA规则并补充行为特征，最贴合题目要求，且比日志或网络监控更精准。其他选项如流量分析或沙箱虽有效，但不如C直接针对YARA检测的延续。\n\nANSWER: [\"C\"]"
+  },
+  {
+   "idx": 27,
+   "question": "Given the MuddyWater threat actor's use of POWGOOP and its variants, which detection strategy would be most effective in identifying the initial stages of their attack chain while minimizing false positives?",
+   "options": [
+    "A) Behavioral analysis focusing on process hollowing and unusual PowerShell execution patterns",
+    "B) Network traffic analysis for unknown encrypted communications to suspicious domains",
+    "C) Endpoint monitoring for unusual registry modifications and suspicious service creations",
+    "D) Monitoring for suspicious DLL loading patterns combined with anomaly detection in Base64-encoded network traffic",
+    "E) Signature-based detection of known POWGOOP hashes with network monitoring for C2 communication patterns"
+   ],
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "MuddyWater typically uses PowerShell-based implants like POWGOOP for initial execution, often via process hollowing or suspicious PowerShell behavior. Behavioral analysis targeting these techniques directly addresses the initial attack chain stage, while other options focus on later stages or generate higher false positives from generic indicators. Thus, option A is the most precise and effective for early detection with minimized noise.\n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 30,
+   "question": "During forensic analysis of an ICONICSTEALER infection, which artifact collection sequence would best preserve evidence while supporting attribution analysis to threat actors like BlackCat/ALPHV?",
+   "options": [
+    "A) Comprehensive disk imaging before any other collection activities",
+    "B) Memory acquisition, followed by disk imaging, and then network traffic capture",
+    "C) Prioritized collection of artifacts related to ICONICSTEALER's data exfiltration methods",
+    "D) Immediate network isolation, then collection of browser databases and configuration files",
+    "E) Coordinated collection of system logs, browser history, and process memory"
+   ],
+   "gold": [
+    "E"
+   ],
+   "pred": [
+    "B"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "ICONICSTEALER is a browser infostealer, so browser databases and configuration files are the primary artifacts for tracing exfiltration and threat actor TTPs. However, proper forensic procedure prioritizes volatile evidence (memory) before disk imaging to preserve running processes and injected code, yet the question emphasizes attribution analysis to BlackCat/ALPHV, which relies heavily on C2 communications and stolen data handling. Memory acquisition first preserves live indicators, followed by disk imaging for persistence artifacts, then network capture for exfiltration paths. Thus, B provides the most complete evidence preservation sequence aligning with forensic best practices and attribution.\n\nANSWER: [\"B\"]"
+  },
+  {
+   "idx": 32,
+   "question": "Given ICONICSTEALER's use of an embedded SQLITE library to query browser databases, which database forensic analysis technique would most effectively identify and recover stolen data?",
+   "options": [
+    "A) Examining browser database journal files for transaction history",
+    "B) Analyzing SQLITE database file carving to recover deleted records",
+    "C) Using SQLITE forensic tools to analyze database structure and content",
+    "D) All of the above",
+    "E) Comparing current database state with historical backups to identify changes"
+   ],
+   "gold": [
+    "D"
+   ],
+   "pred": [
+    "D"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "ICONICSTEALER uses embedded SQLITE to query browser databases, and effective forensics would involve examining transaction logs, carving deleted records, and analyzing structure/content. Since all these techniques are complementary and relevant, the most comprehensive answer is all of them.  \nANSWER: [\"D\"]"
+  },
+  {
+   "idx": 89,
+   "question": "Which of the following three mitigations are most likely to prevent the Androxgh0st malware from exploiting vulnerabilities in Laravel applications? Pick 3 that apply.",
+   "options": [
+    "A) Ensure that any live Laravel applications are not in 'debug' or testing mode.",
+    "B) Remove all cloud credentials from .env files and revoke them.",
+    "C) Prioritize patching known exploited vulnerabilities in internet-facing systems.",
+    "D) Scan the server's file system for unrecognized PHP files.",
+    "E) Verify that the default configuration for all URIs is to deny all requests unless there is a specific need for it to be accessible.",
+    "F) Review outgoing GET requests (via cURL command) to file hosting sites."
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "C"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "Androxgh0st primarily exploits known vulnerabilities (like CVE-2021-3129 and CVE-2018-15133) in internet-facing Laravel apps, so patching is most critical. The other choices are good hygiene but less directly targeted at preventing the exploitation of specific vulnerabilities.  \nANSWER: [\"C\"]"
+  },
+  {
+   "idx": 95,
+   "question": "What aspects of Volt Typhoon's attack might remain invisible to the security tools mentioned in the report? Pick 3 that apply.",
+   "options": [
+    "A) Usage of legitimate Windows commands for discovery and execution",
+    "B) Exfiltration of data via encrypted channels",
+    "C) Lateral movement using Remote Desktop Protocol (RDP) with valid administrator credentials",
+    "D) Obfuscated malware used for command and control",
+    "E) Modifications to the Windows Registry for persistence",
+    "F) Usage of multi-hop proxies for command and control infrastructure"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "Volt Typhoon is known for using living-off-the-land binaries (LOLBins) and legitimate Windows tools, which evade detection by traditional security tools that focus on malware signatures. The report highlights their reliance on native commands and dual-use tools, making their activity blend with normal administration. Among the options, the most characteristic and consistently invisible behavior is the use of legitimate Windows commands.\n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 104,
+   "question": "The threat actors exploited vulnerabilities in Ivanti Cloud Service Appliances (CSA). Pick 3 recovery options that organizations could consider if they detected malicious activity during the initial exploitation phase.",
+   "options": [
+    "A) Restore systems from backups",
+    "B) Upgrade to the latest supported version of Ivanti CSA",
+    "C) Change all user passwords but keep the affected systems online",
+    "D) Isolate the affected systems and conduct a thorough forensic analysis",
+    "E) Ignore the issue and continue normal operations",
+    "F) Immediately patch the vulnerable systems without isolating them"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "D"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "攻击者在初始利用阶段可能已植入持久化机制，仅升级或打补丁无法清除后门，且保持在线会扩大危害。恢复备份和隔离取证是标准响应，但恢复备份可能不完整，因此最稳妥的是隔离系统并取证。  \nANSWER: [\"D\"]"
+  },
+  {
+   "idx": 114,
+   "question": "The threat actor's procedures involve using various DLL files to achieve their goals. How might the threat actor's procedures vary when targeting cloud environments versus on-premises infrastructure described in the report? Pick 3 that apply.",
+   "options": [
+    "A) The threat actor may use different C2 servers for cloud environments",
+    "B) The threat actor may not need to use reverse shells in cloud environments due to existing access mechanisms",
+    "C) The threat actor's use of wiper malware will remain the same across both environments",
+    "D) The threat actor will not target cloud environments due to increased security measures",
+    "E) The threat actor may need to adapt their file exfiltration methods for cloud environments",
+    "F) The threat actor's tactics will remain entirely the same across both environments"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "威胁行为者在云环境中可能利用云服务自身API或管理接口作为C2通道，而本地环境通常需要独立的C2服务器，因此A合理。云环境通常提供已有的身份凭证或API访问权限，可能无需传统反向shell，B也符合逻辑。文件外传在云环境中可能借助存储服务或跨租户数据移动，需调整方法，E也成立。但题目要求选3个，且“最有把握的一个”冲突，按指令只能选一个最确定的。\n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 142,
+   "question": "Which segments of a typical enterprise network would likely have insufficient visibility into the QakBot activity described in the report? Pick 2 that apply.",
+   "options": [
+    "A) Network segments with CrowdStrike Falcon endpoint detection and response (EDR) agents installed",
+    "B) Email gateways not configured to block .one files",
+    "C) User workstations without EDR agents, particularly those used for email and document processing",
+    "D) Network segments with robust logging and monitoring for all incoming and outgoing traffic",
+    "E) Servers hosting critical infrastructure, such as domain controllers and file servers, with comprehensive security monitoring",
+    "F) Network segments isolated through VLANs or other segmentation techniques"
+   ],
+   "gold": [
+    "C"
+   ],
+   "pred": [
+    "B",
+    "C"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "QakBot typically propagates via malicious email attachments and lateral movement, so visibility gaps are highest where endpoints lack EDR and where email filtering fails to block initial infection vectors. Workstations without EDR, especially those handling email/docs, have no host-level detection, and unconfigured email gateways let the malware enter unnoticed.  \nANSWER: [\"C\",\"B\"]"
+  },
+  {
+   "idx": 203,
+   "question": "What type of additional evidence would increase confidence in attributing the Scattered Spider threat actor to a specific nation-state or group, considering both national security agency and private sector organization perspectives? Pick 2 that apply.",
+   "options": [
+    "A) Evidence of using custom malware with unique characteristics tied to a specific nation-state's tactics",
+    "B) Increased frequency of phishing attempts against a specific industry",
+    "C) Intelligence reports indicating a nation-state's involvement in similar cybercrime activities",
+    "D) Use of open-source tools and publicly available exploit code",
+    "E) Detection of command and control (C2) infrastructure overlapping with known nation-state infrastructure",
+    "F) Reports from trusted third-party sources about Scattered Spider's activities"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A",
+    "E"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "IC3",
+   "difficulty": "medium",
+   "raw": "归属判断需要依赖高区分度、难以伪造的技术关联，以及情报源之间的交叉印证。自定义恶意软件的独特特征和C2基础设施重叠都能提供直接、可验证的技术证据链，显著提升置信度。频率变化和第三方报告属于间接或低力度的信息。\n\nANSWER: [\"A\",\"E\"]"
+  },
+  {
+   "idx": 223,
+   "question": "Given ALPHA SPIDER's use of NTFS Alternate Data Streams for hiding reverse-ssh and the limitations of PowerShell 5.1 in detecting ADS on directories and root of volume, what detection strategy would most effectively identify hidden executables while minimizing false positives in a mixed Windows environment?",
+   "options": [
+    "A) Implement PowerShell 7.4 across all Windows systems and use Get-Item cmdlet with -Stream parameter",
+    "B) Use Falcon platform FileCreate events monitoring for ':$DATA' pattern in FileName field",
+    "C) Regularly run streams.exe from Sysinternals on all NTFS volumes",
+    "D) Monitor for unusual directory creation in C:\\\\System and C:\\\\Windows",
+    "E) Enhance logging for all file creation events to include ADS information"
+   ],
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "ALPHA SPIDER hides executables in ADS, and PowerShell 5.1 cannot detect ADS on directories/root volumes; monitoring FileName with ':$DATA' via Falcon provides real-time, broad coverage with low false positives, unlike OS-version-dependent or manual tools.  \nANSWER: [\"B\"]"
+  },
+  {
+   "idx": 228,
+   "question": "Following the LABYRINTH CHOLLIMA attack chain from malicious Node.js packages to OpenSSL Downloader, which detection engineering approach would most effectively identify related activity while adapting to evolving TTPs?",
+   "options": [
+    "A) Development of behavioral detection rules focusing on suspicious rundll32 executions",
+    "B) Creation of YARA rules targeting HC-256 decryption routines in NpmLoader",
+    "C) Implementation of anomaly detection for unusual network traffic patterns to C2 URLs",
+    "D) Use of machine learning models to identify suspicious file system modifications",
+    "E) Signature-based detection of known SHA256 hashes of malicious components"
+   ],
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "LABYRINTH CHOLLIMA 攻击链核心是攻击者利用恶意 npm 包和下载器进行多阶段执行，且 TTP 会演化，因此需要适应行为变化的检测。行为检测规则（如可疑 rundll32 执行）能捕捉攻击模式而非特定 IOC，比静态签名或单一特征更有效。其他选项过于依赖具体样本或单一信号，适应性较弱。\n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 238,
+   "question": "Given b1ackSniﬀer's collection of PII and credit card information through formjacking, which data protection strategy would most effectively minimize exfiltration impact while maintaining business operations? Pick 2 options that apply.",
+   "options": [
+    "A) Implement tokenization for credit card information and monitor for suspicious form activity",
+    "B) Use end-to-end encryption for PII transmission and enforce strict CSP",
+    "C) Limit form field collection to minimum required information and implement honeypots",
+    "D) Require multi-factor authentication for sensitive transactions and monitor for anomalous behavior",
+    "E) Implement data loss prevention controls and monitor for exfiltration attempts"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "b1ackSniﬀer通过表单劫持窃取PII和信用卡信息，核心问题是攻击者能实时截获用户在表单中输入的数据。最有效的策略是减少数据可用性（如tokenization）和检测恶意表单行为，而非仅保护传输或限制数据收集。  \n选项A直接针对信用卡信息进行tokenization，使窃取的数据失去价值，同时监控表单异常活动可早期发现劫持；选项E的DLP和监控虽然有用，但无法阻止数据被输入时即被窃取。  \n因此，A和E结合最符合“最小化外泄影响”且不中断业务，但若只选一个，A更精准。  \n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 250,
+   "question": "What were the initial access vectors for ChromeLoader on macOS? Pick 3 options that apply.",
+   "options": [
+    "A) Threat actors used Twitter to share QR codes that led to ChromeLoader downloads.",
+    "B) QR codes were embedded in seemingly humorous or meme-style social media posts.",
+    "C) The meme claimed to be from an official cybersecurity agency.",
+    "D) The QR codes led to ISO files containing malicious payloads."
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "B"
+   ],
+   "exact": false,
+   "jaccard": 0.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "ChromeLoader on macOS was commonly distributed via social media posts, especially on platforms like Twitter, using QR codes that appeared in humorous or meme-style content to lure users. The QR codes often led to download links, sometimes involving ISO files containing the malware. The most distinctive initial access vector highlighted in reports is the use of QR codes in meme-style social media posts.  \n\nANSWER: [\"B\"]"
+  },
+  {
+   "idx": 281,
+   "question": "Considering the SVR's use of MagicWeb as a sophisticated post-compromise capability and their targeting of various sectors for intelligence gain, which post-compromise detection strategy would be most effective? Pick 2 options that apply.",
+   "options": [
+    "A) Monitoring for unusual authentication patterns and privileged account activity",
+    "B) Endpoint detection and response (EDR) with behavioral analysis",
+    "C) Static signature-based detection of known MagicWeb components",
+    "D) Regular credential hygiene without monitoring for post-compromise activity",
+    "E) Network traffic analysis focusing on anomalous encrypted traffic patterns"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A",
+    "B"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "NSA",
+   "difficulty": "medium",
+   "raw": "SVR's MagicWeb operates as a post-compromise tool that modifies authentication mechanisms and enables persistent privileged access, making behavioral monitoring of authentication and privileged accounts critical. EDR with behavioral analysis can detect the anomalous execution and modifications MagicWeb introduces, whereas static signatures are easily bypassed and credential hygiene alone does not detect active compromise.  \n\nANSWER: [\"A\", \"B\"]"
+  },
+  {
+   "idx": 429,
+   "question": "What security control weaknesses are most clearly demonstrated by the documented SVR attack on JetBrains TeamCity servers? Pick 2 that apply.",
+   "options": [
+    "A) Inadequate patch management for critical software vulnerabilities",
+    "B) Insufficient network segmentation to limit lateral movement",
+    "C) Lack of multi-factor authentication for all user accounts",
+    "D) Inability to detect and prevent 'Bring Your Own Vulnerable Driver' (BYOVD) attacks",
+    "E) Poor configuration of endpoint detection and response (EDR) systems"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A",
+    "B"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "IC3",
+   "difficulty": "medium",
+   "raw": "SVR攻击利用了TeamCity的已知关键漏洞，若未及时修补则可能被利用作为初始入口，这直接暴露了补丁管理缺陷。同时，该攻击链常涉及在服务器间横向移动，而网络分割不足会显著放大影响。其他选项虽相关，但补丁管理和网络分割是文档中最明确显现的弱点。\n\nANSWER: [\"A\", \"B\"]"
+  },
+  {
+   "idx": 432,
+   "question": "Pick 2 that apply. Considering the Initial Exploitation step where attackers potentially exploited the ProxyLogon vulnerability to gain access, which of the following actions could be taken by the attackers after gaining initial access using the analyzed webshells?",
+   "options": [
+    "A) Modify database records directly using SQL commands",
+    "B) Execute system commands using cmd.exe",
+    "C) Create new user accounts on the compromised system",
+    "D) Upload and execute additional malware",
+    "E) Enumerate network shares and permissions",
+    "F) Disable antivirus software"
+   ],
+   "gold": [
+    "B"
+   ],
+   "pred": [
+    "B",
+    "D"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CISA",
+   "difficulty": "medium",
+   "raw": "攻击者在获得初始访问权限后，通常会利用webshell执行系统命令，并可能上传更多恶意工具以维持持久化或横向移动。ProxyLogon漏洞常被用于部署webshell，而后续行为往往包括执行cmd.exe命令和上传额外恶意软件。  \n\nANSWER: [\"B\", \"D\"]"
+  },
+  {
+   "idx": 517,
+   "question": "What is the primary purpose of Scattered Spider's use of Remote Monitoring and Management (RMM) tools, such as Tactical.RMM and Teamviewer, and how do they leverage these tools to further their goals on victim networks?",
+   "options": [
+    "A) Scattered Spider uses RMM tools to maintain persistence on victim networks, allowing them to continue to access and control victim systems, and to deploy additional tools such as AveMaria (WarZone) for remote access.",
+    "B) Scattered Spider uses RMM tools to install malware on victim systems, but this is not their primary purpose.",
+    "C) Scattered Spider uses RMM tools to conduct reconnaissance and gather information about victim networks, but this is not a primary function of RMM tools.",
+    "D) Scattered Spider uses RMM tools to exfiltrate sensitive data from victim networks, but this is not a typical use case for RMM tools."
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "IC3",
+   "difficulty": "medium",
+   "raw": "RMM工具的核心价值在于为攻击者提供持续的远程访问和控制能力，这正是Scattered Spider维持持久性并部署后续恶意工具的关键。选项A准确描述了这一主要目的，而其他选项要么否定主要用途，要么将RMM工具用于非典型功能。  \nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 558,
+   "question": "What is the sequence of actions taken by Threat Actor 1 to gain initial foothold and obtain root privileges in a compromised Ivanti EPM Cloud Services Appliance system?",
+   "options": [
+    "A) Exploits CVE-2021-44529, then exploits CVE-2021-40347 (PwnKit) to gain initial foothold and root privileges, adding a new UID 0 account",
+    "B) Installs reverse-ssh executable, then uses certutil LOLBIN to download Microsoft SQL Server Management Studio and execute commands with unrestricted privileges",
+    "C) Uses mitm6 and Responder to gather credentials, then exploits CVE-2021-21972 to obtain root privileges and install masscan for network reconnaissance",
+    "D) Downloads FileZilla, then uses Veeam.Backup.Common.dll to decrypt stored passwords and gain initial foothold and root privileges"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "Threat Actor 1 likely exploited known vulnerabilities in Ivanti EPM, with CVE-2021-44529 enabling remote code execution for initial access, and CVE-2021-40347 (PwnKit) providing local privilege escalation to root. The addition of a UID 0 account is consistent with post-exploitation persistence after gaining root. Other options involve unrelated tools or services not specific to this chain.\n\nANSWER: [\"A\"]"
+  },
+  {
+   "idx": 574,
+   "question": "What is the significance of Sidoh's use of libzip.dll for ZIP file decompression?",
+   "options": [
+    "A) Sidoh uses libzip.dll to decompress ZIP files, which allows it to search for keywords in Microsoft Open XML (MOX) format files, specifically in word/document.xml (.docx) and xl/worksheets/sheet*.xml (.xlsx)",
+    "B) Sidoh uses libzip.dll to compress files, which allows it to exfiltrate data more efficiently, but it does not use it for search functionality in .docx and .xlsx files",
+    "C) Sidoh uses libzip.dll to read and write ZIP files, but it does not use it for search functionality in .docx and .xlsx files, instead relying on a different library",
+    "D) Sidoh uses libzip.dll to decompress ZIP files, but it does not use it for keyword search in .docx and .xlsx files, instead relying on a different algorithm"
+   ],
+   "gold": [
+    "A"
+   ],
+   "pred": [
+    "A"
+   ],
+   "exact": true,
+   "jaccard": 1.0,
+   "parse_ok": true,
+   "topic": "CrowdStrike",
+   "difficulty": "medium",
+   "raw": "Sidoh leverages libzip.dll specifically to decompress ZIP archives, which is essential for accessing the internal XML structure of .docx and .xlsx files. The decompressed content is then searched for keywords within document.xml and sheet XML files, as described in threat reports. This matches option A, which uniquely ties the library’s use to both decompression and keyword search in those file formats.\n\nANSWER: [\"A\"]"
+  }
+ ],
+ "llm_errors": 0,
+ "error": null,
+ "log_dir": "/home/groy/cai/cyberorion/logs/bench"
+}
