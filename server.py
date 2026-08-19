@@ -1700,18 +1700,19 @@ async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
     from cyberorion.tools.blue.traffic import _set_traffic_cache
     from collections import Counter
     source = payload.get("source", "synthetic")
-    max_rows = int(payload.get("max_rows", 5000) or 5000)
+    max_rows = max(1, int(payload.get("max_rows", 5000) or 5000))
+    replay_limit = _traffic_replay_limit(payload)
     csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
     if source == "cicids":
         from cyberorion.paths import CICIDS_DIR
         csv_path = str(CICIDS_DIR / csv_file)
         rows = load_cicids(csv_path, max_rows=max_rows)
-        events = TrafficFeeder.to_events(rows)
+        events = TrafficFeeder.to_events(rows)[:max_rows]
     elif source == "ad_domain":
-        events = load_ad_scenario()
+        events = load_ad_scenario()[:max_rows]
     else:
         rows = load_synthetic()
-        events = TrafficFeeder.to_events(rows)
+        events = TrafficFeeder.to_events(rows)[:max_rows]
     alerts = TrafficDetector().detect(events)
     _set_traffic_cache(events, alerts)
     label_counts = Counter(getattr(e, "label", "BENIGN") for e in events)
@@ -1720,12 +1721,14 @@ async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
         "ok": True,
         "source": source,
         "events_count": len(events),
+        "events_total": len(events),
         "alerts_count": len(alerts),
         "label_distribution": dict(label_counts),
         "alert_distribution": dict(alert_types),
         "csv_file": csv_file if source == "cicids" else "",
         "rows": len(events),
-        "events": [_event_to_dict(e) for e in events[:500]],
+        "replay_limit": replay_limit,
+        "events": [_event_to_replay_dict(e) for e in events[:replay_limit]],
         "alerts": [_alert_to_dict(a) for a in alerts[:200]],
     }
 

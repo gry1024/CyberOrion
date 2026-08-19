@@ -208,7 +208,7 @@ export const api = {
 
   // ---- 流量分析（CICIDS/synthetic 流量回放 + 蓝队 agent 分析） ----
   /** 启动流量回放：返回事件流与触发告警。 */
-  trafficReplay: (opts: { source?: string; csv_file?: string; max_rows?: number }) =>
+  trafficReplay: (opts: { source?: string; csv_file?: string; max_rows?: number; replay_limit?: number }) =>
     post('/api/traffic/replay', opts) as Promise<TrafficReplayResult>,
   /** 查询流量回放服务状态（可用数据源 / CSV 文件清单）。 */
   trafficStatus: () => get('/api/traffic/status') as Promise<TrafficStatus>,

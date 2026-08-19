@@ -965,6 +965,12 @@ export interface TrafficReplayResult {
   source?: string
   csv_file?: string
   rows?: number
+  events_count?: number
+  events_total?: number
+  alerts_count?: number
+  replay_limit?: number
+  label_distribution?: Record<string, number>
+  alert_distribution?: Record<string, number>
   error?: string
 }
 

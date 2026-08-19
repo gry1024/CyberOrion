@@ -214,6 +214,25 @@ def _parse_sse_events(text: str) -> list[dict]:
     return events
 
 
+def test_traffic_replay_honors_max_rows_and_returns_compact_events(
+    client: TestClient,
+) -> None:
+    """Catches regressions where replay ships oversized full event payloads."""
+    response = client.post(
+        "/api/traffic/replay",
+        json={"source": "synthetic", "max_rows": 12, "replay_limit": 7},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["events_count"] == 12
+    assert data["events_total"] == 12
+    assert data["rows"] == 12
+    assert data["replay_limit"] == 7
+    assert len(data["events"]) == 7
+    assert "payload_size" not in data["events"][0]
+
+
 def test_traffic_analyze_stream_replays_reports_and_completes(
     client: TestClient,
     tmp_path: Path,
