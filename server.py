@@ -1566,6 +1566,31 @@ def _traffic_analysis_timeout(payload: dict) -> float:
     return max(0.01, timeout)
 
 
+def _traffic_replay_limit(payload: dict) -> int:
+    raw = payload.get("replay_limit") or os.getenv("CO_TRAFFIC_REPLAY_LIMIT") or "80"
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        limit = 80
+    return max(1, min(limit, 200))
+
+
+def _event_to_replay_dict(e: Any) -> dict[str, Any]:
+    """Return the compact event shape required by the traffic replay UI."""
+    return {
+        "ts": getattr(e, "ts", 0.0),
+        "src_ip": getattr(e, "src_ip", ""),
+        "dst_ip": getattr(e, "dst_ip", ""),
+        "src_port": getattr(e, "src_port", 0),
+        "dst_port": getattr(e, "dst_port", 0),
+        "proto": getattr(e, "proto", ""),
+        "label": getattr(e, "label", ""),
+        "technique": getattr(e, "technique", None),
+        "attack_type": getattr(e, "attack_type", ""),
+        "severity": getattr(e, "severity", "low"),
+    }
+
+
 def _build_traffic_fallback_report(
     *,
     source: str,
@@ -1741,6 +1766,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
     max_rows = int(payload.get("max_rows", 2000) or 2000)
     csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
     analysis_timeout = _traffic_analysis_timeout(payload)
+    replay_limit = _traffic_replay_limit(payload)
 
     async def event_stream():
         # ---- 阶段 0：流量回放（加载数据 + 缓存，供蓝队工具复用） ----
@@ -1754,10 +1780,10 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 rows = load_cicids(csv_path, max_rows=max_rows)
                 events = TrafficFeeder.to_events(rows)
             elif source == "ad_domain":
-                events = load_ad_scenario()
+                events = load_ad_scenario()[:max_rows]
             else:
                 rows = load_synthetic()
-                events = TrafficFeeder.to_events(rows)
+                events = TrafficFeeder.to_events(rows)[:max_rows]
             from cyberorion.traffic import TrafficDetector
             detector = TrafficDetector()
             alerts = detector.detect(events)
@@ -1772,10 +1798,11 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         yield _sse({
             "type": "replay_data", "side": "system", "timestamp": time.time(),
             "data": {
-                "events": [_event_to_dict(e) for e in events[:500]],
+                "events": [_event_to_replay_dict(e) for e in events[:replay_limit]],
                 "events_total": len(events),
                 "alerts": [_alert_to_dict(a) for a in alerts],
                 "source": source, "csv_file": csv_file, "max_rows": max_rows,
+                "replay_limit": replay_limit,
             },
         })
 

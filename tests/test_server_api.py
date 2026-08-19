@@ -234,7 +234,7 @@ def test_traffic_analyze_stream_replays_reports_and_completes(
     with client.stream(
         "POST",
         "/api/traffic/analyze",
-        json={"source": "synthetic", "max_rows": 120},
+        json={"source": "synthetic", "max_rows": 370},
     ) as response:
         assert response.status_code == 200
         events = _parse_sse_events("".join(response.iter_text()))
@@ -247,12 +247,40 @@ def test_traffic_analyze_stream_replays_reports_and_completes(
     replay = next(event for event in events if event.get("type") == "replay_data")
     assert replay["data"]["events_total"] > 0
     assert replay["data"]["events"]
+    assert len(replay["data"]["events"]) <= 80
     assert replay["data"]["alerts"]
 
     report = next(event for event in events if event.get("type") == "report")
     report_text = report["data"]["report"]
     for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
         assert section in report_text
+
+
+def test_traffic_analyze_replay_limit_keeps_first_sse_frame_small(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The replay event must not ship hundreds of full flow records over SSE."""
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+    monkeypatch.setattr(pipeline, "_build_client", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 370, "replay_limit": 12},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+
+    replay = next(event for event in events if event.get("type") == "replay_data")
+    assert replay["data"]["events_total"] == 370
+    assert len(replay["data"]["events"]) == 12
+    assert "payload_size" not in replay["data"]["events"][0]
 
 
 def test_traffic_analyze_timeout_yields_fallback_report_and_completes(
