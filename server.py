@@ -1552,6 +1552,121 @@ def _alert_to_dict(a: Any) -> dict[str, Any]:
     }
 
 
+def _traffic_analysis_timeout(payload: dict) -> float:
+    raw = (
+        payload.get("analysis_timeout_sec")
+        or payload.get("timeout_sec")
+        or os.getenv("CO_TRAFFIC_ANALYSIS_TIMEOUT_SEC")
+        or "90"
+    )
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        timeout = 90.0
+    return max(1.0, timeout)
+
+
+def _build_traffic_fallback_report(
+    *,
+    source: str,
+    csv_file: str,
+    events: list[Any],
+    alerts: list[Any],
+    reason: str = "",
+) -> str:
+    from collections import Counter
+
+    labels = Counter(getattr(event, "label", "BENIGN") for event in events)
+    severities = Counter(getattr(alert, "severity", "unknown") for alert in alerts)
+    alert_types = Counter(getattr(alert, "alert_type", "unknown") for alert in alerts)
+    malicious_ips = sorted({
+        getattr(alert, "src_ip", "")
+        for alert in alerts
+        if getattr(alert, "severity", "") in {"critical", "high"} and getattr(alert, "src_ip", "")
+    })
+    techniques = sorted({
+        getattr(alert, "technique", "")
+        for alert in alerts
+        if getattr(alert, "technique", "")
+    })
+    attack_count = sum(count for label, count in labels.items() if label != "BENIGN")
+    benign_count = labels.get("BENIGN", 0)
+    sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    sorted_alerts = sorted(
+        alerts,
+        key=lambda alert: (
+            sev_order.get(getattr(alert, "severity", ""), 9),
+            -float(getattr(alert, "confidence", 0.0) or 0.0),
+        ),
+    )
+
+    timeline_rows: list[str] = []
+    ioc_rows: list[str] = []
+    for idx, alert in enumerate(sorted_alerts[:20], 1):
+        severity = getattr(alert, "severity", "unknown")
+        alert_type = getattr(alert, "alert_type", "unknown")
+        technique = getattr(alert, "technique", "") or "N/A"
+        src_ip = getattr(alert, "src_ip", "") or "N/A"
+        dst_ip = getattr(alert, "dst_ip", "") or "N/A"
+        confidence = float(getattr(alert, "confidence", 0.0) or 0.0)
+        description = getattr(alert, "description", "") or "规则引擎触发告警"
+        evidence = _evidence_str(getattr(alert, "evidence", ""))
+        timestamp = getattr(alert, "ts", 0.0) or getattr(alert, "timestamp", 0.0) or "-"
+        timeline_rows.append(
+            f"| {idx} | {timestamp} | {severity} | {alert_type} | {technique} | "
+            f"{src_ip} → {dst_ip} | {confidence:.0%} | {description} |"
+        )
+        ioc_rows.append(
+            f"| IP | {src_ip} | {alert_type} / {technique} | {severity} | {evidence or description} |"
+        )
+
+    if not timeline_rows:
+        timeline_rows.append("| - | - | - | 未触发告警 | - | - | - | 当前样本未触发规则告警 |")
+    if not ioc_rows:
+        ioc_rows.append("| - | 未发现 | 无规则告警 | - | 当前样本未提取到高危 IoC |")
+
+    reason_line = f"\n\n> 兜底原因：{reason}" if reason else ""
+    csv_line = f" / {csv_file}" if source == "cicids" and csv_file else ""
+    risk = "Critical" if severities.get("critical") else "High" if severities.get("high") else "Medium" if alerts else "Low"
+
+    return (
+        "# 流量分析报告\n\n"
+        f"> 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  \n"
+        f"> 数据源：{source}{csv_line}  \n"
+        f"> 数据规模：{len(events)} 事件 / {len(alerts)} 告警{reason_line}\n\n"
+        "## 执行摘要\n\n"
+        f"本次工作流完成流量回放、规则阈值检测、IoC 提取与报告生成。"
+        f"样本共 **{len(events)}** 条事件，其中攻击标签 **{attack_count}** 条、"
+        f"正常标签 **{benign_count}** 条；规则引擎触发 **{len(alerts)}** 条告警。"
+        f"综合风险评级为 **{risk}**，依据是告警严重度分布 "
+        f"`{dict(severities)}` 与告警类型分布 `{dict(alert_types)}`。\n\n"
+        "## IoC 指标列表\n\n"
+        "| 类型 | 值 | 关联告警 | 严重度 | 证据 |\n"
+        "|------|----|----------|--------|------|\n"
+        + "\n".join(ioc_rows)
+        + "\n\n"
+        "## 攻击时间线\n\n"
+        "| # | 时间 | 严重度 | 类型 | ATT&CK | 通信方向 | 置信度 | 描述 |\n"
+        "|---|------|--------|------|--------|----------|--------|------|\n"
+        + "\n".join(timeline_rows)
+        + "\n\n"
+        "## 详细分析\n\n"
+        f"- 告警类型：{dict(alert_types) or '无'}。\n"
+        f"- ATT&CK 覆盖：{', '.join(techniques) or '未映射'}。\n"
+        f"- 高危源 IP：{', '.join(malicious_ips) or '未发现'}。\n"
+        "- 结论边界：本报告仅基于已回放流量与规则检测结果；证据不足的攻击阶段不做确定性扩展。\n\n"
+        "## 处置建议\n\n"
+        f"- [ ] 立即封禁或限速高危源 IP：{', '.join(malicious_ips) or '无'}。\n"
+        "- [ ] 对触发告警的目标服务补充访问日志、认证日志和主机遥测。\n"
+        f"- [ ] 将 `{', '.join(techniques) or '当前告警类型'}` 写入持续检测规则并设置回归样本。\n"
+        "- [ ] 对公网服务执行最小暴露面核查，确认无异常外联和弱口令入口。\n\n"
+        "## 附录：检测覆盖\n\n"
+        f"- 标签分布：`{dict(labels)}`。\n"
+        f"- 严重度分布：`{dict(severities)}`。\n"
+        f"- 规则输出：`{dict(alert_types)}`。\n"
+    )
+
+
 @app.post("/api/traffic/replay")
 async def traffic_replay(payload: dict = Body(default={})) -> dict[str, Any]:
     """启动流量回放 — 加载 CICIDS2017 或合成场景，运行检测器。"""
@@ -1625,6 +1740,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
     source = payload.get("source", "synthetic")
     max_rows = int(payload.get("max_rows", 2000) or 2000)
     csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
+    analysis_timeout = _traffic_analysis_timeout(payload)
 
     async def event_stream():
         # ---- 阶段 0：流量回放（加载数据 + 缓存，供蓝队工具复用） ----
@@ -1671,13 +1787,42 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             _traffic_alerts_persist = list(alerts)
         except Exception:
             pass
-        async for ev in run_traffic_analysis_pipeline(events):
-            ev_type = ev.get("type", "")
-            if ev_type == "report":
-                _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
-            elif ev_type == "report_chunk":
-                _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
-            yield _sse(ev)
+        _fallback_reason = ""
+        try:
+            async with asyncio.timeout(analysis_timeout):
+                async for ev in run_traffic_analysis_pipeline(events):
+                    ev_type = ev.get("type", "")
+                    if ev_type == "report":
+                        _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
+                    elif ev_type == "report_chunk":
+                        _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
+                    yield _sse(ev)
+        except TimeoutError:
+            _fallback_reason = f"LLM 分析流水线超过 {analysis_timeout:.0f}s 未完成，已切换模板兜底"
+            yield _sse({"type": "system", "side": "system",
+                        "data": {"text": f"⚠ {_fallback_reason}"},
+                        "timestamp": time.time()})
+        except Exception as e:
+            _fallback_reason = f"分析流水线异常：{type(e).__name__}: {e}"
+            yield _sse({"type": "system", "side": "system",
+                        "data": {"text": f"⚠ {_fallback_reason}"},
+                        "timestamp": time.time()})
+
+        if not "".join(_traffic_report_parts).strip():
+            _fallback_report = _build_traffic_fallback_report(
+                source=source,
+                csv_file=csv_file,
+                events=events,
+                alerts=_traffic_alerts_persist,
+                reason=_fallback_reason or "LLM 未返回最终报告，使用规则引擎结果生成兜底报告",
+            )
+            _traffic_report_parts.append(_fallback_report)
+            yield _sse({
+                "type": "report",
+                "side": "blue",
+                "data": {"agent": "report_writer", "report": _fallback_report, "fallback": True},
+                "timestamp": time.time(),
+            })
 
         # ---- 持久化流量分析结果到磁盘 ----
         _session_id = ""

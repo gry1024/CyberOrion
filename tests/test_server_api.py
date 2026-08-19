@@ -6,6 +6,7 @@ read-only and side-effect free, so no session is started.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -251,3 +252,44 @@ def test_traffic_analyze_stream_replays_reports_and_completes(
     report_text = report["data"]["report"]
     for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
         assert section in report_text
+
+
+def test_traffic_analyze_timeout_yields_fallback_report_and_completes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Real LLM calls may stall; the SSE must still emit a report and complete."""
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+
+    async def hanging_pipeline(_events):
+        yield {
+            "type": "system",
+            "side": "blue",
+            "data": {"text": "pipeline started"},
+            "timestamp": 1.0,
+        }
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(pipeline, "run_traffic_analysis_pipeline", hanging_pipeline)
+
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 120, "analysis_timeout_sec": 0.01},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+
+    event_types = [event.get("type") for event in events]
+    assert "report" in event_types
+    assert "complete" in event_types
+
+    report = next(event for event in events if event.get("type") == "report")
+    assert report["data"]["fallback"] is True
+    for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
+        assert section in report["data"]["report"]
