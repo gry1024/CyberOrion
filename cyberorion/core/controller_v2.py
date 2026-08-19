@@ -18,6 +18,11 @@ from .prompt_renderer import render_task_prompt
 from .session_state import SessionState
 from ..agents.v2.red_orchestrator import build_red_orchestrator
 from ..agents.v2.blue_orchestrator import build_blue_orchestrator
+from ..eval.ground_truth import GroundTruth, set_ground_truth
+from ..scenarios import load_scenario
+from ..telemetry.binding import set_store
+from ..telemetry.collectors import TelemetryCollector
+from ..telemetry.store import TelemetryStore
 logger = logging.getLogger(__name__)
 DEFAULT_RED_MAX_STEPS = 75
 DEFAULT_BLUE_MAX_STEPS = 50
@@ -43,28 +48,21 @@ class ControllerV2:
         self.session_id = ""
         self.scenario = {}
         self.scenario_name = ""
+        self._scenario_model = None
         self._session_dir: Optional[Path] = None
         self._timeline_fp = None
+        self._timeline: list[dict[str, Any]] = []
         self._session_start_time: float = 0.0
+        self._session_active = False
         self._red_tool_calls: list = []
         self._blue_tool_calls: list = []
         self._red_step_count: int = 0
         self._blue_step_count: int = 0
-        # Compatibility surface for read-only telemetry endpoints. The v2
-        # controller does not own a TelemetryStore, so callers see None until
-        # a future adapter explicitly attaches one.
-        self.store = None
-        self.last_metrics = None
-
-    def set_scenario(self, name: str) -> None:
-        """Select and validate the scenario used by the next session."""
-        from ..scenarios.loader import SCENARIOS_DIR
-
-        path = SCENARIOS_DIR / f"{name}.yaml"
-        if not path.is_file():
-            raise FileNotFoundError(f"scenario not found: {path}")
-        os.environ["CO_SCENARIO"] = name
-        self.scenario_name = name
+        # 兼容 server.py 的只读遥测端点；资源只在活动会话期间有效。
+        self.store: Optional[TelemetryStore] = None
+        self.collector: Optional[TelemetryCollector] = None
+        self.ground_truth: Optional[GroundTruth] = None
+        self.last_metrics: Optional[dict[str, Any]] = None
 
     def _setup_session_dir(self):
         ts = datetime.fromtimestamp(self._session_start_time).strftime("%Y%m%d_%H%M%S")
@@ -77,15 +75,19 @@ class ControllerV2:
         self._timeline_fp = open(tl_path, "a", encoding="utf-8")
 
     def _log_timeline(self, event_type: str, side: str, data: dict):
+        entry = {"ts": time.time(), "type": event_type, "side": side, "data": data}
+        self._timeline.append(entry)
         if self._timeline_fp is None:
             return
-        entry = {"ts": time.time(), "type": event_type, "side": side, "data": data}
         self._timeline_fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
         self._timeline_fp.flush()
 
     async def start_session(self, scenario=None) -> None:
+        if self._session_active:
+            raise RuntimeError("session already active; stop it before starting another")
         if scenario is None:
-            scenario = "web_basic"
+            from ..scenarios.loader import DEFAULT_SCENARIO
+            scenario = os.environ.get("CO_SCENARIO") or DEFAULT_SCENARIO
         if isinstance(scenario, str):
             import yaml
             from ..scenarios.loader import SCENARIOS_DIR
@@ -94,88 +96,139 @@ class ControllerV2:
                 raise FileNotFoundError(f"scenario not found: {path}")
             self.scenario = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.scenario_name = scenario
+            self._scenario_model = load_scenario(scenario)
         else:
             self.scenario = dict(scenario)
             self.scenario_name = self.scenario.get("name", "")
+            if not self.scenario_name:
+                raise ValueError("scenario mapping must contain a non-empty name")
+            self._scenario_model = load_scenario(self.scenario_name)
+
+        # 重置必须发生在采集器启动前，避免旧会话日志/加固状态污染本轮。
+        from ..arena_reset import reset_all
+        reset_result = await asyncio.to_thread(reset_all, self._scenario_model)
         await self.red_state.reset()
         await self.blue_state.reset()
         await self._inject_initial_credentials(self.scenario)
+        from ..tools.v2.blue_tools import reset_blue_investigation
+        reset_blue_investigation()
+        self._stopped.clear()
+        self._red_stop.clear()
+        self._blue_stop.clear()
+        self.red_task = None
+        self.blue_task = None
+        self._last_outcome = {"red": None, "blue": None}
+        self.last_metrics = None
         self._session_start_time = time.time()
         self._red_tool_calls = []
         self._blue_tool_calls = []
+        self._red_step_count = 0
+        self._blue_step_count = 0
+        self._timeline = []
         self._setup_session_dir()
-        self._log_timeline("session_start", "system", {"scenario": self.scenario_name})
-        await self.event_bus.publish(Event(
-            type="session_start", side="system",
-            data={"reset": True, "session_id": self.session_id, "scenario": self.scenario_name},
-            timestamp=time.time(),
-        ))
+        try:
+            assert self._session_dir is not None
+            self.store = TelemetryStore(
+                self._session_dir / "telemetry.db", session_id=self.session_id)
+            set_store(self.store)
+            self.ground_truth = GroundTruth(
+                self.store, self.session_id, self.event_bus)
+            set_ground_truth(self.ground_truth)
+            self.collector = TelemetryCollector(
+                self._scenario_model, self.store, self.session_id, self.event_bus)
+            self.collector.start()
+            await self.collector.wait_ready()
+            self._session_active = True
+            self._log_timeline(
+                "reset", "system", {"scenario": self.scenario_name,
+                                      "result": reset_result})
+            self._log_timeline("session_start", "system", {"scenario": self.scenario_name})
+            await self.event_bus.publish(Event(
+                type="session_start", side="system",
+                data={"reset": True, "session_id": self.session_id,
+                      "scenario": self.scenario_name},
+                timestamp=time.time(),
+            ))
+        except Exception:
+            await self._release_session_resources()
+            self._close_timeline()
+            self._session_active = False
+            raise
 
     async def stop_session(self) -> str:
-        self._stopped.set()
-        await self.stop_red()
-        await self.stop_blue()
-        if self._timeline_fp:
+        if not self._session_active:
+            return ""
+        report = ""
+        try:
+            self._stopped.set()
+            await self.stop_all()
+            if self.collector is not None:
+                collector = self.collector
+                try:
+                    await collector.stop()
+                except Exception:
+                    logger.exception("failed to stop telemetry collector")
+                finally:
+                    self.collector = None
             self._log_timeline("session_end", "system", {})
-            self._timeline_fp.close()
-            self._timeline_fp = None
-        await self.event_bus.publish(Event(
-            type="session_end", side="system",
-            data={"session_id": self.session_id, "action": "stop"},
-            timestamp=time.time(),
-        ))
-        report = await self._build_report()
+            self._close_timeline()
+            await self.event_bus.publish(Event(
+                type="session_end", side="system",
+                data={"session_id": self.session_id, "action": "stop"},
+                timestamp=time.time(),
+            ))
+            report = await self._build_report()
 
-        # Write metrics.json with actual session data
-        if self._session_dir:
-            import json as _json
-            red_tool_names = [tc.get("name", "") for tc in self._red_tool_calls]
-            blue_tool_names = [tc.get("name", "") for tc in self._blue_tool_calls]
-            red_snap = await self.red_state.snapshot()
-            has_da = red_snap.has_domain_admin
-            has_gt = red_snap.has_golden_ticket
-            has_bh = any(tc.get("name") == "bloodhound_owned" for tc in self._red_tool_calls)
-            has_ir_report = any(tc.get("name") == "generate_report" for tc in self._blue_tool_calls)
-            has_krbtgt = any(tc.get("name") == "krbtgt_rotate" for tc in self._blue_tool_calls)
-            has_rbcd = any(tc.get("name") == "revoke_rbcd" for tc in self._blue_tool_calls)
-            has_isolation = any(tc.get("name") == "host_isolation" for tc in self._blue_tool_calls)
+            # Write metrics.json with actual session data
+            if self._session_dir:
+                import json as _json
+                red_tool_names = [tc.get("name", "") for tc in self._red_tool_calls]
+                blue_tool_names = [tc.get("name", "") for tc in self._blue_tool_calls]
+                red_snap = await self.red_state.snapshot()
+                has_da = red_snap.has_domain_admin
+                has_gt = red_snap.has_golden_ticket
+                has_bh = any(tc.get("name") == "bloodhound_owned" for tc in self._red_tool_calls)
+                has_ir_report = any(tc.get("name") == "generate_report" for tc in self._blue_tool_calls)
+                has_krbtgt = any(tc.get("name") == "krbtgt_rotate" for tc in self._blue_tool_calls)
+                has_rbcd = any(tc.get("name") == "revoke_rbcd" for tc in self._blue_tool_calls)
+                has_isolation = any(tc.get("name") == "host_isolation" for tc in self._blue_tool_calls)
 
-            red_score = 0
-            if has_da: red_score += 40
-            if has_gt: red_score += 30
-            if has_bh: red_score += 15
-            red_score += min(15, len(red_tool_names))
+                red_score = 0
+                if has_da: red_score += 40
+                if has_gt: red_score += 30
+                if has_bh: red_score += 15
+                red_score += min(15, len(red_tool_names))
 
-            blue_score = 0
-            if has_ir_report: blue_score += 30
-            if has_krbtgt: blue_score += 25
-            if has_rbcd: blue_score += 15
-            if has_isolation: blue_score += 15
-            blue_score += min(15, len(blue_tool_names))
+                blue_score = 0
+                if has_ir_report: blue_score += 30
+                if has_krbtgt: blue_score += 25
+                if has_rbcd: blue_score += 15
+                if has_isolation: blue_score += 15
+                blue_score += min(15, len(blue_tool_names))
 
-            metrics = {
-                "session_id": self.session_id,
-                "scenario": self.scenario_name,
-                "red_score": red_score,
-                "blue_score": blue_score,
-                "red_steps": self._red_step_count,
-                "blue_steps": self._blue_step_count,
-                "red_tools_used": sorted(set(red_tool_names)),
-                "blue_tools_used": sorted(set(blue_tool_names)),
-                "red_tool_count": len(red_tool_names),
-                "blue_tool_count": len(blue_tool_names),
-                "has_domain_admin": has_da,
-                "has_golden_ticket": has_gt,
-                "has_bloodhound_owned": has_bh,
-                "has_incident_report": has_ir_report,
-                "has_krbtgt_rotate": has_krbtgt,
-                "has_revoke_rbcd": has_rbcd,
-                "has_host_isolation": has_isolation,
-                "winner": "red" if red_score > blue_score else ("blue" if blue_score > red_score else "draw"),
-            }
-            metrics_path = self._session_dir / "metrics.json"
-            with open(metrics_path, "w", encoding="utf-8") as f:
-                _json.dump(metrics, f, ensure_ascii=False, indent=2)
+                metrics = {
+                    "session_id": self.session_id,
+                    "scenario": self.scenario_name,
+                    "red_score": red_score,
+                    "blue_score": blue_score,
+                    "red_steps": self._red_step_count,
+                    "blue_steps": self._blue_step_count,
+                    "red_tools_used": sorted(set(red_tool_names)),
+                    "blue_tools_used": sorted(set(blue_tool_names)),
+                    "red_tool_count": len(red_tool_names),
+                    "blue_tool_count": len(blue_tool_names),
+                    "has_domain_admin": has_da,
+                    "has_golden_ticket": has_gt,
+                    "has_bloodhound_owned": has_bh,
+                    "has_incident_report": has_ir_report,
+                    "has_krbtgt_rotate": has_krbtgt,
+                    "has_revoke_rbcd": has_rbcd,
+                    "has_host_isolation": has_isolation,
+                    "winner": "red" if red_score > blue_score else ("blue" if blue_score > red_score else "draw"),
+                }
+                metrics_path = self._session_dir / "metrics.json"
+                with open(metrics_path, "w", encoding="utf-8") as f:
+                    _json.dump(metrics, f, ensure_ascii=False, indent=2)
 
             # Auto-generate storyline.md in the background. Stop requests must
             # return quickly; report generation can take minutes with remote LLMs.
@@ -191,21 +244,58 @@ class ControllerV2:
                     print(f"[controller_v2] Storyline auto-gen failed: {_e}")
 
             asyncio.create_task(_generate_storyline_bg())
+        finally:
+            self._close_timeline()
+            await self._release_session_resources()
+            self._session_active = False
 
         return report
+
+    def _close_timeline(self) -> None:
+        if self._timeline_fp is not None:
+            self._timeline_fp.close()
+            self._timeline_fp = None
+
+    async def _release_session_resources(self) -> None:
+        """解绑并关闭会话资源；初始化失败和重复清理均安全。"""
+        if self.collector is not None:
+            try:
+                await self.collector.stop()
+            except Exception:
+                logger.exception("failed to stop telemetry collector")
+            self.collector = None
+        set_ground_truth(None)
+        self.ground_truth = None
+        set_store(None)
+        if self.store is not None:
+            self.store.close()
+            self.store = None
+
+    def set_scenario(self, name: str) -> None:
+        """选择下一次会话使用的场景，并保持旧场景 API 兼容。"""
+        if self._session_active:
+            raise RuntimeError("session active; stop it before switching scenario")
+        selected = load_scenario(name)
+        os.environ["CO_SCENARIO"] = selected.name
+        self.scenario_name = selected.name
+
+    def get_timeline(self) -> list[dict[str, Any]]:
+        """返回当前会话内存时间线副本。"""
+        return list(self._timeline)
+
     async def start_red(
         self, prompt: "str | dict" = "", max_steps: Optional[int] = None
     ) -> asyncio.Task:
         if self.red_task is not None and not self.red_task.done():
             raise RuntimeError("red agent already running")
         if isinstance(prompt, dict):
-            scenario = prompt
+            if not self._session_active:
+                await self.start_session(prompt)
+            scenario = self.scenario
             prompt = ""
-            await self.red_state.reset()
-            await self._inject_initial_credentials(scenario)
         else:
             scenario = self.scenario
-            if not scenario:
+            if not self._session_active or not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
         self._red_tool_calls = []
@@ -242,11 +332,13 @@ class ControllerV2:
         if self.blue_task is not None and not self.blue_task.done():
             raise RuntimeError("blue agent already running")
         if isinstance(prompt, dict):
-            scenario = prompt
+            if not self._session_active:
+                await self.start_session(prompt)
+            scenario = self.scenario
             prompt = ""
         else:
             scenario = self.scenario
-            if not scenario:
+            if not self._session_active or not scenario:
                 raise RuntimeError("no scenario loaded, call start_session first")
         ctx = self._build_ctx(scenario)
         self._blue_tool_calls = []
@@ -371,6 +463,7 @@ class ControllerV2:
                 return None
             return {"reason": o.reason.value, "steps": o.steps, "findings": o.findings, "error": o.error}
         return {
+            "session_active": self._session_active,
             "red_running": red_running, "blue_running": blue_running,
             "red_stop_set": self._red_stop.is_set(), "blue_stop_set": self._blue_stop.is_set(),
             "session_id": self.session_id,

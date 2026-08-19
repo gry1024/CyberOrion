@@ -358,7 +358,9 @@ class TestGuessForced:
 class TestRagV5:
     def test_rag_v5_prompt(self):
         q = {"question": "某样本做了什么？", "options": ["A. x", "B. y"]}
-        system, user = bench.build_prompt(q, "rag", [])
+        docs = [{"id": "T1059", "name": "某样本做了什么？",
+                 "description": "某样本做了什么？"}]
+        system, user = bench.build_prompt(q, "rag", docs)
         assert system == bench._SYSTEM_RAG
         assert "禁止弃答" in user             # 并入原 rag_g v4 规则
         assert "最佳猜测" in user

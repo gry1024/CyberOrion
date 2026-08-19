@@ -108,7 +108,6 @@ logger = logging.getLogger("cyberorion.server")
 from cyberorion.core.event_bus import EventBus, Event
 from cyberorion.core.session_state import SessionState
 from cyberorion.core.controller_v2 import ControllerV2
-from cyberorion.core.session_runner import SessionRunner
 from cyberorion.tools._common import (
     set_session_state_ref, snapshot_ledger, reset_state, TOOL_CALL_LOG,
 )
@@ -121,11 +120,8 @@ event_bus = EventBus()
 session_state = SessionState()
 controller = ControllerV2(event_bus, session_state)
 
-# V2 会话运行器（独立于旧 Controller，管理 v2 agent loop 攻防会话）
-v2_runner = SessionRunner()
-
-# V2 ControllerV2 (agent loop framework, coexists with SessionRunner)
-controller_v2 = None
+# 兼容曾经从 server 导入 controller_v2 的调用方；两者必须始终是同一实例。
+controller_v2 = controller
 
 # Bridge: tools mirror ledger writes into SessionState for frontend visibility.
 set_session_state_ref(session_state)
@@ -144,9 +140,10 @@ def _red_manual_prompt() -> str:
     return (
         f"=== 红方 CTF 授权演练 #{round_num} ===\n"
         "目标只限当前 web_basic 靶场中列出的本地容器和映射端口。"
-        "按顺序执行：1) 枚举目标与服务；2) 针对 DVWA、weak_ssh、Log4Shell "
-        "选择可用工具验证弱点；3) 将成功登录、命令执行或 flag 线索整理成发现；"
-        "4) 避免破坏性动作，达到可验证战果后收尾。"
+        "由 orchestrator 按侦察、凭据获取、权限提升和横向移动阶段派遣 Worker："
+        "1) 枚举目标与服务；2) 针对 DVWA、weak_ssh、Log4Shell 选择可用工具验证弱点；"
+        "3) 将成功登录、命令执行或 flag 线索整理成发现；4) 避免破坏性动作。"
+        "工具失败时保留原始证据并调整策略，不得声称未验证的战果。"
     )
 
 
@@ -170,8 +167,10 @@ def _blue_manual_prompt() -> str:
         "STEP 2 - 调用 dispatch_triage 分派分诊子 Agent，提取 IoC、主机和严重性。\n"
         "STEP 3 - 调用 dispatch_threat_hunter 做日志/检测/进程/文件深挖与 ATT&CK 映射。\n"
         "STEP 4 - 若存在多主机关联，再调用 dispatch_lateral_analyst；若高危或需处置，调用 dispatch_escalation。\n"
-        "STEP 5 - 调用 complete_investigation 汇总，再用 task_complete 输出中文防御总结。\n\n"
-        "输出要求：每个确认判断都说明依据；证据不足时标注不确定，并给出下一步调查动作。"
+        "STEP 5 - 任何 malicious/suspicious 结论必须调用 report_finding 写入正式 alerts 表；"
+        "再调用 complete_investigation 汇总，并用 task_complete 输出中文防御总结。\n\n"
+        "每个确认判断必须有 evidence，confidence 必须诚实；证据不足时标注不确定，"
+        "继续查询并给出下一步调查动作，不得上报臆测。"
     )
 
 
@@ -407,18 +406,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 @app.get("/api/status")
 async def get_status() -> dict[str, Any]:
     """Return controller status + live VULN_LEDGER + session summary."""
-    status = controller.get_status()
+    controller_status = controller.get_status()
+    status = dict(controller_status)
     status["ledger"] = snapshot_ledger()
     status["summary"] = _session_summary
-    # 合并 V2 控制器状态：V2 会话进行中时前端按钮/状态才能正确显示。
-    if controller_v2 is not None:
-        try:
-            v2 = controller_v2.get_status()
-            status["v2"] = v2
-            if v2.get("session_id"):
-                status["session_active"] = True
-        except Exception:
-            pass
+    # 保留 v2 键供旧前端读取；内容与顶层来自同一个控制器。
+    status["v2"] = dict(controller_status)
     return status
 
 
@@ -1351,21 +1344,21 @@ async def session_start() -> dict[str, Any]:
     global _session_summary
     _session_summary = {}
     reset_state()
-    await controller.start_session()
-    return {"ok": True, "status": await get_status()}
+    try:
+        await controller.start_session()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/session/stop")
 async def session_stop() -> dict[str, Any]:
-    global _session_summary, controller_v2
+    global _session_summary
     _session_summary = _generate_summary()
     await controller.stop_session()
-    # V2 会话存在时也一并收尾，确保 report/metrics/storyline 落盘。
-    if controller_v2 is not None:
-        try:
-            await controller_v2.stop_session()
-        except Exception as _e:
-            print(f"[server] v2 stop failed: {_e}")
     await event_bus.publish(Event(
         type="session_end", side="system",
         data={"summary": _session_summary, "snapshot": session_state.snapshot()},
@@ -1378,7 +1371,7 @@ async def session_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/red/start")
 async def red_start() -> dict[str, Any]:
-    if not controller.session_id:  # type: ignore[attr-defined]
+    if not controller.get_status().get("session_active"):
         await controller.start_session()
     prompt = _red_manual_prompt()
     try:
@@ -1393,14 +1386,16 @@ async def red_start() -> dict[str, Any]:
 
 @app.post("/api/red/pause")
 async def red_pause() -> dict[str, Any]:
-    await controller.stop_red()
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 暂不支持暂停；可停止后重新启动",
+         "status": await get_status()}, status_code=409)
 
 
 @app.post("/api/red/resume")
 async def red_resume() -> dict[str, Any]:
-    pass
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 暂不支持恢复；请使用 /api/red/start",
+         "status": await get_status()}, status_code=409)
 
 
 @app.post("/api/red/stop")
@@ -1414,7 +1409,7 @@ async def red_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/blue/start")
 async def blue_start() -> dict[str, Any]:
-    if not controller.session_id:  # type: ignore[attr-defined]
+    if not controller.get_status().get("session_active"):
         await controller.start_session()
     prompt = _blue_manual_prompt()
     try:
@@ -1431,14 +1426,16 @@ async def blue_start() -> dict[str, Any]:
 
 @app.post("/api/blue/pause")
 async def blue_pause() -> dict[str, Any]:
-    await controller.stop_blue()
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 暂不支持暂停；可停止后重新启动",
+         "status": await get_status()}, status_code=409)
 
 
 @app.post("/api/blue/resume")
 async def blue_resume() -> dict[str, Any]:
-    pass
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 暂不支持恢复；请使用 /api/blue/start",
+         "status": await get_status()}, status_code=409)
 
 
 @app.post("/api/blue/stop")
@@ -1449,14 +1446,16 @@ async def blue_stop() -> dict[str, Any]:
 
 @app.post("/api/blue/patrol/start")
 async def blue_patrol_start(interval: float = 30.0) -> dict[str, Any]:
-    pass
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 暂不支持自动巡逻；请使用 /api/blue/start",
+         "status": await get_status()}, status_code=409)
 
 
 @app.post("/api/blue/patrol/stop")
 async def blue_patrol_stop() -> dict[str, Any]:
-    pass
-    return {"ok": True, "status": await get_status()}
+    return JSONResponse(
+        {"ok": False, "error": "ControllerV2 没有活动的自动巡逻任务",
+         "status": await get_status()}, status_code=409)
 
 
 
@@ -1741,23 +1740,27 @@ def _sse(ev: dict) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# V2 API 端点 — 基于 ControllerV2 / SessionRunner 的 ares 风格 agent loop
-# 与旧版 /api/* 端点并存，互不影响。
+# V2 API 端点 — 与主 /api/* 路由共享同一个 ControllerV2 实例。
 # --------------------------------------------------------------------------- #
 @app.post("/api/v2/session/start")
-async def v2_start_session(scenario: str = "web_basic") -> dict[str, Any]:
+async def v2_start_session(scenario: str | None = None) -> dict[str, Any]:
     """启动 v2 攻防会话：加载场景 → 启动红蓝 agent loop → 返回 session_id.
 
     注意：simulate 参数已移除（REFACTOR_M1 D1）。仅支持 live 模式，需要 Docker 靶场。
     """
-    global controller_v2
     try:
-        controller_v2 = ControllerV2(event_bus, session_state)
-        await controller_v2.start_session(scenario)
+        # 未显式指定时复用主 API 的场景选择（CO_SCENARIO/default），
+        # 避免兼容路由悄悄切回尚未验收的 AD 场景。
+        await controller.start_session(scenario)
         return {
-            "session_id": controller_v2.session_id,
-            "scenario": controller_v2.scenario_name,
+            "session_id": controller.session_id,
+            "scenario": controller.scenario_name,
         }
+    except (RuntimeError, ValueError) as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": f"{type(exc).__name__}: {exc}"},
+        )
     except Exception as exc:
         return JSONResponse(
             status_code=500,
@@ -1768,31 +1771,37 @@ async def v2_start_session(scenario: str = "web_basic") -> dict[str, Any]:
 @app.get("/api/v2/session/{session_id}/status")
 async def v2_session_status(session_id: str) -> dict[str, Any]:
     """获取 v2 会话状态：红蓝运行状态/步数/发现数。"""
-    return await v2_runner.get_session_status(session_id)
+    if session_id != controller.session_id:
+        return JSONResponse(status_code=404, content={"error": "session not found"})
+    return controller.get_status()
 
 
 @app.post("/api/v2/session/{session_id}/stop")
 async def v2_stop_session(session_id: str) -> dict[str, Any]:
     """停止 v2 会话。"""
-    return await v2_runner.stop_session(session_id)
+    if session_id != controller.session_id:
+        return JSONResponse(status_code=404, content={"error": "session not found"})
+    await controller.stop_session()
+    return {"session_id": session_id, "stopped": True}
 
 
 @app.get("/api/v2/session/{session_id}/timeline")
-async def v2_session_timeline(session_id: str) -> list[dict[str, Any]]:
+async def v2_session_timeline(session_id: str) -> Any:
     """获取 v2 会话时间线。"""
-    return await v2_runner.get_session_timeline(session_id)
+    if session_id != controller.session_id:
+        return JSONResponse(status_code=404, content={"error": "session not found"})
+    return controller.get_timeline()
 
 
 @app.post("/api/v2/red/start")
 async def v2_red_start(payload: dict = Body(default={})) -> dict[str, Any]:
     """Start red team agent loop via ControllerV2."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
     prompt = str(payload.get("prompt", ""))
     try:
-        await controller_v2.start_red(prompt=prompt)
-        return {"ok": True, "status": controller_v2.get_status()}
+        await controller.start_red(prompt=prompt)
+        return {"ok": True, "status": controller.get_status()}
     except (RuntimeError, ValueError) as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})
 
@@ -1800,13 +1809,12 @@ async def v2_red_start(payload: dict = Body(default={})) -> dict[str, Any]:
 @app.post("/api/v2/blue/start")
 async def v2_blue_start(payload: dict = Body(default={})) -> dict[str, Any]:
     """Start blue team agent loop via ControllerV2."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
     prompt = str(payload.get("prompt", ""))
     try:
-        await controller_v2.start_blue(prompt=prompt)
-        return {"ok": True, "status": controller_v2.get_status()}
+        await controller.start_blue(prompt=prompt)
+        return {"ok": True, "status": controller.get_status()}
     except (RuntimeError, ValueError) as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})
 
@@ -1814,41 +1822,37 @@ async def v2_blue_start(payload: dict = Body(default={})) -> dict[str, Any]:
 @app.post("/api/v2/red/stop")
 async def v2_red_stop() -> dict[str, Any]:
     """Stop red team agent loop."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller_v2.stop_red()
-    return {"ok": True, "status": controller_v2.get_status()}
+    await controller.stop_red()
+    return {"ok": True, "status": controller.get_status()}
 
 
 @app.post("/api/v2/blue/stop")
 async def v2_blue_stop() -> dict[str, Any]:
     """Stop blue team agent loop."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller_v2.stop_blue()
-    return {"ok": True, "status": controller_v2.get_status()}
+    await controller.stop_blue()
+    return {"ok": True, "status": controller.get_status()}
 
 
 @app.get("/api/v2/status")
 async def v2_status() -> dict[str, Any]:
     """Get ControllerV2 status."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return {"active": False}
-    return {"active": True, "session_id": controller_v2.session_id, "status": controller_v2.get_status()}
+    return {"active": True, "session_id": controller.session_id,
+            "status": controller.get_status()}
 
 
 @app.post("/api/v2/session/stop")
 async def v2_session_stop() -> dict[str, Any]:
     """Stop v2 session (ControllerV2)."""
-    global controller_v2
-    if controller_v2 is None:
+    if not controller.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller_v2.stop_session()
-    status = controller_v2.get_status()
-    controller_v2 = None
+    await controller.stop_session()
+    status = controller.get_status()
     return {"ok": True, "status": status}
 
 

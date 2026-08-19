@@ -126,6 +126,16 @@ list_alerts = make_tool(
      ("host", "string", "按主机过滤，空=全部")],
     [],
 )
+report_finding = make_tool(
+    "report_finding", "上报有遥测证据支撑的正式安全发现（写入 alerts 表）。",
+    [("host", "string", "受影响主机/容器名"),
+     ("technique", "string", "ATT&CK 技术编号，如 T1110；未知可传空串"),
+     ("verdict", "string", "malicious/suspicious/benign/false_positive"),
+     ("confidence", "number", "置信度 0.0~1.0"),
+     ("evidence", "string", "具体遥测事件或快照差异证据"),
+     ("title", "string", "发现的简短标题")],
+    ["host", "verdict", "confidence", "evidence"],
+)
 
 # 威胁情报
 lookup_technique = make_tool(
@@ -240,7 +250,7 @@ _ALL: dict[str, ToolDefinition] = {
         query_logs, query_logs_around_timestamp, query_logs_progressive,
         run_detection_query, run_parallel_detections, list_detection_templates,
         network_summary, get_active_connections, check_suspicious_ports,
-        process_audit, file_integrity, list_alerts,
+        process_audit, file_integrity, report_finding, list_alerts,
         lookup_technique, suggest_techniques, search_attack_kb,
         add_evidence, record_timeline_event, add_technique,
         track_host_investigation,
@@ -260,23 +270,23 @@ def _pick(names: list[str]) -> list[ToolDefinition]:
 # 角色 -> 工具元数据列表（不含回调工具；回调工具由 tools_for_role 合并）。
 BLUE_ROLE_TOOLS: dict[AgentRole, list[ToolDefinition]] = {
     AgentRole.BLUE_TRIAGE: _pick([
-        "query_logs", "list_alerts", "run_detection_query", "lookup_technique",
+        "query_logs", "list_alerts", "report_finding", "run_detection_query", "lookup_technique",
         "add_evidence", "record_timeline_event",
     ]),
     AgentRole.BLUE_THREAT_HUNTER: _pick([
         "query_logs", "query_logs_around_timestamp", "run_parallel_detections",
         "list_detection_templates", "network_summary", "process_audit",
         "file_integrity", "lookup_technique", "suggest_techniques",
-        "search_attack_kb", "add_evidence", "add_technique",
+        "search_attack_kb", "add_evidence", "add_technique", "report_finding",
     ]),
     AgentRole.BLUE_LATERAL: _pick([
         "query_logs", "network_summary", "get_active_connections",
         "check_suspicious_ports", "track_host_investigation", "process_audit",
-        "add_evidence", "record_timeline_event",
+        "add_evidence", "record_timeline_event", "report_finding",
     ]),
     AgentRole.BLUE_ESCALATION: _pick([
         "query_logs", "list_alerts", "run_detection_query", "lookup_technique",
-        "add_evidence", "record_timeline_event",
+        "add_evidence", "record_timeline_event", "report_finding",
     ]),
     AgentRole.BLUE_ORCHESTRATOR: _pick([
         "get_alerts", "get_investigation_summary",

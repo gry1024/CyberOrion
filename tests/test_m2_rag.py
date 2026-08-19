@@ -18,6 +18,19 @@ from pathlib import Path
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+KI_PATH = REPO_ROOT / "cyberorion/core/knowledge_injector.py"
+
+
+def _load_knowledge_injector_module():
+    """按仓库绝对路径加载模块，避免依赖 pytest 启动目录。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ki", KI_PATH)
+    ki = importlib.util.module_from_spec(spec)
+    sys.modules["ki"] = ki
+    spec.loader.exec_module(ki)
+    return ki
+
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -25,14 +38,7 @@ import pytest
 @pytest.fixture
 def injector():
     """构造 KnowledgeInjector。"""
-    # 绕过 core/__init__.py 的 cai 依赖
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "ki", "./cyberorion/cyberorion/core/knowledge_injector.py"
-    )
-    ki = importlib.util.module_from_spec(spec)
-    sys.modules["ki"] = ki
-    spec.loader.exec_module(ki)
+    ki = _load_knowledge_injector_module()
     return ki.KnowledgeInjector()
 
 
@@ -42,7 +48,7 @@ def injector():
 def test_red_team_blocked(injector):
     """红队调用必须抛 SecurityError。"""
     async def run():
-        with pytest.raises(ki.SecurityError if hasattr(ki, "SecurityError") else Exception):
+        with pytest.raises(PermissionError):
             await injector.inject_for(
                 side="red", role="recon", intent="recon", current_state={}
             )
@@ -105,15 +111,7 @@ def test_blue_no_match(injector):
 # --------------------------------------------------------------------------- #
 def test_blue_char_budget():
     """蓝队 IR 字符上限 ≤2500。"""
-    sys.path.insert(0, "./cyberorion")
-    from cyberorion.kb.rag import get_kb
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "ki", "./cyberorion/cyberorion/core/knowledge_injector.py"
-    )
-    ki = importlib.util.module_from_spec(spec)
-    sys.modules["ki"] = ki
-    spec.loader.exec_module(ki)
+    ki = _load_knowledge_injector_module()
 
     async def run():
         inj = ki.KnowledgeInjector()
@@ -143,15 +141,7 @@ def test_blue_char_budget():
 
 def test_host_char_budget():
     """主机卫士字符上限 ≤1800。"""
-    sys.path.insert(0, "./cyberorion")
-    from cyberorion.kb.rag import get_kb
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "ki", "./cyberorion/cyberorion/core/knowledge_injector.py"
-    )
-    ki = importlib.util.module_from_spec(spec)
-    sys.modules["ki"] = ki
-    spec.loader.exec_module(ki)
+    ki = _load_knowledge_injector_module()
 
     async def run():
         inj = ki.KnowledgeInjector()
@@ -184,15 +174,7 @@ def test_kb_zh_translations():
 
 def test_blue_retrieval_includes_zh_names():
     """蓝队检索返回的 doc 含 name_zh。"""
-    sys.path.insert(0, "./cyberorion")
-    from cyberorion.kb.rag import get_kb
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "ki", "./cyberorion/cyberorion/core/knowledge_injector.py"
-    )
-    ki = importlib.util.module_from_spec(spec)
-    sys.modules["ki"] = ki
-    spec.loader.exec_module(ki)
+    ki = _load_knowledge_injector_module()
 
     async def run():
         inj = ki.KnowledgeInjector()
@@ -235,15 +217,7 @@ BLUE_SCENARIOS = [
 @pytest.mark.parametrize("scenario_name,technique,hint", BLUE_SCENARIOS)
 def test_blue_scenarios(scenario_name, technique, hint):
     """10 个蓝队 IR 剧本全过。"""
-    sys.path.insert(0, "./cyberorion")
-    from cyberorion.kb.rag import get_kb
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "ki", "./cyberorion/cyberorion/core/knowledge_injector.py"
-    )
-    ki = importlib.util.module_from_spec(spec)
-    sys.modules["ki"] = ki
-    spec.loader.exec_module(ki)
+    ki = _load_knowledge_injector_module()
 
     captured = []
     async def emitter(ev):

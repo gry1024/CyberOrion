@@ -46,7 +46,7 @@ cyberorion/                        # 仓库根
 │   │   ├── blue.py                旧单体蓝队（13 业务工具 + Skill，回退路径）
 │   │   └── red.py                 红方渗透者（6 业务工具 + Skill + 草稿板）
 │   ├── core/
-│   │   ├── controller.py          会话生命周期：重置→遥测→红蓝并发→评分
+│   │   ├── controller_v2.py       V2 会话生命周期：重置→遥测→红蓝并发→评分
 │   │   ├── agent_runner.py        Runner.run_streamed 流式运行 + 事件转播
 │   │   ├── event_bus.py           asyncio pub/sub 总线（前端所有实时数据的源头）
 │   │   └── session_state.py       全局/会话状态 + 漏洞台账
@@ -156,7 +156,7 @@ cd <cai-repo>/cyberorion && python server.py   # → http://localhost:8000
 1. **bench/对抗出现全 0 或全错，先查 LLM 端点，别怀疑代码**。历史教训：DashScope 欠费导致所有调用静默失败、分数全 0。排查顺序：`curl $OPENAI_BASE_URL/models -H "Authorization: Bearer $OPENAI_API_KEY"` → 看 run json 里 `llm_errors` / raw 输出。`<cai-repo>/.env.bak.*` 是历次端点切换的备份，可对照。
 2. **busybox vs procps 的 ps 格式不同**：快照解析 `parse_ps_aux` 必须兼容两种布局（`telemetry/collectors.py:281` 有注释）。weak_ssh 是 busybox——早年只支持 procps 导致其进程快照恒为空。改快照解析时两种都要测。
 3. **容器里没有/用不了 iptables**：`block_ip` 在某些容器上失败是**环境问题**（容器缺 NET_ADMIN，`tools/blue/respond.py:81` 明确返回此提示），不是 bug。工具已如实返回失败，别去"修"它谎报成功。
-4. **靶机状态污染**：上一轮蓝队加固（关 ssh 密码认证、DVWA 调 high、删后门）会让新一轮"没东西可打"。`Controller.start_session` 会自动 `arena_reset.reset_all`，手动用 `scripts/reset_targets.sh`。遇到"红队突然打不进"先想这个。
+4. **靶机状态污染**：上一轮蓝队加固（关 ssh 密码认证、DVWA 调 high、删后门）会让新一轮"没东西可打"。`ControllerV2.start_session` 会自动 `arena_reset.reset_all`，手动用 `scripts/reset_targets.sh`。遇到"红队突然打不进"先想这个。
 5. **WSL2 里容器 IP（172.29.x.x）从 Windows 侧/某些路径不可直连**：红方工具一律走 **127.0.0.1 + 宿主映射端口**（28080/22222/8983），蓝方遥测走 docker exec/容器网段。新增目标时两条路径都要配对设置，`CO_TARGET_*_IP` / `CO_*_HOST_PORT` 环境变量可覆盖。
 6. **ATT&CK v18 是 13 个战术**：Defense Evasion 已拆成 Stealth + Defense Impairment（`kb/service.py` 注释）。写死 12 战术的代码/测试都是错的。
 7. **推理型模型（MiniMax-M 系列 / deepseek-v4-flash）会把 max_tokens 全烧在思维链上导致答案行缺失** → bench `parse_fail` 飙升被判 wrong。实测 deepseek-v4-flash 在 rag 长提示（注入知识后 ~4k 字符）下 4096 甚至 8192 tokens 全部变成 reasoning_tokens、content 为空（finish_reason=length）；`extra_body={"thinking": {"type": "disabled"}}` 可关闭思维链（5s 出完整答案）。`bench/cybersoceval.py` 支持 `CO_BENCH_THINKING=disabled` 下发该参数（DeepSeek 兼容端点；其他端点不认识时不要设）。`_MAX_TOKENS=4096`（2026-08 起）。换模型跑 bench 先看 parse_fail。

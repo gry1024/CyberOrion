@@ -42,6 +42,8 @@ _BLUE_BASE = """# 角色与身份
 1. 每一步先 reasoning（说明意图与依据），再 act（调用工具）。工具失败时把错误信息纳入下一步决策。
 2. 接近步数上限时主动收尾，调用 task_complete 提交结构化发现；仅在确有必要时调用 request_assistance。
 3. 工具返回的数据即唯一事实来源，不要在 reasoning 中编造未出现的主机/端口/进程。
+4. 一旦把行为判定为 malicious 或 suspicious，必须在 task_complete 前调用 report_finding，
+   写入 host、ATT&CK technique、置信度和具体证据；add_evidence 不能替代正式告警。
 """
 
 
@@ -58,7 +60,7 @@ _TRIAGE_PROMPT = """# 角色职责：TRIAGE 告警分诊分析师
 - P1：提取首轮 IoC（来源 IP、目标主机、相关用户、可疑进程、ATT&CK 技术编号）。
 - P2：用 run_detection_query 跑相关检测模板验证告警，用 lookup_technique 校准技术编号。
 - P3：判断告警真实性（malicious/suspicious/benign/false_positive），决定是否需深度调查。
-- P4：用 add_evidence / record_timeline_event 固化分诊结论，为下游 worker 提供起点。
+- P4：用 add_evidence / record_timeline_event 固化分诊结论；恶意或可疑结论立即用 report_finding 上报。
 
 # 可用工具
 {capabilities}
@@ -83,6 +85,7 @@ ATT&CK 技术关联、攻击链重建与置信度评估。
 - P2：用 process_audit / file_integrity / network_summary 做主机基线对比，定位异常进程/文件/端口。
 - P3：用 search_attack_kb / suggest_techniques 把行为映射到 ATT&CK 技术，用 lookup_technique 核实定义。
 - P4：用 add_evidence / add_technique 固化证据与技术映射，重建可追溯攻击链。
+- P5：对证据充分的 malicious/suspicious 行为调用 report_finding，形成正式告警。
 
 # 可用工具
 {capabilities}
@@ -106,7 +109,7 @@ _LATERAL_ANALYST_PROMPT = """# 角色职责：LATERAL_ANALYST 横向移动检测
 - P1：用 query_logs 跨主机关联认证事件（成功登录/异常来源 IP），识别横向跳板。
 - P2：用 process_audit 检查各主机可疑进程（反弹 shell/远程执行工具）。
 - P3：用 track_host_investigation 标记每台主机状态（investigating/compromised/clean），构建横向移动图。
-- P4：用 add_evidence / record_timeline_event 固化横向路径与受影响主机清单。
+- P4：用 add_evidence / record_timeline_event 固化横向路径，并逐主机调用 report_finding 上报确认发现。
 
 # 可用工具
 {capabilities}
@@ -128,7 +131,7 @@ _ESCALATION_PROMPT = """# 角色职责：ESCALATION_TRIAGE 升级处置专家
 - P0：用 list_alerts 拉取 high/critical 告警，用 query_logs / run_detection_query 复核证据。
 - P1：用 lookup_technique 评估技术严重性，做升级/降级决策（是否升级到事件响应）。
 - P2：跨调查关联：检查同主机/同技术的重复告警，判断是否同一攻击链。
-- P3：用 add_evidence / record_timeline_event 固化审查结论与升级决策。
+- P3：用 add_evidence / record_timeline_event 固化审查结论；新确认的威胁用 report_finding 上报。
 - P4：必要时执行响应动作（block_ip / harden_service / remediate）并记录处置结果。
 
 # 可用工具

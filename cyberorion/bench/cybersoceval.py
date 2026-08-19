@@ -776,9 +776,9 @@ def build_prompt(q: dict, mode: str = "base",
         header = ("【检索到的 MITRE ATT&CK 知识】（仅供参考，可能部分或"
                   "全部与本题无关）")
         if mode == "rag":
-            rules += "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案（如 ANSWER: []）。\n"
+            rules += _KNOWLEDGE_GUIDANCE + _GUESS_RULES_V5
             header = ("【检索到的恶意软件知识】（ATT&CK 技术 / 恶意软件"
-                      "仅供参考，可能与本题无关）")
+                      "家族资料 / 沙箱报告解读知识，仅供参考）")
             if report_summary:
                 excerpt = (
                     "【本题沙箱报告摘要】（题目引用的 Hybrid Analysis "

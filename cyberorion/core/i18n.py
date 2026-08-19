@@ -126,6 +126,71 @@ TOOL_LABELS: dict[str, str] = {
     "targeted_kerberoast":         "Targeted Kerberoasting",
     "noPac":                       "noPac 提权利用",
     "printnightmare":              "PrintNightmare 提权利用",
+    "add_computer":                "添加域计算机账户",
+    "addspn":                      "添加或修改服务主体名称",
+    "adminsd_holder_add_ace":      "向 AdminSDHolder 添加访问控制项",
+    "bloodyad_add_genericall":     "授予 GenericAll 权限",
+    "bloodyad_add_group_member":   "向域组添加成员",
+    "bloodyad_set_password":       "重置域用户密码",
+    "certipy_esc4_full_chain":     "执行 ADCS ESC4 完整攻击链",
+    "certipy_template_esc4":       "修改证书模板实施 ESC4",
+    "check_autologon_registry":    "检查自动登录注册表凭据",
+    "check_credman_entries":       "检查凭据管理器条目",
+    "crack_with_hashcat":          "使用 Hashcat 破解哈希",
+    "crack_with_john":             "使用 John 破解哈希",
+    "create_inter_realm_ticket":   "创建跨域 Kerberos 票据",
+    "dacl_edit":                   "编辑目录对象 DACL",
+    "dnstool":                     "修改 AD 集成 DNS 记录",
+    "domain_admin_checker":        "检查域管理员权限",
+    "evil_winrm":                  "通过 Evil-WinRM 远程执行",
+    "extract_trust_key":           "提取域信任密钥",
+    "find_delegation":             "枚举 Kerberos 委派配置",
+    "generate_golden_ticket":      "生成 Kerberos 黄金票据",
+    "get_sid":                     "查询域或账户 SID",
+    "get_tgt":                     "申请 Kerberos TGT",
+    "gmsa_dump_passwords":         "转储 gMSA 密码",
+    "gmsa_read_password_bloodyad": "读取 gMSA 托管密码",
+    "gpp_password_finder":         "查找 GPP 遗留密码",
+    "krbrelayup":                  "执行 KrbRelayUp 提权",
+    "laps_dump":                   "读取 LAPS 托管密码",
+    "ldap_search_descriptions":    "检索 LDAP 描述字段凭据",
+    "mssql_command":               "执行 MSSQL 命令",
+    "mssql_enable_xp_cmdshell":    "启用 MSSQL xp_cmdshell",
+    "mssql_enum_impersonation":    "枚举 MSSQL 模拟权限",
+    "mssql_enum_linked_servers":   "枚举 MSSQL 链接服务器",
+    "mssql_exec_linked":           "通过链接服务器执行命令",
+    "mssql_impersonate":           "模拟 MSSQL 登录身份",
+    "mssql_linked_enable_xpcmdshell": "在链接服务器启用 xp_cmdshell",
+    "mssql_linked_xpcmdshell":     "在链接服务器执行 xp_cmdshell",
+    "mssql_ntlm_coerce":           "通过 MSSQL 强制 NTLM 认证",
+    "nopac":                       "执行 noPac 提权攻击",
+    "ntds_dit_extract":            "提取 NTDS.dit 域凭据",
+    "ntlmrelayx_multirelay":       "执行多目标 NTLM 中继",
+    "ntlmrelayx_to_adcs":          "将 NTLM 认证中继到 ADCS",
+    "ntlmrelayx_to_ldaps":         "将 NTLM 认证中继到 LDAPS",
+    "ntlmrelayx_to_smb":           "将 NTLM 认证中继到 SMB",
+    "password_policy":             "查询域密码与锁定策略",
+    "password_spray":              "执行密码喷洒",
+    "petitpotam_unauth":           "执行未认证 PetitPotam",
+    "psexec_kerberos":             "使用 Kerberos 执行 PsExec",
+    "pth_rpcclient":               "使用哈希访问 RPCClient",
+    "pth_smbclient":               "使用哈希访问 SMBClient",
+    "pth_winexe":                  "使用哈希执行 WinExe",
+    "pth_wmic":                    "使用哈希执行 WMI 命令",
+    "pygpoabuse_immediate_task":   "通过 GPO 创建立即任务",
+    "rbcd_write":                  "写入 RBCD 委派配置",
+    "s4u_attack":                  "执行 Kerberos S4U 委派攻击",
+    "secretsdump_kerberos":        "使用 Kerberos 转储凭据",
+    "sharpgpoabuse":               "滥用可写 GPO",
+    "smbexec_kerberos":            "使用 Kerberos 执行 SMBExec",
+    "ssh_with_password":           "使用密码登录 SSH",
+    "start_mitm6":                 "启动 Mitm6 IPv6 欺骗",
+    "start_responder":             "启动 Responder 名称解析投毒",
+    "sysvol_script_search":        "搜索 SYSVOL 脚本凭据",
+    "unconstrained_coerce_and_capture": "强制认证并捕获非约束委派 TGT",
+    "unconstrained_tgt_dump":      "转储非约束委派 TGT",
+    "username_as_password":        "尝试用户名作为密码",
+    "wmiexec_kerberos":            "使用 Kerberos 执行 WMIExec",
     # ============== Blue 工具 ==============
     "query_logs":                  "查询日志",
     "query_logs_around_timestamp": "按时间戳查询周边日志",
@@ -139,6 +204,7 @@ TOOL_LABELS: dict[str, str] = {
     "process_audit":               "进程审计",
     "file_integrity":              "文件完整性校验",
     "list_alerts":                 "列出告警",
+    "report_finding":              "上报安全发现",
     "lookup_technique":            "查询 ATT&CK 技术详情",
     "suggest_techniques":          "推荐可能 ATT&CK 技术",
     "search_attack_kb":            "搜索攻击知识库",
@@ -266,13 +332,15 @@ def _llm_summarize_sync(tool_name: str, raw_output: str) -> str:
     try:
         from openai import AsyncOpenAI
 
-        api_key = os.getenv("OPENAI_API_KEY", "missing")
+        api_key = os.getenv("OPENAI_API_KEY", "")
         base_url = os.getenv("OPENAI_API_BASE") or os.getenv("OPENAI_BASE_URL")
+        if not api_key or not base_url:
+            return f"[{get_label_or_default(tool_name, tool_name)}] 执行完成"
         client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=30.0)
         model = os.getenv("CAI_MODEL", "deepseek-chat").split("/")[-1]
     except Exception as e:
         logger.warning(f"无法构造 LLM 客户端用于兜底摘要: {e}")
-        return f"[{get_label(tool_name)}] 执行完成"
+        return f"[{get_label_or_default(tool_name, tool_name)}] 执行完成"
 
     async def _call():
         try:
@@ -299,7 +367,7 @@ def _llm_summarize_sync(tool_name: str, raw_output: str) -> str:
             return (resp.choices[0].message.content or "").strip()
         except Exception as e:
             logger.warning(f"LLM 兜底摘要失败: {e}")
-            return f"[{get_label(tool_name)}] 执行完成"
+            return f"[{get_label_or_default(tool_name, tool_name)}] 执行完成"
 
     try:
         return asyncio.run(_call())
@@ -339,7 +407,7 @@ def summarize(
 
     if use_llm_if_missing:
         return _llm_summarize_sync(tool_name, raw_output)
-    return f"[{get_label(tool_name)}] 执行完成"
+    return f"[{get_label_or_default(tool_name, tool_name)}] 执行完成"
 
 
 __all__ = [

@@ -386,6 +386,52 @@ async def file_integrity(container: str = "", paths: str = "/var/www,/etc", **_:
     return _clip("\n".join(out))
 
 
+_VALID_VERDICTS = ("malicious", "suspicious", "benign", "false_positive")
+
+
+async def report_finding(
+    host: str = "",
+    technique: str = "",
+    verdict: str = "",
+    confidence: float = 0.0,
+    evidence: str = "",
+    title: str = "",
+    **_: Any,
+) -> str:
+    """上报有遥测证据支撑的正式安全发现（写入 alerts 表）。"""
+    s = _store()
+    if isinstance(s, str):
+        return s
+    host = (host or "").strip()
+    verdict = (verdict or "").strip().lower()
+    evidence = (evidence or "").strip()
+    if not host:
+        return "host 不能为空"
+    if verdict not in _VALID_VERDICTS:
+        return f"非法 verdict {verdict!r}，取值: {'/'.join(_VALID_VERDICTS)}"
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        return "confidence 必须是 0.0~1.0 的数字"
+    if not 0.0 <= conf <= 1.0:
+        return "confidence 必须在 0.0~1.0 之间"
+    if not evidence:
+        return "evidence 不能为空：必须引用具体遥测事件或快照差异"
+    finding_title = (title or "").strip()[:80]
+    alert_evidence = f"[{finding_title}] {evidence}" if finding_title else evidence
+    alert_id = s.insert_alert(
+        host=host,
+        technique=(technique or "").strip().upper(),
+        verdict=verdict,
+        confidence=conf,
+        evidence=alert_evidence,
+        source_tool="report_finding",
+    )
+    return (f"告警已记录: id={alert_id} host={host} "
+            f"technique={(technique or '-').strip()} verdict={verdict} "
+            f"confidence={conf:.2f}")
+
+
 async def list_alerts(status: str = "", host: str = "", **_: Any) -> str:
     """列出蓝队告警。"""
     s = _store()
@@ -576,7 +622,7 @@ __all__ = [
     "query_logs", "query_logs_around_timestamp", "query_logs_progressive",
     "run_detection_query", "run_parallel_detections", "list_detection_templates",
     "network_summary", "get_active_connections", "check_suspicious_ports",
-    "process_audit", "file_integrity", "list_alerts",
+    "process_audit", "file_integrity", "report_finding", "list_alerts",
     "lookup_technique", "suggest_techniques", "search_attack_kb",
     "add_evidence", "record_timeline_event", "add_technique",
     "track_host_investigation",

@@ -16,7 +16,7 @@
                      └───────────────────┬───────────────────────┘
                                          │
                      ┌───────────────────▼───────────────────────┐
-                     │       core/Controller（会话编排）           │
+                     │      core/ControllerV2（会话编排）          │
                      │  start/pause/resume/stop · 红蓝各自         │
                      │  asyncio.Task 并发，互不共享上下文           │
                      │  start_session: 靶场重置 → 遥测 → 建 agent │
@@ -42,7 +42,7 @@
 
 数据流细节：
 
-1. `Controller.start_session` → `arena_reset.reset_all`（恢复易受攻击基线）→ 建 `TelemetryStore`/`TelemetryCollector`/`GroundTruth` 并开始采集 → 构建红蓝 agent → 发 `session_start`；
+1. `ControllerV2.start_session` → `arena_reset.reset_all`（恢复易受攻击基线）→ 建 `TelemetryStore`/`TelemetryCollector`/`GroundTruth` 并开始采集 → 构建红蓝 agent → 发 `session_start`；
 2. 红方每个攻击工具被 `@_gt_record` 装饰，调用结果自动写入 `attacks` 表并发 `attack` 事件；`claim_success` 裁判把 VERIFIED 判定也写回地面真值；
 3. 采集器把容器日志解析为归一化事件写 `events` 表（severity ≥ medium 同时上事件总线），每 30s 写进程/网络快照；
 4. 蓝方团队用检测工具查询 `events`/`snapshots`（代码层面接触不到 `attacks`），`report_finding` 写 `alerts` 表，处置工具（`block_ip`/`harden_service`）埋点 `source='response'` 防御事件；
@@ -65,7 +65,7 @@ cyberorion/                          # 仓库根
 │   │   ├── blue.py                  旧单体蓝队（13 业务工具 + Skill，兼容/回退）
 │   │   └── red.py                   红方自主渗透者（6 业务工具 + Skill + 草稿板）
 │   ├── core/
-│   │   ├── controller.py            会话生命周期 + 红蓝控制 + 自动巡逻
+│   │   ├── controller_v2.py         V2 会话生命周期 + 红蓝 agent loop 控制
 │   │   ├── agent_runner.py          Runner.run_streamed 流式运行 + 事件转播
 │   │   ├── event_bus.py             asyncio 队列 pub/sub（含线程安全 publish_sync）
 │   │   └── session_state.py         全局/会话状态 + 双 scope 漏洞台账
@@ -231,6 +231,8 @@ Skill 只描述“何时调用、调用顺序、证据与停止条件”，不�
 ### 5.2 TelemetryCollector（collectors.py）
 
 - **文件日志**：`docker exec <container> tail -n +N -F <path>`，从当前文件末尾开始（历史日志属于旧会话，从头摄取会污染评分），跟踪行偏移防重连重复，文件缩小时重置偏移；
+- **启动屏障**：`ControllerV2` 在发布 `session_start` 前等待所有日志流完成行数基线定位，防止会话开头的攻击日志被误当成历史日志跳过；
+- **停止清理**：文件 tail 启动时记录容器内进程 PID，停止采集时定向发送 TERM 并等待退出，避免仅杀本地 `docker exec` 客户端后在容器里遗留 `tail -F`；
 - **stdout 服务**：场景里 `logs: {app: docker_logs}`（或 `docker_logs:<container>`）时改用 `docker logs -f --tail 0`；
 - **快照**：每 30s `ps aux` + `ss -tlnp`（回退 netstat）；`parse_ps_aux` 兼容 procps 与 busybox 两种布局；
 - **降级**：docker 缺失/容器不存在/日志缺失 → warning + 10s 重试，绝不抛出。
@@ -274,7 +276,7 @@ red_score  = 100 × attacks_verified / attacks_total     # 无攻击尝试时为
 
 ## 7. 靶场重置（arena_reset.py + scripts/reset_targets.sh）
 
-历史会话会留下加固痕迹（sshd 密码认证被关、DVWA 被调 high/impossible、后门账户/webshell/`.cyberorion.bak` 残留），导致新一轮"没有可打的目标"。`Controller.start_session` 在遥测采集启动**之前**调 `reset_all(scenario)`（best-effort，失败只记录不阻断）：
+历史会话会留下加固痕迹（sshd 密码认证被关、DVWA 被调 high/impossible、后门账户/webshell/`.cyberorion.bak` 残留），导致新一轮"没有可打的目标"。`ControllerV2.start_session` 在遥测采集启动**之前**调 `reset_all(scenario)`（best-effort，失败只记录不阻断）：
 
 - **weak_ssh**：优先从 `sshd_config.cyberorion.bak` 还原、再强制写入弱基线（PasswordAuthentication/PermitRootLogin yes）→ 恢复原生弱口令并解锁 → 删 uid∈[1000,60000) 的非保留账户 → 清 authorized_keys/cron/.bak → 清 iptables；验证用 `sshpass user@127.0.0.1:22222 id` 真实登录；
 - **dvwa**：security_level 重置 low（改写+读回验证）→ 还原 .cyberorion.bak 删除的文件 → 清 uploads（保留镜像自带文件）→ 还原被补丁的 dvwaPage.inc.php（无备份时换回原生 `dvwaSecurityLevelGet()` 实现）→ 清 iptables；
@@ -286,13 +288,13 @@ red_score  = 100 × attacks_verified / attacks_total     # 无攻击尝试时为
 
 ## 8. 服务端（server.py）
 
-FastAPI 单实例：`EventBus` + `SessionState` + `Controller`；启动时加载 `../.env`；uvicorn 监听 `0.0.0.0:8000`；静态托管 `web/dist`（挂载在最后，不遮蔽 `/api`）。
+FastAPI 单实例：`EventBus` + `SessionState` + `ControllerV2`；`/api/*` 与 `/api/v2/*` 是同一实例的兼容路由，不创建第二套会话状态。启动时加载 `../.env`；uvicorn 监听 `0.0.0.0:8000`；静态托管 `web/dist`（挂载在最后，不遮蔽 `/api`）。
 
 **WS `/ws`**：连接即发 `snapshot`（控制器状态）；之后转发所有总线事件（信封 `{type, side, data, timestamp}`），30s 无事件发 `heartbeat`。事件类型：`thinking` / `tool_call` / `tool_output`（red/blue，可带 `agent`）/ `team` / `telemetry` / `attack`（地面真值行或红方回合汇总）/ `detection` / `score` / `bench` / `scenario` / `reset` / `round_start|end` / `session_start|end` / `snapshot` / `heartbeat`。
 
 **REST**（完整签名见 server.py 头注）：`/api/status` `/api/ledger` `/api/summary` `/api/score`（实时指标，无会话 503）`/api/scenario` `/api/scenarios` `POST /api/scenario/select`（会话进行中 409）`/api/alerts` `/api/events` `/api/sessions` `/api/sessions/{id}/report|metrics`（id 严格正则防路径穿越）`POST /api/session/start|stop` `POST /api/red|blue/start|pause|resume|stop` `POST /api/blue/patrol/start|stop` `POST /api/bench/run` `GET /api/bench/runs` `GET /api/bench/run/{id}`。FastAPI 自带文档在 `/docs`。
 
-**Controller 细节**：红蓝各有 pause 门（`asyncio.Event`）与 stop 信号，`AgentRunner` 流循环逐步检查；红方单轮 max_turns=10/timeout=240s，蓝队指挥官 max_turns=14/timeout=900s（子代理不耗指挥官轮数）；自动巡逻默认 30s 间隔，蓝方在跑则跳过该 tick。
+**ControllerV2 细节**：红蓝各有 stop 信号，由 `run_agent_loop` 逐步检查；默认红方最多 75 步、蓝方最多 50 步。V2 暂无可保持上下文的暂停/恢复和自动巡逻语义，对应兼容端点明确返回 409，不会谎报成功。
 
 ---
 
@@ -310,7 +312,7 @@ FastAPI 单实例：`EventBus` + `SessionState` + `Controller`；启动时加载
 - `eval/metrics.py` 是纯函数（只依赖 store 接口 + 场景加载器，无 docker/网络），可无环境单测；
 - agent 定义（`agents/`）与工具实现（`tools/`）分离：agents 只负责 prompt 与装配，工具不知道自己在哪个 agent 里。
 
-**绑定模式（session-scoped singleton）**：会话级资源不穿透工具签名，而是模块级绑定 + 锁保护——`telemetry.binding.set_store` / `eval.ground_truth.set_ground_truth` / `blue_team.set_event_bus`，Controller 在 `start_session`/`stop_session` 统一绑定/解绑。工具未绑定时返回解释性字符串（`tools/blue/_helpers.py::_require_store`），**绝不向 agent loop 抛异常**。
+**绑定模式（session-scoped singleton）**：会话级资源不穿透工具签名，而是模块级绑定 + 锁保护——`telemetry.binding.set_store` / `eval.ground_truth.set_ground_truth`。`ControllerV2` 在 `start_session`/`stop_session` 统一绑定/解绑；V2 红队在 Worker handler 适配层集中写 GroundTruth，V2 蓝队通过 `report_finding` 写 alerts。工具未绑定时返回解释性字符串，**绝不向 agent loop 抛异常**。
 
 **工具约定**：
 

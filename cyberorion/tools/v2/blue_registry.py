@@ -27,6 +27,7 @@ from .blue_tools import (
     query_logs_progressive,
     record_timeline_event,
     remediate,
+    report_finding,
     run_detection_query,
     run_parallel_detections,
     search_attack_kb,
@@ -55,6 +56,7 @@ BLUE_TOOL_HANDLERS: dict[str, HandlerFn] = {
     # 主机调查
     "process_audit": process_audit,
     "file_integrity": file_integrity,
+    "report_finding": report_finding,
     "list_alerts": list_alerts,
     # 威胁情报
     "lookup_technique": lookup_technique,

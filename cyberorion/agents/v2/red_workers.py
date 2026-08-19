@@ -35,6 +35,8 @@ try:
 except ImportError:
     _get_handler = None
 
+from ...tools.v2.ground_truth import record_red_tool_result
+
 
 async def _placeholder_handler(**kwargs: Any) -> str:
     """占位工具 handler：真实工具在 R3 阶段实现。"""
@@ -77,9 +79,11 @@ def _wrap_tools(role: AgentRole, state: OpState) -> list[ToolDef]:
     agent_loop invokes ``handler(**args)``. An adapter packs kwargs into the
     ``args`` dict and forwards ``state`` for scope/credential injection.
     """
-    def _adapt(real_handler):
+    def _adapt(tool_name: str, real_handler):
         async def _adapter(**kwargs: Any) -> Any:
-            return await real_handler(args=kwargs, state=state)
+            result = await real_handler(args=kwargs, state=state)
+            record_red_tool_result(tool_name, role, kwargs, result)
+            return result
         return _adapter
 
     tools: list[ToolDef] = []
@@ -88,7 +92,7 @@ def _wrap_tools(role: AgentRole, state: OpState) -> list[ToolDef]:
             handler = None
         elif _get_handler is not None:
             real = _get_handler(d.name)
-            handler = _adapt(real) if real is not None else _placeholder_handler
+            handler = _adapt(d.name, real) if real is not None else _placeholder_handler
         else:
             handler = _placeholder_handler
         tools.append(

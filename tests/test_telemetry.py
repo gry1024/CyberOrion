@@ -417,6 +417,24 @@ def _fake_scenario() -> Scenario:
 
 
 class TestCollector:
+    def test_wait_ready_tracks_all_log_streams(self, store):
+        """就绪屏障必须等待每条日志流完成基线定位。"""
+        async def run():
+            collector = TelemetryCollector(
+                _fake_scenario(), store, "session_test")
+            first, second = asyncio.Event(), asyncio.Event()
+            collector._ready_events = [first, second]
+            waiter = asyncio.create_task(collector.wait_ready(timeout=1.0))
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            first.set()
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            second.set()
+            assert await waiter is True
+
+        asyncio.run(run())
+
     def test_start_stop_without_docker(self, store):
         """Collector against a nonexistent container must not raise."""
         async def run():

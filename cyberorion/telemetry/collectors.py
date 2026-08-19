@@ -369,6 +369,7 @@ class TelemetryCollector:
         self.event_bus = event_bus
         self._tasks: list[asyncio.Task] = []
         self._stopped = asyncio.Event()
+        self._ready_events: list[asyncio.Event] = []
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -376,20 +377,25 @@ class TelemetryCollector:
     def start(self) -> None:
         """Spawn collector tasks. Must be called inside a running loop."""
         self._stopped.clear()
+        self._ready_events.clear()
         for target in self.scenario.targets.values():
             for log_name, path in target.logs.items():
+                ready = asyncio.Event()
+                self._ready_events.append(ready)
                 head, sep, override = path.partition(":")
                 if head == "docker_logs":
                     # Stdout-logging service: follow `docker logs -f`
                     # instead of tailing a file inside the container.
                     container = override if sep else target.container
                     self._tasks.append(asyncio.create_task(
-                        self._tail_docker_logs(target.name, container, log_name),
+                        self._tail_docker_logs(
+                            target.name, container, log_name, ready),
                         name=f"dockerlogs:{target.name}:{log_name}",
                     ))
                     continue
                 self._tasks.append(asyncio.create_task(
-                    self._tail_log(target.name, target.container, log_name, path),
+                    self._tail_log(
+                        target.name, target.container, log_name, path, ready),
                     name=f"tail:{target.name}:{log_name}",
                 ))
             self._tasks.append(asyncio.create_task(
@@ -399,6 +405,20 @@ class TelemetryCollector:
         log.info("telemetry collector started: %d tasks, session=%s",
                  len(self._tasks), self.session_id)
 
+    async def wait_ready(self, timeout: float = 20.0) -> bool:
+        """等待所有日志流完成基线定位，避免会话开头的日志被跳过。"""
+        if not self._ready_events:
+            return True
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(event.wait() for event in self._ready_events)),
+                timeout=timeout,
+            )
+            return True
+        except asyncio.TimeoutError:
+            log.warning("telemetry log streams not ready after %.1fs", timeout)
+            return False
+
     async def stop(self) -> None:
         """Cancel all collector tasks and wait for them to finish."""
         self._stopped.set()
@@ -407,6 +427,7 @@ class TelemetryCollector:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        self._ready_events.clear()
         log.info("telemetry collector stopped")
 
     # ------------------------------------------------------------------ #
@@ -414,6 +435,7 @@ class TelemetryCollector:
     # ------------------------------------------------------------------ #
     async def _tail_log(
         self, host: str, container: str, log_name: str, path: str,
+        ready: "asyncio.Event | None" = None,
     ) -> None:
         """Tail one log file forever, reconnecting on any failure.
 
@@ -430,14 +452,23 @@ class TelemetryCollector:
         warned = False
         while not self._stopped.is_set():
             proc = None
+            remote_pid: "int | None" = None
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "docker", "exec", container,
-                    "tail", "-n", f"+{offset + 1}", "-F", path,
+                    "docker", "exec", container, "sh", "-c",
+                    'echo "$$"; exec tail -n "$1" -F "$2"',
+                    "cyberorion-tail", f"+{offset + 1}", path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
+                assert proc.stdout is not None
+                pid_line = await asyncio.wait_for(proc.stdout.readline(), 5.0)
+                remote_pid = int(pid_line.decode("ascii", "strict").strip())
+                if ready is not None:
+                    ready.set()
             except Exception as exc:  # docker binary missing, etc.
+                if ready is not None:
+                    ready.set()
                 if not warned:
                     log.warning("telemetry: cannot tail %s:%s (%s); retrying",
                                 container, path, exc)
@@ -447,7 +478,7 @@ class TelemetryCollector:
 
             warned = False
             try:
-                assert proc.stdout is not None
+                assert proc is not None and proc.stdout is not None
                 while not self._stopped.is_set():
                     line = await proc.stdout.readline()
                     if not line:
@@ -462,14 +493,7 @@ class TelemetryCollector:
                 log.warning("telemetry: tail %s:%s error: %s", container, path, exc)
             finally:
                 if proc is not None:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    try:
-                        await proc.wait()
-                    except Exception:
-                        pass
+                    await self._stop_file_tail(proc, container, remote_pid)
             # Process exited (container restart, missing file, ...): retry.
             if not self._stopped.is_set():
                 offset = await self._file_lines(container, path, offset)
@@ -477,6 +501,7 @@ class TelemetryCollector:
 
     async def _tail_docker_logs(
         self, host: str, container: str, log_name: str,
+        ready: "asyncio.Event | None" = None,
     ) -> None:
         """Follow ``docker logs -f --tail 0 <container>`` forever.
 
@@ -493,7 +518,11 @@ class TelemetryCollector:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )
+                if ready is not None:
+                    ready.set()
             except Exception as exc:  # docker binary missing, etc.
+                if ready is not None:
+                    ready.set()
                 if not warned:
                     log.warning("telemetry: cannot docker-logs %s (%s); retrying",
                                 container, exc)
@@ -529,6 +558,41 @@ class TelemetryCollector:
             # Process exited (container restart/stop): retry.
             if not self._stopped.is_set():
                 await self._sleep(RETRY_INTERVAL)
+
+    async def _stop_file_tail(
+        self,
+        proc: asyncio.subprocess.Process,
+        container: str,
+        remote_pid: "int | None",
+    ) -> None:
+        """定向结束容器内本采集流的 tail，避免 docker exec 断开后遗留。"""
+        if remote_pid is not None:
+            killer = None
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "docker", "exec", container,
+                    "kill", "-TERM", str(remote_pid),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(killer.wait(), 5.0)
+            except Exception:
+                if killer is not None:
+                    try:
+                        killer.kill()
+                    except Exception:
+                        pass
+        try:
+            await asyncio.wait_for(proc.wait(), 2.0)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                await proc.wait()
+            except Exception:
+                pass
 
     @staticmethod
     def _log_kind(log_name: str) -> str:
@@ -608,17 +672,23 @@ class TelemetryCollector:
 
     async def _current_line_count(self, container: str, path: str) -> int:
         """返回文件当前行数；查询失败时返回 0（从头 tail 的旧行为兜底）。"""
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker", "exec", container, "wc", "-l", path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await proc.communicate()
+            out, _ = await asyncio.wait_for(proc.communicate(), 10.0)
             if proc.returncode == 0:
                 return int(out.decode("utf-8", "replace").split()[0])
         except Exception:
-            pass
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
         return 0
 
     async def _file_lines(self, container: str, path: str, offset: int) -> int:
@@ -627,18 +697,24 @@ class TelemetryCollector:
         If the file is missing or shrank (rotation/truncation), restart
         from the top; otherwise keep the previous offset.
         """
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker", "exec", container, "wc", "-l", path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await proc.communicate()
+            out, _ = await asyncio.wait_for(proc.communicate(), 10.0)
             if proc.returncode == 0:
                 lines = int(out.decode("utf-8", "replace").split()[0])
                 return offset if lines >= offset else 0
         except Exception:
-            pass
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
         return offset
 
     # ------------------------------------------------------------------ #

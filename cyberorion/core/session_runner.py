@@ -53,8 +53,6 @@ class SessionRunner:
         红蓝 orchestrator 并发运行，各自独立的 agent loop。
         """
         scenario = self._load_scenario_dict(scenario_name)
-        session_id = f"v2_{int(time.time() * 1000)}"
-
         event_bus = EventBus()
         session_state = SessionState()
         controller = ControllerV2(event_bus, session_state)
@@ -74,25 +72,27 @@ class SessionRunner:
 
         collector_task = asyncio.create_task(_collect())
 
-        self._sessions[session_id] = _V2Session(
-            controller=controller,
-            event_bus=event_bus,
-            scenario=scenario,
-            timeline=timeline,
-            collector_task=collector_task,
-            started_at=time.time(),
-        )
+        try:
+            # ControllerV2 统一负责 reset/store/collector/GroundTruth 生命周期。
+            await controller.start_session(scenario)
+            session_id = controller.session_id
+            self._sessions[session_id] = _V2Session(
+                controller=controller,
+                event_bus=event_bus,
+                scenario=scenario,
+                timeline=timeline,
+                collector_task=collector_task,
+                started_at=time.time(),
+            )
 
-        # 发布 session_start 事件
-        await event_bus.publish(Event(
-            type="session_start", side="system",
-            data={"session_id": session_id, "scenario": scenario_name},
-            timestamp=time.time(),
-        ))
-
-        # 启动红蓝（并发）
-        await controller.start_red(scenario)
-        await controller.start_blue(scenario)
+            # 启动红蓝（并发）
+            await controller.start_red()
+            await controller.start_blue()
+        except Exception:
+            await controller.stop_session()
+            collector_task.cancel()
+            await asyncio.gather(collector_task, return_exceptions=True)
+            raise
 
         return session_id
 
@@ -114,13 +114,8 @@ class SessionRunner:
         session = self._sessions.get(session_id)
         if session is None:
             return {"error": "session not found", "session_id": session_id}
-        await session.controller.stop_all()
+        await session.controller.stop_session()
         session.stopped = True
-        await session.event_bus.publish(Event(
-            type="session_end", side="system",
-            data={"session_id": session_id, "action": "stop"},
-            timestamp=time.time(),
-        ))
         # 停止时间线收集器
         if session.collector_task is not None and not session.collector_task.done():
             session.collector_task.cancel()

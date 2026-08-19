@@ -247,7 +247,7 @@ class TestRunnerErrorEvent:
 
         class ExplodingRunner:
             @staticmethod
-            def run_streamed(agent, input, max_turns):
+            def run_streamed(agent, input, max_turns, run_config=None):
                 raise RuntimeError("model exploded")
 
         monkeypatch.setattr(
@@ -275,7 +275,7 @@ class TestRunnerErrorEvent:
 
         class HungRunner:
             @staticmethod
-            def run_streamed(agent, input, max_turns):
+            def run_streamed(agent, input, max_turns, run_config=None):
                 return HungStream()
 
         monkeypatch.setattr(

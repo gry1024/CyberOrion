@@ -27,6 +27,8 @@ from cyberorion.core.i18n import (
     summarize,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 # --------------------------------------------------------------------------- #
 # 16 核心工具的 i18n smoke 测试
@@ -79,13 +81,14 @@ def test_red_tool_summary_contains_chinese(tool_name):
 # --------------------------------------------------------------------------- #
 def test_sim_tools_file_deleted():
     """sim_tools.py 文件必须已删除。"""
-    sim_tools_path = Path("cyberorion/cyberorion/tools/v2/sim_tools.py")
+    sim_tools_path = REPO_ROOT / "cyberorion/tools/v2/sim_tools.py"
     assert not sim_tools_path.exists(), f"{sim_tools_path} should be deleted"
 
 
 def test_controller_v2_no_simulate():
     """controller_v2.py 不能有 simulate 相关代码（除文档注释外）。"""
-    cv2 = Path("cyberorion/cyberorion/core/controller_v2.py").read_text(encoding="utf-8")
+    cv2 = (REPO_ROOT / "cyberorion/core/controller_v2.py").read_text(
+        encoding="utf-8")
     # 应该有"simulate 已删除"的 docstring，但不应有 simulate 字段/参数
     forbidden = ["self.simulate", "simulate: bool", "_convert_sim_tools",
                  "RED_SIM_SYSTEM_PROMPT", "BLUE_SIM_SYSTEM_PROMPT",
@@ -96,7 +99,7 @@ def test_controller_v2_no_simulate():
 
 def test_server_no_simulate_param():
     """server.py v2_start_session 不应再有 simulate 参数。"""
-    svr = Path("cyberorion/server.py").read_text(encoding="utf-8")
+    svr = (REPO_ROOT / "server.py").read_text(encoding="utf-8")
     # 'simulate=True' 是模拟模式的特征签名
     assert "simulate=True" not in svr, "server.py still references simulate=True"
 
