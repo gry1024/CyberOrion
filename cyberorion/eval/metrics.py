@@ -40,6 +40,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..scenarios.loader import DEFAULT_SCENARIO
+
 # 判定为"恶意倾向"的告警 verdict 集合（FP 统计与 alerts_malicious 的分母）。
 _MALICIOUS_VERDICTS = ("malicious", "suspicious")
 
@@ -47,11 +49,11 @@ _MALICIOUS_VERDICTS = ("malicious", "suspicious")
 _PRE_TOLERANCE_SEC = 30.0
 
 
-def _load_scenario_safe() -> Any:
-    """加载当前场景；任何失败都返回 None（降级为仅精确匹配）。"""
+def _load_scenario_safe(name: str | None = None) -> Any:
+    """加载指定场景；任何失败都返回 None（降级为仅精确匹配）。"""
     try:
         from ..scenarios import load_scenario
-        return load_scenario()
+        return load_scenario(name or DEFAULT_SCENARIO)
     except Exception:
         return None
 
@@ -122,7 +124,8 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
         指标字典（schema 见模块 docstring 与 README 说明），可直接 JSON 序列化。
     """
     window = float(window_sec)
-    scenario = _load_scenario_safe()
+    scenario_name = getattr(store, "scenario_name", "") or DEFAULT_SCENARIO
+    scenario = _load_scenario_safe(scenario_name)
 
     attacks = sorted(store.query_attacks(limit=100000),
                      key=lambda r: float(r.get("ts") or 0))
@@ -130,9 +133,6 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
                     key=lambda r: float(r.get("ts") or 0))
     # 侦察类动作（nmap_scan 等）不留日志痕迹、蓝方无从检测：
     # 从检测率分母排除，只影响攻击计数展示，不计入 TP/FN。
-    # 检测匹配用"可检测攻击"：所有非 recon 的攻击行为（含未成功得手的
-    # 爆破/注入尝试）。只要蓝方在时间窗口内用对应技术检测到该行为，即算有效
-    # 检测（TP）——攻击行为真实发生了且被侦测到，不能因其未得手就判误报。
     eligible = [a for a in attacks if not a.get("recon")]
     # 红方得分仅统计已验证成功且非 recon 的攻击（体现实际战果）。
     verified = [a for a in eligible if a.get("success")]
@@ -145,6 +145,13 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
 
     for atk in eligible:
         equiv = _host_equiv(atk.get("target") or "", scenario)
+        tech = (atk.get("technique") or "").strip() or "(unknown)"
+        tgt = (atk.get("target") or "").strip() or "(unknown)"
+        for bucket, key in ((per_technique, tech), (per_target, tgt)):
+            b = bucket.setdefault(key, {"attacks": 0, "detected": 0})
+            b["attacks"] += 1
+    for atk in verified:
+        equiv = _host_equiv(atk.get("target") or "", scenario)
         hit = None
         hit_weak = False
         for alert in alerts:  # 时间升序，第一条命中即检测
@@ -153,13 +160,10 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
                 hit = alert
                 hit_weak = weak
                 break
-        tech = (atk.get("technique") or "").strip() or "(unknown)"
-        tgt = (atk.get("target") or "").strip() or "(unknown)"
-        for bucket, key in ((per_technique, tech), (per_target, tgt)):
-            b = bucket.setdefault(key, {"attacks": 0, "detected": 0})
-            b["attacks"] += 1
         if hit is not None:
             matched_alert_ids.add(hit["id"])
+            tech = (atk.get("technique") or "").strip() or "(unknown)"
+            tgt = (atk.get("target") or "").strip() or "(unknown)"
             per_technique[tech]["detected"] += 1
             per_target[tgt]["detected"] += 1
             detections.append({
@@ -188,7 +192,7 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
         if alert["id"] in matched_alert_ids:
             continue
         matched_any = False
-        for atk in eligible:
+        for atk in verified:
             equiv = _host_equiv(atk.get("target") or "", scenario)
             ok, _weak = _matches(atk, alert, equiv, window)
             if ok:
@@ -208,13 +212,12 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     fn = len(missed)
     fp = len(false_positives)
     n_verified = len(verified)
-    n_eligible = len(eligible)
     n_malicious = len(malicious_alerts)
     # 侦察（recon）与可检测攻击分开统计：侦察不留日志、蓝方无从检测，
     # 只作展示（红方时间线标注），不进检测率分母。
     n_recon = sum(1 for a in attacks if a.get("recon"))
 
-    detection_rate = tp / n_eligible if n_eligible else 0.0
+    detection_rate = tp / n_verified if n_verified else 0.0
     fp_rate = fp / n_malicious if n_malicious else 0.0
     mttd = (sum(d["ttd_sec"] for d in detections) / tp) if tp else None
 

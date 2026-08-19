@@ -68,6 +68,15 @@ def _fill_main(store: TelemetryStore) -> None:
 # ---------------------------------------------------------------------------
 
 class TestComputeMetrics:
+    def test_global_scenario_env_does_not_change_store_metrics(self, store, monkeypatch):
+        """A session store without explicit scenario metadata should not depend on CO_SCENARIO."""
+        monkeypatch.setenv("CO_SCENARIO", "cve_log4j")
+        _fill_main(store)
+        m = compute_metrics(store)
+
+        assert m["tp"] == 2 and m["fn"] == 1 and m["fp"] == 1
+        assert m["blue_score"] == pytest.approx(62.5)
+
     def test_main_scenario_exact_values(self, store):
         _fill_main(store)
         m = compute_metrics(store)

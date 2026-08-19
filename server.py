@@ -107,6 +107,7 @@ logger = logging.getLogger("cyberorion.server")
 
 from cyberorion.core.event_bus import EventBus, Event
 from cyberorion.core.session_state import SessionState
+from cyberorion.core.controller import Controller
 from cyberorion.core.controller_v2 import ControllerV2
 from cyberorion.tools._common import (
     set_session_state_ref, snapshot_ledger, reset_state, TOOL_CALL_LOG,
@@ -118,10 +119,11 @@ from cyberorion.tools._common import (
 # --------------------------------------------------------------------------- #
 event_bus = EventBus()
 session_state = SessionState()
-controller = ControllerV2(event_bus, session_state)
+controller = Controller(event_bus, session_state)
 
-# 兼容曾经从 server 导入 controller_v2 的调用方；两者必须始终是同一实例。
-controller_v2 = controller
+# AD/domain v2 演示控制器仅服务 /api/v2/*；公网主作战台走上面的 CTF Controller。
+controller_v2_state = SessionState()
+controller_v2 = ControllerV2(event_bus, controller_v2_state)
 
 # Bridge: tools mirror ledger writes into SessionState for frontend visibility.
 set_session_state_ref(session_state)
@@ -410,8 +412,8 @@ async def get_status() -> dict[str, Any]:
     status = dict(controller_status)
     status["ledger"] = snapshot_ledger()
     status["summary"] = _session_summary
-    # 保留 v2 键供旧前端读取；内容与顶层来自同一个控制器。
-    status["v2"] = dict(controller_status)
+    # 保留 v2 键供旧前端读取；AD/domain v2 状态独立于公网 CTF 作战台。
+    status["v2"] = controller_v2.get_status()
     return status
 
 
@@ -1398,16 +1400,26 @@ async def red_start() -> dict[str, Any]:
 
 @app.post("/api/red/pause")
 async def red_pause() -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 暂不支持暂停；可停止后重新启动",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.pause_red()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/red/resume")
 async def red_resume() -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 暂不支持恢复；请使用 /api/red/start",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.resume_red()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/red/stop")
@@ -1438,16 +1450,26 @@ async def blue_start() -> dict[str, Any]:
 
 @app.post("/api/blue/pause")
 async def blue_pause() -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 暂不支持暂停；可停止后重新启动",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.pause_blue()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/blue/resume")
 async def blue_resume() -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 暂不支持恢复；请使用 /api/blue/start",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.resume_blue()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/blue/stop")
@@ -1458,16 +1480,26 @@ async def blue_stop() -> dict[str, Any]:
 
 @app.post("/api/blue/patrol/start")
 async def blue_patrol_start(interval: float = 30.0) -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 暂不支持自动巡逻；请使用 /api/blue/start",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.start_blue_patrol(interval=interval)
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 @app.post("/api/blue/patrol/stop")
 async def blue_patrol_stop() -> dict[str, Any]:
-    return JSONResponse(
-        {"ok": False, "error": "ControllerV2 没有活动的自动巡逻任务",
-         "status": await get_status()}, status_code=409)
+    try:
+        await controller.stop_blue_patrol()
+        return {"ok": True, "status": await get_status()}
+    except (RuntimeError, ValueError) as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "status": await get_status()},
+            status_code=409,
+        )
 
 
 
@@ -1648,12 +1680,14 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             yield _sse(ev)
 
         # ---- 持久化流量分析结果到磁盘 ----
+        _session_id = ""
         try:
             import time as _time, json as _json
             from datetime import datetime as _dt
             from pathlib import Path as _Path
             _ts_str = _dt.fromtimestamp(_time.time()).strftime("%Y%m%d_%H%M%S")
-            _session_dir = _Path("logs") / f"session_{_ts_str}"
+            _session_id = f"session_{_ts_str}"
+            _session_dir = _Path("logs") / _session_id
             _session_dir.mkdir(parents=True, exist_ok=True)
 
             _report_md = "".join(_traffic_report_parts) if _traffic_report_parts else ""
@@ -1674,7 +1708,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
 
             # Write traffic_analysis.json (metadata for session listing)
             _meta = {
-                "session_id": f"session_{_ts_str}",
+                "session_id": _session_id,
                 "type": "traffic_analysis",
                 "timestamp": _ts_str,
                 "source": source,
@@ -1715,7 +1749,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
 
             # Write metrics.json (placeholder scores)
             _metrics = {
-                "session_id": f"session_{_ts_str}",
+                "session_id": _session_id,
                 "type": "traffic_analysis",
                 "event_count": len(events),
                 "alert_count": len(_traffic_alerts_persist),
@@ -1730,18 +1764,29 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
 
             print(f"[traffic] Persisted to {_session_dir}")
 
-            # Auto-generate storyline.md (LLM traffic analysis recap).
-            try:
-                # 在 worker 线程执行 LLM 复盘生成，避免同步调用阻塞事件循环
-                # （旧代码直接同步调用，traffic/analyze 的 SSE 生成器卡住，
-                # 表现为「后端离线」）。
-                from cyberorion.storyline import generate_storyline
-                await asyncio.to_thread(generate_storyline, _session_dir)
-                print(f"[traffic] Auto-generated storyline for {_session_dir.name}")
-            except Exception as _se:
-                print(f"[traffic] Storyline auto-gen failed: {_se}")
+            async def _generate_traffic_storyline() -> None:
+                try:
+                    from cyberorion.storyline import generate_storyline
+                    await asyncio.to_thread(generate_storyline, _session_dir)
+                    print(f"[traffic] Auto-generated storyline for {_session_dir.name}")
+                except Exception as _se:
+                    print(f"[traffic] Storyline auto-gen failed: {_se}")
+
+            asyncio.create_task(_generate_traffic_storyline())
         except Exception as _exc:
             print(f"[traffic] Persistence failed: {_exc}")
+        finally:
+            yield _sse({
+                "type": "complete",
+                "side": "system",
+                "timestamp": time.time(),
+                "data": {
+                    "message": "流量分析完成",
+                    "session_id": _session_id,
+                    "events_total": len(events),
+                    "alerts_total": len(_traffic_alerts_persist),
+                },
+            })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -1752,7 +1797,7 @@ def _sse(ev: dict) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# V2 API 端点 — 与主 /api/* 路由共享同一个 ControllerV2 实例。
+# V2 API 端点 — AD/domain loop 兼容接口，独立于主 CTF 作战台。
 # --------------------------------------------------------------------------- #
 @app.post("/api/v2/session/start")
 async def v2_start_session(scenario: str | None = None) -> dict[str, Any]:
@@ -1763,10 +1808,10 @@ async def v2_start_session(scenario: str | None = None) -> dict[str, Any]:
     try:
         # 未显式指定时复用主 API 的场景选择（CO_SCENARIO/default），
         # 避免兼容路由悄悄切回尚未验收的 AD 场景。
-        await controller.start_session(scenario)
+        await controller_v2.start_session(scenario)
         return {
-            "session_id": controller.session_id,
-            "scenario": controller.scenario_name,
+            "session_id": controller_v2.session_id,
+            "scenario": controller_v2.scenario_name,
         }
     except (RuntimeError, ValueError) as exc:
         return JSONResponse(
@@ -1783,37 +1828,37 @@ async def v2_start_session(scenario: str | None = None) -> dict[str, Any]:
 @app.get("/api/v2/session/{session_id}/status")
 async def v2_session_status(session_id: str) -> dict[str, Any]:
     """获取 v2 会话状态：红蓝运行状态/步数/发现数。"""
-    if session_id != controller.session_id:
+    if session_id != controller_v2.session_id:
         return JSONResponse(status_code=404, content={"error": "session not found"})
-    return controller.get_status()
+    return controller_v2.get_status()
 
 
 @app.post("/api/v2/session/{session_id}/stop")
 async def v2_stop_session(session_id: str) -> dict[str, Any]:
     """停止 v2 会话。"""
-    if session_id != controller.session_id:
+    if session_id != controller_v2.session_id:
         return JSONResponse(status_code=404, content={"error": "session not found"})
-    await controller.stop_session()
+    await controller_v2.stop_session()
     return {"session_id": session_id, "stopped": True}
 
 
 @app.get("/api/v2/session/{session_id}/timeline")
 async def v2_session_timeline(session_id: str) -> Any:
     """获取 v2 会话时间线。"""
-    if session_id != controller.session_id:
+    if session_id != controller_v2.session_id:
         return JSONResponse(status_code=404, content={"error": "session not found"})
-    return controller.get_timeline()
+    return controller_v2.get_timeline()
 
 
 @app.post("/api/v2/red/start")
 async def v2_red_start(payload: dict = Body(default={})) -> dict[str, Any]:
     """Start red team agent loop via ControllerV2."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
     prompt = str(payload.get("prompt", ""))
     try:
-        await controller.start_red(prompt=prompt)
-        return {"ok": True, "status": controller.get_status()}
+        await controller_v2.start_red(prompt=prompt)
+        return {"ok": True, "status": controller_v2.get_status()}
     except (RuntimeError, ValueError) as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})
 
@@ -1821,12 +1866,12 @@ async def v2_red_start(payload: dict = Body(default={})) -> dict[str, Any]:
 @app.post("/api/v2/blue/start")
 async def v2_blue_start(payload: dict = Body(default={})) -> dict[str, Any]:
     """Start blue team agent loop via ControllerV2."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
     prompt = str(payload.get("prompt", ""))
     try:
-        await controller.start_blue(prompt=prompt)
-        return {"ok": True, "status": controller.get_status()}
+        await controller_v2.start_blue(prompt=prompt)
+        return {"ok": True, "status": controller_v2.get_status()}
     except (RuntimeError, ValueError) as exc:
         return JSONResponse(status_code=409, content={"error": str(exc)})
 
@@ -1834,37 +1879,37 @@ async def v2_blue_start(payload: dict = Body(default={})) -> dict[str, Any]:
 @app.post("/api/v2/red/stop")
 async def v2_red_stop() -> dict[str, Any]:
     """Stop red team agent loop."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller.stop_red()
-    return {"ok": True, "status": controller.get_status()}
+    await controller_v2.stop_red()
+    return {"ok": True, "status": controller_v2.get_status()}
 
 
 @app.post("/api/v2/blue/stop")
 async def v2_blue_stop() -> dict[str, Any]:
     """Stop blue team agent loop."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller.stop_blue()
-    return {"ok": True, "status": controller.get_status()}
+    await controller_v2.stop_blue()
+    return {"ok": True, "status": controller_v2.get_status()}
 
 
 @app.get("/api/v2/status")
 async def v2_status() -> dict[str, Any]:
     """Get ControllerV2 status."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return {"active": False}
-    return {"active": True, "session_id": controller.session_id,
-            "status": controller.get_status()}
+    return {"active": True, "session_id": controller_v2.session_id,
+            "status": controller_v2.get_status()}
 
 
 @app.post("/api/v2/session/stop")
 async def v2_session_stop() -> dict[str, Any]:
     """Stop v2 session (ControllerV2)."""
-    if not controller.get_status().get("session_active"):
+    if not controller_v2.get_status().get("session_active"):
         return JSONResponse(status_code=400, content={"error": "session not started"})
-    await controller.stop_session()
-    status = controller.get_status()
+    await controller_v2.stop_session()
+    status = controller_v2.get_status()
     return {"ok": True, "status": status}
 
 

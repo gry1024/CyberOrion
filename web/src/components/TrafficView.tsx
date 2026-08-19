@@ -166,34 +166,23 @@ export function TrafficView() {
           )
           break
         }
+        case 'complete': {
+          const text = String(d.message ?? '流量分析完成')
+          openThinking.current = {}
+          lastTool.current = {}
+          setRunning(false)
+          abortRef.current = null
+          setSteps((p) => capped(p, { id: nextId(), kind: 'system', text, timestamp: ts }))
+          void refreshStatus()
+          break
+        }
         default:
           break
       }
     },
-    [],
-  )
-  // 修复：trafficAnalyzeStream 的 fetch 完成后需要设置 running=false
-  // 通过包装 onEvent 的方式不可行（不知道何时结束），改为在 SSE 事件中
-  // 检测 "═══ 流量分析完成 ═══" 系统消息来判断结束。
-  // 但更可靠的方式是修改 api.ts 让 fetch 完成后回调。
-  // 这里采用检测完成消息 + 定时器双保险。
-  const onCompleteRef = useRef<(() => void) | null>(null)
-  onCompleteRef.current = () => setRunning(false)
-
-  // 包装 handleSSEEvent 以检测完成
-  const handleSSEEventWrapped = useCallback(
-    (ev: { type: string; side: string; data: Record<string, unknown>; timestamp: number }) => {
-      handleSSEEvent(ev)
-      if (ev.type === 'system' && typeof ev.data?.text === 'string') {
-        if (ev.data.text.includes('流量分析完成') || ev.data.text.includes('分析完成')) {
-          setTimeout(() => onCompleteRef.current?.(), 100)
-        }
-      }
-    },
-    [handleSSEEvent],
+    [refreshStatus],
   )
 
-  // 重新创建 start handler 使用 wrapped 版本
   const handleStart = useCallback(() => {
     if (running) {
       abortRef.current?.abort()
@@ -205,6 +194,7 @@ export function TrafficView() {
     demo.clear()
     setSteps([])
     setEvents([])
+    setEventsTotal(0)
     setAlerts([])
     setSelectedEvent(null)
     openThinking.current = {}
@@ -212,14 +202,19 @@ export function TrafficView() {
 
     const ctrl = api.trafficAnalyzeStream(
       { source, csv_file: csvFile || undefined, max_rows: maxRows },
-      handleSSEEventWrapped,
+      handleSSEEvent,
       (e: Error) => {
         pushToast(`分析异常：${e.message}`, { side: 'system' })
         setRunning(false)
+        abortRef.current = null
+      },
+      () => {
+        setRunning(false)
+        abortRef.current = null
       },
     )
     abortRef.current = ctrl
-  }, [running, source, csvFile, maxRows, handleSSEEventWrapped])
+  }, [running, source, csvFile, maxRows, handleSSEEvent])
 
   // 清理
   useEffect(() => {
@@ -255,10 +250,10 @@ export function TrafficView() {
           流量分析
         </span>
         <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
-          多 agent 分层研判 · 流式输出
+          流量回放 + 四阶段 Agent 研判
         </span>
         <span className="ml-auto font-mono text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
-          {eventsTotal} 事件 / {alerts.length} 告警
+          {source}{source === 'cicids' && csvFile ? `:${csvFile}` : ''} · {eventsTotal} 事件 / {alerts.length} 告警
         </span>
       </div>
 
@@ -336,7 +331,7 @@ export function TrafficView() {
           <div className="scroll-thin min-h-0 overflow-y-auto" style={{ flex: '1 1 40%' }}>
             {alerts.length === 0 ? (
               <div className="px-3 py-4 text-center text-[11px]" style={{ color: 'var(--color-fg-4)' }}>
-                {running ? '等待规则引擎检测…' : '点击「开始分析」后此处显示告警'}
+                {running ? '等待规则引擎检测…' : '点击「回放并分析」后此处显示告警'}
               </div>
             ) : (
               alerts.map((al, i) => (
@@ -400,7 +395,7 @@ export function TrafficView() {
           <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
             {events.length === 0 ? (
               <div className="px-3 py-4 text-center text-[11px]" style={{ color: 'var(--color-fg-4)' }}>
-                {running ? '加载流量数据中…' : '点击「开始分析」后此处显示事件流'}
+                {running ? '加载流量数据中…' : '点击「回放并分析」后此处显示事件流'}
               </div>
             ) : (
               events.map((ev, i) => {
@@ -484,10 +479,10 @@ export function TrafficView() {
             <button
               className="btn btn-primary ml-auto"
               onClick={handleStart}
-              disabled={!ready || demo.playing}
+              disabled={(!ready && !running) || demo.playing}
               style={{ height: 24, fontSize: 11.5 }}
             >
-              {running ? '■ 停止' : '▶ 开始分析'}
+              {running ? '■ 停止分析' : '▶ 回放并分析'}
             </button>
             <button
               className="btn"
@@ -507,7 +502,7 @@ export function TrafficView() {
             running={running || demo.playing}
             accent="blue"
             emptyTitle="多 agent 流量研判"
-            emptyDesc="点击「开始分析」启动 4 阶段流水线：规则检测 → 语义分析 → 攻击链重建 → 报告生成"
+            emptyDesc="点击「回放并分析」启动：流量回放 → 规则检测 → 语义分析 → 攻击链重建 → 报告生成"
             autoExpandReports
           />
         </div>

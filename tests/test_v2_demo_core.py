@@ -250,17 +250,20 @@ def test_v2_blue_report_finding_writes_alert_without_ground_truth_access(
         assert forbidden not in source
 
 
-def test_server_uses_one_controller_and_no_v1_private_members() -> None:
+def test_server_separates_ctf_controller_from_v2_compat() -> None:
     import server
 
-    assert server.controller_v2 is server.controller
+    assert server.controller_v2 is not server.controller
+    assert server.controller.__class__.__name__ == "Controller"
+    assert server.controller.__class__.__module__ == "cyberorion.core.controller"
     source = Path(server.__file__).read_text(encoding="utf-8")
-    for forbidden in ("controller._red_agent", "controller._blue_agent",
-                      "controller._red_history"):
-        assert forbidden not in source
+    main_api_region = source.split("# V2 API 端点", 1)[0]
+    assert "controller_v2.start_red" not in main_api_region
+    assert "controller_v2.start_blue" not in main_api_region
+    assert "dispatch_recon" not in server._red_manual_prompt()
 
 
-def test_main_red_start_delegates_to_controller_v2(
+def test_main_red_start_delegates_to_ctf_controller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import server

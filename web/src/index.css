@@ -319,16 +319,16 @@ body {
 }
 
 .terminal-line {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.045);
 }
 
 .terminal-line-main {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 24px;
-  align-items: start;
-  gap: 6px 8px;
-  padding: 7px 10px;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 10px;
   text-align: left;
   letter-spacing: 0;
 }
@@ -337,12 +337,26 @@ body {
   background: rgba(148, 163, 184, 0.06);
 }
 
+.terminal-prompt {
+  grid-column: 1;
+  justify-self: center;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.terminal-content {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
 .terminal-meta {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: #65707c;
   font-size: 9.5px;
   line-height: 1.35;
@@ -362,36 +376,33 @@ body {
 }
 
 .terminal-kind {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  padding: 0 4px;
-  font-weight: 700;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .terminal-summary {
-  grid-column: 1 / 2;
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   color: var(--terminal-text);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  line-height: 1.72;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
 }
 
 .terminal-expand {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-column: 3;
   justify-self: end;
 }
 
 .terminal-detail {
   max-height: 320px;
   margin: 0;
+  margin-left: 35px;
   overflow: auto;
-  border-top: 1px dashed rgba(148, 163, 184, 0.16);
+  border-left: 1px solid rgba(148, 163, 184, 0.14);
   background: #05070a;
-  padding: 10px 12px;
+  padding: 7px 10px;
   color: #aeb8c2;
   font: 11.5px/1.65 var(--font-mono);
   white-space: pre-wrap;
@@ -422,13 +433,14 @@ body {
 
 @media (max-width: 860px) {
   .terminal-line-main {
-    grid-template-columns: minmax(0, 1fr) 22px;
+    grid-template-columns: 16px minmax(0, 1fr) 22px;
   }
-  .terminal-summary {
-    grid-column: 1 / 2;
+  .terminal-content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
   .terminal-detail {
-    padding-left: 12px;
+    margin-left: 31px;
   }
 }
 

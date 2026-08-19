@@ -7,19 +7,22 @@ import { pushToast } from '../toasts'
 import { ChatStream } from './ChatStream'
 import { DispatchGraph } from './DispatchGraph'
 import { Modal } from './Modal'
-import type { ScenarioDetail } from '../types'
+import type { ScenarioDetail, TargetInfo } from '../types'
 
-function BattleConsole({ onDemo, onStart, demoPlaying, demoSession }: {
+function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, targets }: {
   onDemo: () => void
   onStart: () => void
   demoPlaying: boolean
   demoSession: string
+  sceneName: string
+  targets: TargetInfo[]
 }) {
   const { status, refreshStatus, clearSteps } = useArena()
   const [busy, setBusy] = useState(false)
   const active = status.session_active
   const redRun = status.red_running
   const blueRun = status.blue_running
+  const targetNames = targets.map((target) => target.name).join(' / ') || '等待靶机信息'
 
   const call = async (fn: () => Promise<unknown>, label: string) => {
     setBusy(true)
@@ -40,12 +43,18 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession }: {
     if (!active) await api.sessionStart()
     await api.redStart()
     await api.blueStart()
-  }, '一键开始')
+  }, '启动当前靶场')
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="mr-1 min-w-[240px]">
+        <div className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>CURRENT RANGE</div>
+        <div className="truncate text-[11.5px]" style={{ color: 'var(--color-fg-2)' }}>
+          {sceneName} · {targetNames}
+        </div>
+      </div>
       {!active ? (
-        <button className="btn btn-primary" disabled={busy || demoPlaying} onClick={startAll}>开始</button>
+        <button className="btn btn-primary" disabled={busy || demoPlaying} onClick={startAll}>一键启动当前靶场</button>
       ) : (
         <button className="btn btn-danger" disabled={busy} onClick={() => void call(api.sessionStop, '停止会话')}>停止</button>
       )}
@@ -61,7 +70,7 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession }: {
         </>
       )}
       <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
-        {demoSession ? `演示日志 ${demoSession}` : 'CTF 靶场 · 红蓝协同'}
+        {demoSession ? `演示日志 ${demoSession}` : active ? '会话运行中' : '未启动'}
       </span>
     </div>
   )
@@ -93,8 +102,8 @@ export function ArenaView() {
       {/* Single production architecture: no legacy version selector. */}
       <div className="flex flex-none items-center gap-2 border-b px-3 py-1.5" style={{ borderColor: 'var(--color-hairline)' }}>
         <span className="text-[12.5px] font-semibold" style={{ color: 'var(--color-fg)' }}>作战舱</span>
-        <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>{sceneName}</span>
-        <span className="ml-2 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>MULTI-AGENT DEFENSE</span>
+        <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>当前靶场：{sceneName}</span>
+        <span className="ml-2 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>CTF LIVE RANGE</span>
         <button className="btn ml-2" onClick={() => setScenarioOpen(true)} style={{ height: 22, fontSize: 11 }}>
           靶机信息
         </button>
@@ -148,7 +157,14 @@ export function ArenaView() {
       </div>
 
       <div className="flex-none border-t px-3 py-1.5" style={{ borderColor: 'var(--color-hairline)' }}>
-        <BattleConsole onDemo={playDemo} onStart={clearDemo} demoPlaying={demo.playing} demoSession={demo.sessionId} />
+        <BattleConsole
+          onDemo={playDemo}
+          onStart={clearDemo}
+          demoPlaying={demo.playing}
+          demoSession={demo.sessionId}
+          sceneName={sceneName}
+          targets={targets}
+        />
       </div>
       {scenarioOpen && scenarioDetail && (
         <Modal title={`靶场信息 · ${scenarioDetail.name}`} onClose={() => setScenarioOpen(false)} width="w-[920px]">

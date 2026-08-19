@@ -17,18 +17,33 @@ const COLORS: Record<ThoughtStepKind, string> = {
 }
 
 const LABELS: Record<ThoughtStepKind, string> = {
-  thinking: "THINK",
-  tool_call: "TOOL CALL",
-  tool_output: "TOOL RESULT",
-  rag_retrieval: "KB SEARCH",
-  rag_no_match: "KB MISS",
-  rag_unavailable: "KB ERROR",
-  subagent_dispatch: "AGENT DISPATCH",
-  subagent_result: "AGENT RESULT",
-  sop_phase: "SOP PHASE",
-  report: "REPORT",
-  error: "ERROR",
-  system: "SYSTEM",
+  thinking: "thinking",
+  tool_call: "tool",
+  tool_output: "result",
+  rag_retrieval: "kb",
+  rag_no_match: "kb",
+  rag_unavailable: "kb",
+  subagent_dispatch: "dispatch",
+  subagent_result: "agent",
+  sop_phase: "phase",
+  report: "report",
+  error: "error",
+  system: "system",
+}
+
+const ICONS: Record<ThoughtStepKind, string> = {
+  thinking: "✻",
+  tool_call: "⏺",
+  tool_output: "⎿",
+  rag_retrieval: "⏺",
+  rag_no_match: "⎿",
+  rag_unavailable: "✖",
+  subagent_dispatch: "↳",
+  subagent_result: "✓",
+  sop_phase: "◆",
+  report: "◆",
+  error: "✖",
+  system: "•",
 }
 
 function fmtTs(ts: number): string {
@@ -93,8 +108,16 @@ function detailOf(step: ThoughtStep): string {
   return ""
 }
 
-function TerminalLine({ step, side }: { step: ThoughtStep; side: Side }) {
-  const [open, setOpen] = useState(step.kind === "report")
+function TerminalLine({
+  step,
+  side,
+  autoExpandReports,
+}: {
+  step: ThoughtStep
+  side: Side
+  autoExpandReports: boolean
+}) {
+  const [open, setOpen] = useState(step.kind === "report" && autoExpandReports)
   const summary = summaryOf(step)
   const detail = detailOf(step)
   const color = COLORS[step.kind]
@@ -107,12 +130,15 @@ function TerminalLine({ step, side }: { step: ThoughtStep; side: Side }) {
         onClick={() => detail && setOpen((value) => !value)}
         aria-expanded={detail ? open : undefined}
       >
-        <span className="terminal-meta">
-          <span className="terminal-time">{fmtTs(step.timestamp)}</span>
-          <span className="terminal-agent">{agentName(step, side)}</span>
-          <span className="terminal-kind" style={{ color }}>{LABELS[step.kind]}</span>
+        <span className="terminal-prompt" style={{ color }}>{ICONS[step.kind]}</span>
+        <span className="terminal-content">
+          <span className="terminal-meta">
+            <span className="terminal-agent">{agentName(step, side)}</span>
+            <span className="terminal-kind" style={{ color }}>{LABELS[step.kind]}</span>
+            <span className="terminal-time">{fmtTs(step.timestamp)}</span>
+          </span>
+          <span className="terminal-summary" style={{ color }}>{summary || "..."}</span>
         </span>
-        <span className="terminal-summary" style={{ color }}>{summary || "..."}</span>
         {detail && <span className="terminal-expand">{open ? "[-]" : "[+]"}</span>}
       </button>
       {open && detail && <pre className="terminal-detail">{detail}</pre>}
@@ -132,6 +158,7 @@ export function ChatStream({
   running = false,
   emptyTitle = "等待任务",
   emptyDesc = "启动后将在此显示 Agent、工具与证据事件。",
+  autoExpandReports = true,
 }: {
   steps: ThoughtStep[]
   side: Side
@@ -168,7 +195,14 @@ export function ChatStream({
             <span>{emptyDesc}</span>
           </div>
         ) : (
-          normalized.map((step) => <TerminalLine key={step.id} step={step} side={side} />)
+          normalized.map((step) => (
+            <TerminalLine
+              key={step.id}
+              step={step}
+              side={side}
+              autoExpandReports={autoExpandReports}
+            />
+          ))
         )}
         {running && <div className="terminal-cursor" aria-hidden="true">_</div>}
       </div>

@@ -19,7 +19,8 @@ turn-based Arena:
 from .event_bus import EventBus, Event
 from .session_state import SessionState
 from .agent_runner import AgentRunner
-from .controller_v2 import ControllerV2 as Controller
+from .controller import Controller
+from .controller_v2 import ControllerV2
 
 # ares 风格 agent loop 框架
 from .op_state import OpState, StateSnapshot
@@ -49,6 +50,7 @@ __all__ = [
     "SessionState",
     "AgentRunner",
     "Controller",
+    "ControllerV2",
     # ares 风格 agent loop 框架
     "OpState",
     "StateSnapshot",

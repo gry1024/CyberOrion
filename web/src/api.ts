@@ -216,13 +216,19 @@ export const api = {
   trafficAnalyze: (opts: Record<string, unknown>) =>
     post('/api/traffic/analyze', opts) as Promise<{ ok: boolean; output?: string; error?: string }>,
 
-  trafficAnalyzeStream: (opts: Record<string, unknown>, onEvent: (ev: { type: string; side: string; data: Record<string, unknown>; timestamp: number }) => void, onError?: (e: Error) => void): AbortController => {
+  trafficAnalyzeStream: (
+    opts: Record<string, unknown>,
+    onEvent: (ev: { type: string; side: string; data: Record<string, unknown>; timestamp: number }) => void,
+    onError?: (e: Error) => void,
+    onComplete?: () => void,
+  ): AbortController => {
     const c = new AbortController()
     fetch(url('/api/traffic/analyze'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts), signal: c.signal }).then(async (r: Response) => {
       if (!r.ok || !r.body) { onError?.(new Error(`HTTP ${r.status}`)); return }
       const rd = r.body.getReader(), dec = new TextDecoder()
       let buf = ''
       for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const f = buf.slice(0, i); buf = buf.slice(i + 2); for (const l of f.split('\n')) { const t = l.trim(); if (!t.startsWith('data:')) continue; try { onEvent(JSON.parse(t.slice(5).trim())) } catch {} } } }
+      onComplete?.()
     }).catch((e: Error) => { if (e.name !== 'AbortError') onError?.(e) })
     return c
   },

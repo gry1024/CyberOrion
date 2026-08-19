@@ -6,6 +6,7 @@ read-only and side-effect free, so no session is started.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -199,3 +200,54 @@ def test_scenario_select_conflict_when_session_active(client: TestClient,
     r = client.post("/api/scenario/select", json={"name": "web_basic"})
     assert r.status_code == 409
     assert r.json()["ok"] is False
+
+
+def _parse_sse_events(text: str) -> list[dict]:
+    events: list[dict] = []
+    for frame in text.split("\n\n"):
+        for line in frame.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                events.append(json.loads(line[5:].strip()))
+    return events
+
+
+def test_traffic_analyze_stream_replays_reports_and_completes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Catches regressions where traffic SSE omits replay data, report, or completion."""
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+
+    def no_llm() -> tuple[object, str]:
+        raise RuntimeError("offline test")
+
+    monkeypatch.setattr(pipeline, "_build_client", no_llm)
+
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 120},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+
+    event_types = [event.get("type") for event in events]
+    assert "replay_data" in event_types
+    assert "report" in event_types
+    assert "complete" in event_types
+
+    replay = next(event for event in events if event.get("type") == "replay_data")
+    assert replay["data"]["events_total"] > 0
+    assert replay["data"]["events"]
+    assert replay["data"]["alerts"]
+
+    report = next(event for event in events if event.get("type") == "report")
+    report_text = report["data"]["report"]
+    for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
+        assert section in report_text
