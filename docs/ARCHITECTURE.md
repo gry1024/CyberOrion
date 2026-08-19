@@ -270,7 +270,7 @@ red_score  = 100 × attacks_verified / attacks_total     # 无攻击尝试时为
 
 ### 6.2 裁判报告（judge.py + report.py）
 
-`finalize_session(store, session_dir)`：`compute_metrics` → `generate_judge_report` → 落盘 `metrics.json` + `report.md`。两条渲染路径共享同一事实抽取（已验证攻击时间线 + 全部告警 + 防御响应 + 指标）：LLM 路径（judge agent，`Runner.run_sync`，max_turns=1）失败时（无 key/超时/异常）自动回退模板渲染同样的六章节（战役概述/红方时间线与战果/蓝方检测与处置评估/指标表/判罚结论/改进建议）——**永远有产出**。模板路径判罚：检测率 ≥0.8 且响应率 ≥0.5 → 蓝方占优；≥0.5 → 有效对抗；否则红方占优（无已验证战果 → 僵持）。
+`finalize_session(store, session_dir)`：`compute_metrics` → `generate_judge_report` → 落盘 `metrics.json` + `report.md`。两条渲染路径共享同一事实抽取（已验证攻击时间线 + 全部告警 + 防御响应 + 指标）：默认走离线模板报告，避免会话停止被远端 LLM 阻塞；显式传入 `model` 或设置 `CO_JUDGE_LLM=1` 时才走 LLM 路径（judge agent，`Runner.run_sync`，max_turns=1），失败自动回退模板渲染同样的六章节（战役概述/红方时间线与战果/蓝方检测与处置评估/指标表/判罚结论/改进建议）——**永远有产出**。模板路径判罚：检测率 ≥0.8 且响应率 ≥0.5 → 蓝方占优；≥0.5 → 有效对抗；否则红方占优（无已验证战果 → 僵持）。
 
 ---
 

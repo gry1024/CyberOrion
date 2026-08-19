@@ -16,6 +16,7 @@ from __future__ import annotations
 from ..core.agent_runner import run_agent_once_sync
 
 import json
+import os
 from typing import Any
 
 # 喂给 LLM 的单条证据最大长度（避免上下文膨胀）。
@@ -121,6 +122,7 @@ def _render_with_llm(facts: dict, model: Any = None) -> str:
         + json.dumps(facts, ensure_ascii=False, indent=2, default=str)
     )
     result = run_agent_once_sync(agent, prompt, max_turns=1, timeout=600)
+    report = str(result or "").strip()
     if not report:
         raise RuntimeError("judge agent 返回空报告")
     return report
@@ -285,6 +287,11 @@ def generate_judge_report(store: Any, metrics: dict, model: Any = None) -> str:
         Markdown 报告文本（含全部六个章节）。
     """
     facts = _extract_facts(store, metrics)
+    llm_enabled = model is not None or os.getenv("CO_JUDGE_LLM", "").lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not llm_enabled:
+        return _render_template(facts)
     try:
         return _render_with_llm(facts, model)
     except Exception:

@@ -263,6 +263,23 @@ class TestResponseStats:
 # ---------------------------------------------------------------------------
 
 class TestJudgeFallback:
+    def test_default_report_uses_template_without_llm(self, store, monkeypatch):
+        """默认裁判报告必须离线即时生成，避免会话停止被 LLM 阻塞。"""
+        _fill_main(store)
+        m = compute_metrics(store)
+        called = False
+
+        def _unexpected(*_args, **_kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("LLM should be opt-in for stop_session")
+
+        monkeypatch.setattr(judge_mod, "_render_with_llm", _unexpected)
+        report = generate_judge_report(store, m)
+
+        assert called is False
+        assert "## 指标表" in report
+
     def test_llm_failure_falls_back_to_template(self, store, monkeypatch):
         """LLM 路径抛异常 -> 模板报告，且包含指标表与正确数字。"""
         _fill_main(store)
@@ -272,7 +289,7 @@ class TestJudgeFallback:
             raise RuntimeError("no API key")
 
         monkeypatch.setattr(judge_mod, "_render_with_llm", _boom)
-        report = generate_judge_report(store, m)
+        report = generate_judge_report(store, m, model=object())
 
         assert "## 指标表" in report
         assert "## 战役概述" in report
@@ -285,6 +302,14 @@ class TestJudgeFallback:
         # 红方时间线只含 verified 攻击（3 条），失败尝试不出现。
         assert "log4shell probe" not in report
         assert "ssh brute force" in report
+
+    def test_explicit_llm_report_returns_runner_output(self, monkeypatch):
+        """显式启用 LLM 路径时返回 runner 产物，而不是未定义变量。"""
+        monkeypatch.setattr(judge_mod, "run_agent_once_sync", lambda *a, **k: "LLM REPORT")
+
+        report = judge_mod._render_with_llm({"metrics": {}}, model=object())
+
+        assert report == "LLM REPORT"
 
 
 # ---------------------------------------------------------------------------
