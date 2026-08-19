@@ -216,3 +216,42 @@ def test_stopping_blocked_agent_returns_promptly(monkeypatch) -> None:
         assert elapsed < 0.3
 
     asyncio.run(run())
+
+
+def test_scripted_red_workflow_verifies_weak_ssh(monkeypatch, tmp_path: Path) -> None:
+    from cyberorion import arena_reset
+    from cyberorion.agents import blue_team
+    from cyberorion.core.controller import Controller
+    from cyberorion.telemetry.collectors import TelemetryCollector
+    from cyberorion.tools import _common
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(arena_reset, "reset_all", lambda _scenario: {"status": "ok"})
+    monkeypatch.setattr(TelemetryCollector, "start", lambda _self: None)
+    monkeypatch.setattr(TelemetryCollector, "stop", lambda _self: asyncio.sleep(0))
+    monkeypatch.setattr("cyberorion.agent.build_red_agent", lambda: SimpleNamespace(name="fake-red"))
+    monkeypatch.setattr(blue_team, "build_blue_team", lambda _scenario: SimpleNamespace(name="fake-blue"))
+    monkeypatch.setattr(blue_team, "set_event_bus", lambda _bus: None)
+
+    def fake_run(cmd, timeout=60):
+        text = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if "/dev/tcp" in text:
+            return 0, "OPEN PORTS: 22222/open/ssh", ""
+        if "-l user" in text:
+            return 0, "uid=1000(user) gid=1000(user)", ""
+        return 255, "", "Permission denied"
+
+    monkeypatch.setattr(_common, "_run", fake_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        await controller.start_session("web_basic")
+        try:
+            task = await controller.start_red()
+            await asyncio.wait_for(task, timeout=2)
+            assert controller.get_status()["red_history_count"] == 1
+            assert "SSH 弱口令" in controller._red_history[-1]
+        finally:
+            await controller.stop_session()
+
+    asyncio.run(run())
