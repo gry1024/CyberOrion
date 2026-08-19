@@ -119,7 +119,7 @@ from cyberorion.tools._common import (
 # --------------------------------------------------------------------------- #
 event_bus = EventBus()
 session_state = SessionState()
-controller = Controller(event_bus, session_state)
+controller = Controller(event_bus, session_state, build_agents_on_start=False)
 
 # AD/domain v2 演示控制器仅服务 /api/v2/*；公网主作战台走上面的 CTF Controller。
 controller_v2_state = SessionState()
