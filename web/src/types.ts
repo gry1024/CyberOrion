@@ -613,7 +613,7 @@ export type BenchMode =
 
 /** Bench suites — run_id format `<ts>_<suite>_<mode>_n<n>`; old runs default
  * to malware_analysis server-side. */
-export type BenchSuite = 'soc_evidence' | 'malware_analysis' | 'attack_kb' | 'threat_intel'
+export type BenchSuite = 'soc_evidence' | 'malware_analysis' | 'attack_kb' | 'threat_intel' | 'cybergym_lite'
 
 export const BENCH_SUITES: Record<
   BenchSuite,
@@ -634,6 +634,10 @@ export const BENCH_SUITES: Record<
   threat_intel: {
     label: '威胁情报推理 · CrowdStrike',
     hint: '基于 CrowdStrike 真实威胁报告的防御决策多选题：安全控制测试方法论 / 检测建议 / 缓解措施，题干自包含威胁上下文（588 题）',
+  },
+  cybergym_lite: {
+    label: 'CyberGym Lite',
+    hint: '官方 CyberGym Level-1 小体积漏洞修复任务；用隐藏补丁做等价评分，适合快速展示 CyberOrion Agent 分数',
   },
 }
 
@@ -669,6 +673,10 @@ export const BENCH_ARMS: Record<
     bare: { mode: 'base', label: '纯 LLM · base' },
     framework: { mode: 'rag', label: 'CyberOrion 框架 · rag' },
   },
+  cybergym_lite: {
+    bare: { mode: 'base', label: 'Plain LLM' },
+    framework: { mode: 'agent', label: 'CyberOrion Agent' },
+  },
 }
 
 /** 臂的展示名；legacy 实验模式（不在对比中）原样返回 mode。 */
@@ -698,6 +706,7 @@ export interface BenchScores {
   n: number
   correct_mc_pct: number
   avg_score: number
+  patch_equivalence?: number
   parse_fail: number
   /** LLM 调用失败的题目数（endpoint 故障不再静默成全 0 分）。 */
   llm_errors?: number
@@ -725,19 +734,35 @@ export function primaryScoreOf(r: {
   scores: BenchScores | null
 }): number | undefined {
   if (!r.scores) return undefined
+  if (r.suite === 'cybergym_lite') return r.scores.patch_equivalence ?? r.scores.avg_score
+  if (r.suite === 'soc_evidence') return r.scores.task_success ?? r.scores.avg_score
   return r.scores.correct_mc_pct
 }
 
-export function primaryScoreLabel(_suite: BenchSuite | undefined): string {
+export function primaryScoreLabel(suite: BenchSuite | undefined): string {
+  if (suite === 'cybergym_lite') return '补丁等价分'
+  if (suite === 'soc_evidence') return '任务成功率'
   return '选择题正确率'
 }
 
 /** GET /api/bench/questions — 题目预览（含答案），与正式基准同采样逻辑。 */
 export interface BenchQuestionPreview {
-  idx: number
-  question: string
-  options: string[]
-  correct_options: string[]
+  idx?: number
+  question?: string
+  options?: string[]
+  correct_options?: string[]
+  task_id?: string
+  project_name?: string
+  project_homepage?: string
+  project_main_repo?: string
+  project_language?: string
+  vulnerability_description?: string
+  difficulty_level?: string
+  task_difficulty?: Record<string, string[]>
+  visible_level1_artifacts?: string[]
+  artifact_sizes?: Record<string, number>
+  key_fix_actions?: string[]
+  expected_files?: string[]
   topic?: string
   difficulty?: string
   attack?: string
@@ -815,6 +840,46 @@ export interface EvidenceBenchResult {
   estimated_tokens: number
 }
 
+export interface CyberGymLiteMetrics {
+  parse_ok: boolean
+  exact: boolean
+  patch_equivalence: number
+  file_score: number
+  invariant_score: number
+  diff_similarity: number
+  has_patch_shape: boolean
+  answer_files: string[]
+  gold_files: string[]
+  token_hits: Array<{ token: string; hit: boolean }>
+}
+
+export interface CyberGymLiteResult {
+  idx: number
+  task_id: string
+  project_name: string
+  project_homepage: string
+  project_main_repo: string
+  project_language: string
+  vulnerability_description: string
+  difficulty: string
+  title: string
+  visible_level1_artifacts: string[]
+  artifact_sizes: Record<string, number>
+  expected_files: string[]
+  gold_changed_files: string[]
+  gold_patch_excerpt: string
+  key_fix_actions: string[]
+  raw: string
+  metrics: CyberGymLiteMetrics
+  parse_ok: boolean
+  llm_error: boolean
+  error?: string | null
+  agent_trace: EvidenceTraceEvent[]
+  failure_tags: string[]
+  latency_ms: number
+  estimated_tokens: number
+}
+
 /** GET /api/bench/run/{run_id} — full detail incl. per-question results. */
 export interface BenchRunDetail extends BenchRunSummary {
   started_at?: number
@@ -823,7 +888,7 @@ export interface BenchRunDetail extends BenchRunSummary {
   /** 逐题可读报告路径（logs/bench/<run_id>.md，完整题干/选项/回答）。 */
   report?: string | null
   /** QA suites: per-question results. */
-  results?: BenchResultItem[]
+  results?: Array<BenchResultItem | EvidenceBenchResult | CyberGymLiteResult>
   budget?: { max_steps: number; task_timeout: number }
 }
 
@@ -834,7 +899,7 @@ export interface BenchTaskDetail {
   mode?: string
   idx: number
   n: number
-  task: BenchResultItem
+  task: BenchResultItem | EvidenceBenchResult | CyberGymLiteResult
 }
 
 /** Live state of a running bench run, fed by WS `bench` events. */

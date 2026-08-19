@@ -160,6 +160,27 @@ class TestBenchAPI:
             state = _wait_done(r.json()["run_id"])
             assert state["suite"] == "soc_evidence"
 
+    def test_cybergym_lite_suite_accepted(
+            self, client: TestClient, fake_bench) -> None:
+        r = client.post("/api/bench/run", json={
+            "suite": "cybergym_lite", "mode": "agent", "n": 1})
+        assert r.status_code == 200, r.text
+        run_id = r.json()["run_id"]
+        assert "_cybergym_lite_agent_n1" in run_id
+        state = _wait_done(run_id)
+        assert state["suite"] == "cybergym_lite"
+
+    def test_cybergym_lite_questions_preview(self, client: TestClient) -> None:
+        r = client.get("/api/bench/questions?suite=cybergym_lite&n=2&seed=42")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["suite"] == "cybergym_lite"
+        assert data["n"] == 2
+        task = data["questions"][0]
+        assert task["task_id"].startswith("arvo:")
+        assert task["vulnerability_description"]
+        assert task["visible_level1_artifacts"]
+
     def test_soc_evidence_preview_is_not_multiple_choice(
             self, client: TestClient) -> None:
         r = client.get("/api/bench/questions?suite=soc_evidence&n=2&seed=42")

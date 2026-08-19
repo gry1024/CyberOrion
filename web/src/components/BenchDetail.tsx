@@ -8,12 +8,21 @@ import type {
   BenchResultItem,
   BenchRunDetail,
   BenchRunSummary,
+  CyberGymLiteResult,
 } from '../types'
 import { armLabelOf } from '../types'
 import { fmtDuration, fmtPct, fmtRunTime } from './BenchmarkView'
 import { MarkdownView } from './MarkdownView'
 
 const DIFF_ORDER = ['easy', 'medium', 'hard']
+
+function isCyberGymLiteResult(item: unknown): item is CyberGymLiteResult {
+  return typeof item === 'object' && item !== null && 'task_id' in item && 'key_fix_actions' in item
+}
+
+function isBenchResultItem(item: unknown): item is BenchResultItem {
+  return typeof item === 'object' && item !== null && 'gold' in item && 'pred' in item && 'jaccard' in item
+}
 
 function GroupBar({
   label,
@@ -55,7 +64,7 @@ function useTaskDetail(runId: string, idx: number, enabled: boolean) {
     api
       .getBenchTask(runId, idx)
       .then((d) => {
-        if (!stale) setTask(d.task)
+        if (!stale && isBenchResultItem(d.task)) setTask(d.task)
       })
       .catch(() => {
         if (!stale) setFailed(true)
@@ -195,7 +204,7 @@ function QuestionsSection({
   run: BenchRunSummary
   detail: BenchRunDetail | null
 }) {
-  const items = detail?.results ?? []
+  const items = (detail?.results ?? []).filter(isBenchResultItem)
   const [showAll, setShowAll] = useState(false)
   if (items.length === 0) return null
   const wrongFirst = [...items].sort((a, b) => Number(a.exact) - Number(b.exact))
@@ -227,6 +236,54 @@ function QuestionsSection({
           {showAll ? '▾ 只显示前 20 题' : `▸ 展开全部 ${items.length} 题`}
         </button>
       )}
+    </section>
+  )
+}
+
+function CyberGymTaskSection({ detail }: { detail: BenchRunDetail | null }) {
+  const items = (detail?.results ?? []).filter(isCyberGymLiteResult)
+  if (items.length === 0) return null
+  return (
+    <section>
+      <div className="mb-2.5 flex items-baseline gap-2 text-[10px] uppercase tracking-widest text-text-2">
+        <span>CyberGym 任务详情</span>
+        <span className="font-mono normal-case tracking-normal text-text-3">
+          {items.length} 个 Level-1 小任务
+        </span>
+      </div>
+      <div className="space-y-3">
+        {items.map((item, i) => (
+          <div key={item.task_id} className="border border-hairline/60 p-3">
+            <div className="mb-1 flex flex-wrap items-baseline gap-2">
+              <span className="font-mono text-[10px] text-text-3">#{i + 1}</span>
+              <span className="font-mono text-[11px] text-text-1">{item.task_id}</span>
+              <span className="text-[10px] text-text-3">{item.project_name} · {item.project_language}</span>
+              <span className="ml-auto font-mono text-[11px] text-text-1">
+                补丁等价 {fmtPct(item.metrics.patch_equivalence)}
+              </span>
+            </div>
+            <div className="text-[11.5px] leading-5 text-text-2">{item.vulnerability_description}</div>
+            <div className="mt-2 grid gap-1 font-mono text-[9.5px] text-text-3">
+              <span>可见输入：{item.visible_level1_artifacts.join(', ')}</span>
+              <span>期望文件：{item.expected_files.join(', ')}</span>
+              <span>实际文件：{item.metrics.answer_files.join(', ') || '—'}</span>
+              <span>file={item.metrics.file_score.toFixed(3)} · invariant={item.metrics.invariant_score.toFixed(3)} · diff={item.metrics.diff_similarity.toFixed(3)}</span>
+            </div>
+            <div className="mt-2 text-[10px] text-text-2">关键修复动作</div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[10.5px] leading-5 text-text-3">
+              {item.key_fix_actions.map((action) => <li key={action}>{action}</li>)}
+            </ul>
+            {item.raw && (
+              <details className="mt-2 border border-hairline/50 bg-panel-2/60">
+                <summary className="cursor-pointer px-2.5 py-1.5 text-[10px] text-text-2">Agent 原始补丁输出</summary>
+                <div className="scroll-thin max-h-72 overflow-y-auto px-2.5 pb-2">
+                  <MarkdownView markdown={item.raw} className="md-inline" />
+                </div>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
@@ -399,8 +456,11 @@ export function BenchDetailDrawer({
                 </section>
               )}
 
-              {/* 逐题 drill-down */}
-              <QuestionsSection run={run} detail={detail} />
+              {suite === 'cybergym_lite' ? (
+                <CyberGymTaskSection detail={detail} />
+              ) : (
+                <QuestionsSection run={run} detail={detail} />
+              )}
           </>
         )}
       </aside>

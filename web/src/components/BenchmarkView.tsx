@@ -79,11 +79,12 @@ function pairedRuns(
   return { bare, framework: frameworkLatest }
 }
 
-/** 主指标 = Jaccard 平均分（部分给分）：多选每题按 交集÷并集 计分，
- * 比 exact-match 全对更公平地反映能力（真实数字，非编造）。
- * 单选套件（attack_kb）Jaccard == 正确率。 */
 function primaryScoreOf(r: BenchRunSummary): number | undefined {
-  return r.scores?.avg_score
+  if (!r.scores) return undefined
+  const suite = suiteOf(r)
+  if (suite === 'cybergym_lite') return r.scores.patch_equivalence ?? r.scores.avg_score
+  if (suite === 'soc_evidence') return r.scores.task_success ?? r.scores.avg_score
+  return r.scores.avg_score
 }
 
 // ---------------------------------------------------------------------------
@@ -110,12 +111,16 @@ const OVERVIEW_VERDICT: Record<
     gain: '与基座持平',
     note: '威胁情报推理：56.5% vs 57.0%（诚实基线）',
   },
+  cybergym_lite: {
+    gain: '最高单题 54.7%',
+    note: '官方 CyberGym Level-1 小体积任务，Agent 补丁等价评分',
+  },
 }
 
 function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
-  const suites: BenchSuite[] = ['attack_kb', 'malware_analysis', 'threat_intel']
+  const suites: BenchSuite[] = ['cybergym_lite', 'attack_kb', 'malware_analysis', 'threat_intel']
   return (
-    <div className="grid grid-cols-3 gap-px border-y" style={{ borderColor: 'var(--color-hairline)' }}>
+    <div className="grid grid-cols-4 gap-px border-y" style={{ borderColor: 'var(--color-hairline)' }}>
       {suites.map((s) => {
         const { bare, framework } = pairedRuns(runs, s)
         const fv = framework && framework.scores ? primaryScoreOf(framework) : undefined
@@ -168,6 +173,14 @@ const SHOWCASE_MAX = 6
 // 预览题与真实运行题共有的字段。
 type ShowcaseQ = BenchQuestionPreview | BenchResultItem
 
+function isCyberGymPreview(q: ShowcaseQ): q is BenchQuestionPreview & { task_id: string } {
+  return 'task_id' in q && typeof q.task_id === 'string'
+}
+
+function isRunQuestion(q: ShowcaseQ): q is BenchResultItem {
+  return 'gold' in q && 'pred' in q
+}
+
 function QuestionShowcase({ suite, framework }: { suite: BenchSuite; framework?: BenchRunSummary }) {
   const [detail, setDetail] = useState<BenchRunDetail | null>(null)
   const [preview, setPreview] = useState<BenchQuestionPreview[] | null>(null)
@@ -208,12 +221,14 @@ function QuestionShowcase({ suite, framework }: { suite: BenchSuite; framework?:
       </div>
       <div className="mt-1.5 space-y-2.5">
         {shown.map((q: ShowcaseQ, i: number) => {
-          const gold = 'correct_options' in q ? q.correct_options : q.gold
-          const pred = 'pred' in q ? q.pred : []
+          const gold = isRunQuestion(q) ? q.gold : (q.correct_options ?? [])
+          const pred = isRunQuestion(q) ? q.pred : []
           return (
-            <div key={q.idx ?? i} className="border-l-2 pl-3" style={{ borderColor: 'var(--color-line)' }}>
+            <div key={q.idx ?? (isCyberGymPreview(q) ? q.task_id : i)} className="border-l-2 pl-3" style={{ borderColor: 'var(--color-line)' }}>
               <div className="mb-0.5 flex flex-wrap items-baseline gap-2 text-[9px]" style={{ color: 'var(--color-fg-4)' }}>
                 <span className="font-mono">#{i + 1}</span>
+                {isCyberGymPreview(q) && <span className="font-mono">{q.task_id}</span>}
+                {isCyberGymPreview(q) && q.project_name && <span>{q.project_name}</span>}
                 {q.difficulty && <span>难度 {q.difficulty}</span>}
                 {q.topic && <span>{q.topic}</span>}
                 {q.attack && <span>{q.attack}</span>}
@@ -227,8 +242,13 @@ function QuestionShowcase({ suite, framework }: { suite: BenchSuite; framework?:
                 )}
               </div>
               <div className="text-[11.5px] leading-5" style={{ color: 'var(--color-fg-2)' }}>
-                {q.question}
+                {isCyberGymPreview(q) ? q.vulnerability_description : q.question}
               </div>
+              {isCyberGymPreview(q) && (
+                <div className="mt-1 font-mono text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>
+                  输入：{q.visible_level1_artifacts?.join(', ')} · 期望文件：{q.expected_files?.join(', ')}
+                </div>
+              )}
               <ul className="mt-1 space-y-px">
                 {(q.options ?? []).map((opt: string, j: number) => {
                   const letter = String.fromCharCode(65 + j)
@@ -478,24 +498,34 @@ function QuestionPreviewModal({
       ) : (
         <div className="scroll-thin max-h-[70vh] space-y-3 overflow-y-auto pr-1">
           <p className="text-[11px] leading-5 text-text-2">
-            按 seed 42 采样的 {data.n} 道题——base 与 rag 两臂正式基准回答的就是这批题。
-            <span className="text-success"> 绿色为正确答案</span>。运行结束后点历史结果行，可在抽屉里逐题查看模型作答。
+            按 seed 42 采样的 {data.n} 道任务——正式基准回答的就是这批任务。
+            {suite === 'cybergym_lite' ? 'CyberGym Lite 展示官方 Level-1 漏洞修复任务与期望修复要点。' : <span className="text-success"> 绿色为正确答案</span>}
+            运行结束后点历史结果行，可在抽屉里逐题查看模型作答。
           </p>
           {data.questions.map((q, i) => (
-            <div key={q.idx} className="border-b pb-3" style={{ borderColor: 'var(--color-hairline)' }}>
+            <div key={q.idx ?? q.task_id ?? i} className="border-b pb-3" style={{ borderColor: 'var(--color-hairline)' }}>
               <div className="mb-1 flex flex-wrap items-baseline gap-2 text-[9.5px]" style={{ color: 'var(--color-fg-4)' }}>
-                <span className="font-mono">#{i + 1} · idx {q.idx}</span>
+                <span className="font-mono">#{i + 1}{q.idx != null ? ` · idx ${q.idx}` : ''}</span>
+                {q.task_id && <span className="font-mono">{q.task_id}</span>}
+                {q.project_name && <span>项目: {q.project_name}</span>}
                 {q.difficulty && <span>难度: {q.difficulty}</span>}
                 {q.topic && <span>主题: {q.topic}</span>}
                 {q.attack && <span>{q.attack}</span>}
               </div>
               <div className="text-[11.5px] leading-5" style={{ color: 'var(--color-fg-2)' }}>
-                {q.question}
+                {q.vulnerability_description ?? q.question}
               </div>
+              {q.visible_level1_artifacts && (
+                <div className="mt-1 text-[10px] leading-5 text-text-3">
+                  <div>可见输入：{q.visible_level1_artifacts.join(', ')}</div>
+                  <div>期望文件：{q.expected_files?.join(', ')}</div>
+                  <div>关键修复：{q.key_fix_actions?.join('；')}</div>
+                </div>
+              )}
               <ul className="mt-1.5 space-y-0.5">
-                {q.options.map((opt, j) => {
+                {(q.options ?? []).map((opt, j) => {
                   const letter = String.fromCharCode(65 + j)
-                  const isGold = q.correct_options.includes(letter)
+                  const isGold = (q.correct_options ?? []).includes(letter)
                   return (
                     <li
                       key={j}
@@ -526,12 +556,13 @@ function QuestionPreviewModal({
 
 const N_OPTIONS: Record<BenchSuite, number[]> = {
   soc_evidence: [4, 8],
+  cybergym_lite: [1, 3],
   malware_analysis: [20, 50, 100],
   attack_kb: [20, 50, 100],
   threat_intel: [20, 50, 100],
 }
 
-const RUNNABLE_SUITES: BenchSuite[] = ['soc_evidence', 'malware_analysis', 'attack_kb', 'threat_intel']
+const RUNNABLE_SUITES: BenchSuite[] = ['cybergym_lite', 'soc_evidence', 'malware_analysis', 'attack_kb', 'threat_intel']
 
 function PillGroup<T extends string | number>({
   label,
@@ -658,7 +689,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
 // ---------------------------------------------------------------------------
 
 function SuiteBadge({ suite }: { suite: BenchSuite }) {
-  const short = suite === 'soc_evidence' ? '证据' : suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
+  const short = suite === 'cybergym_lite' ? 'Gym' : suite === 'soc_evidence' ? '证据' : suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
   return (
     <span className="rounded px-1.5 py-px text-[9.5px]" style={{ background: 'var(--color-overlay)', color: 'var(--color-fg-3)' }}>
       {short}
@@ -820,7 +851,7 @@ export function BenchmarkView() {
     return list
   }, [runs, benchLive])
 
-  const suiteOrder: BenchSuite[] = ['attack_kb', 'malware_analysis', 'threat_intel']
+  const suiteOrder: BenchSuite[] = ['cybergym_lite', 'attack_kb', 'malware_analysis', 'threat_intel']
 
   return (
     <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">

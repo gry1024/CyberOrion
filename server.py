@@ -1048,6 +1048,9 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
     elif suite == "soc_evidence":
         from cyberorion.bench import soc_evidence as _m
         allowed_modes = _m.MODES
+    elif suite == "cybergym_lite":
+        from cyberorion.bench import cybergym_lite as _m
+        allowed_modes = _m.MODES
     else:
         allowed_modes = bench_mod.MODES
     if mode not in allowed_modes:
@@ -1285,6 +1288,9 @@ async def bench_questions(suite: str = "malware_analysis",
                 {"ok": False, "error": "questions.json 不可用"},
                 status_code=503)
         qs = bench_mod.sample_questions(all_q, n, seed)
+    elif suite == "cybergym_lite":
+        from cyberorion.bench import cybergym_lite as _cg
+        qs = _cg.sample_tasks(n, seed)
     else:
         return JSONResponse(
             {"ok": False,
@@ -1293,6 +1299,12 @@ async def bench_questions(suite: str = "malware_analysis",
     if suite == "soc_evidence":
         keys = ("case_id", "task_type", "title", "prompt", "telemetry",
                 "gold", "evidence_map", "difficulty")
+    elif suite == "cybergym_lite":
+        keys = ("task_id", "project_name", "project_homepage",
+                "project_main_repo", "project_language",
+                "vulnerability_description", "difficulty_level",
+                "task_difficulty", "visible_level1_artifacts",
+                "artifact_sizes", "key_fix_actions", "expected_files")
     else:
         keys = ("idx", "question", "options", "correct_options", "topic",
                 "difficulty", "attack")

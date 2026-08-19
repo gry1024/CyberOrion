@@ -58,6 +58,22 @@ interface MetricDef {
 }
 
 function metricsFor(suite: BenchSuite): MetricDef[] {
+  if (suite === 'cybergym_lite') {
+    return [
+      {
+        key: 'patch_equivalence',
+        label: '补丁等价分',
+        desc: '0.45*安全不变量 + 0.35*文件范围 + 0.20*diff 相似度',
+        get: (s) => s.patch_equivalence ?? s.avg_score,
+      },
+      {
+        key: 'avg_score',
+        label: '平均得分',
+        desc: '任务级补丁等价平均值',
+        get: (s) => s.avg_score,
+      },
+    ]
+  }
   if (suite === 'attack_kb') {
     // 单选套件：Jaccard 恒等于 exact-match（选中=1/未中=0），
     // 只画一个指标，避免两个必然相同的柱误导。

@@ -131,7 +131,7 @@ ARM_LABELS = {
 # 主因。v7 改为“佐证之一，绝不据此断定/排除”，判断以题目文本为准。
 # run_bench 支持的全部 suite（单一事实源）；attack_kb 套件的 mode 白名单
 # 见 bench/attack_kb.py 的 MODES。
-SUITES = ("malware_analysis", "attack_kb", "threat_intel", "soc_evidence")
+SUITES = ("malware_analysis", "attack_kb", "threat_intel", "soc_evidence", "cybergym_lite")
 
 # rag_g 模式追加的作答规则（接在 rag v2 的 3 条要求之后）。
 _GUESS_RULES = (
@@ -911,6 +911,12 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     if suite == "soc_evidence":
         from . import soc_evidence
         return await soc_evidence.run_bench(
+            n=n, mode=mode, seed=seed, log_dir=log_dir,
+            concurrency=concurrency, llm=llm, kb=kb,
+            on_progress=on_progress, run_id=run_id)
+    if suite == "cybergym_lite":
+        from . import cybergym_lite
+        return await cybergym_lite.run_bench(
             n=n, mode=mode, seed=seed, log_dir=log_dir,
             concurrency=concurrency, llm=llm, kb=kb,
             on_progress=on_progress, run_id=run_id)
