@@ -1788,17 +1788,44 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         except Exception:
             pass
         _fallback_reason = ""
-        _pipeline_iter = run_traffic_analysis_pipeline(events)
+        _PIPELINE_DONE = object()
+        _pipeline_active = True
+        _pipeline_queue: asyncio.Queue[Any] = asyncio.Queue()
         _deadline = time.monotonic() + analysis_timeout
+
+        async def _produce_pipeline_events() -> None:
+            try:
+                async for pipeline_event in run_traffic_analysis_pipeline(events):
+                    if not _pipeline_active:
+                        break
+                    await _pipeline_queue.put(pipeline_event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await _pipeline_queue.put({"__pipeline_error__": exc})
+            finally:
+                await _pipeline_queue.put(_PIPELINE_DONE)
+
+        _pipeline_task = asyncio.create_task(_produce_pipeline_events())
+
+        def _consume_pipeline_result(task: asyncio.Task) -> None:
+            with suppress(BaseException):
+                task.exception()
+
+        _pipeline_task.add_done_callback(_consume_pipeline_result)
         try:
             while True:
                 _remaining = _deadline - time.monotonic()
                 if _remaining <= 0:
                     raise asyncio.TimeoutError
                 try:
-                    ev = await asyncio.wait_for(anext(_pipeline_iter), timeout=_remaining)
-                except StopAsyncIteration:
+                    ev = await asyncio.wait_for(_pipeline_queue.get(), timeout=_remaining)
+                except asyncio.TimeoutError:
+                    raise
+                if ev is _PIPELINE_DONE:
                     break
+                if isinstance(ev, dict) and "__pipeline_error__" in ev:
+                    raise ev["__pipeline_error__"]
                 ev_type = ev.get("type", "")
                 if ev_type == "report":
                     _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
@@ -1816,8 +1843,9 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                         "data": {"text": f"⚠ {_fallback_reason}"},
                         "timestamp": time.time()})
         finally:
-            with suppress(Exception):
-                await asyncio.wait_for(_pipeline_iter.aclose(), timeout=1.0)
+            _pipeline_active = False
+            if not _pipeline_task.done():
+                _pipeline_task.cancel()
 
         if not "".join(_traffic_report_parts).strip():
             _fallback_report = _build_traffic_fallback_report(

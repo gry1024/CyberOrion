@@ -351,3 +351,43 @@ def test_traffic_analyze_timeout_interrupts_blocking_kb_lookup(
     assert elapsed < 0.8
     assert any(event.get("type") == "report" for event in events)
     assert any(event.get("type") == "complete" for event in events)
+
+
+def test_traffic_analyze_timeout_not_held_by_stubborn_generator(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Timeout must close the response even if the pipeline swallows cancellation."""
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    async def stubborn_pipeline(_events):
+        yield {
+            "type": "system",
+            "side": "blue",
+            "data": {"text": "pipeline started"},
+            "timestamp": 1.0,
+        }
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            await asyncio.sleep(1.2)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+    monkeypatch.setattr(pipeline, "run_traffic_analysis_pipeline", stubborn_pipeline)
+
+    started = time.monotonic()
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 120, "analysis_timeout_sec": 0.05},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.8
+    assert any(event.get("type") == "report" for event in events)
+    assert any(event.get("type") == "complete" for event in events)
