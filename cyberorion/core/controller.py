@@ -346,13 +346,13 @@ class Controller:
         self._red_paused.set()
         await _cancel_tasks(self._red_stream_tasks)
         if self._red_task is not None and not self._red_task.done():
-            try:
-                await asyncio.wait_for(self._red_task, timeout=5)
-            except asyncio.TimeoutError:
-                self._red_task.cancel()
-            except Exception:
-                pass
+            self._red_task.cancel()
         self._red_task = None
+        await self.event_bus.publish(Event(
+            type="round_end",
+            side="red",
+            data={"action": "stop", "target": "red"},
+        ))
 
     async def stop_blue(self) -> None:
         self._stop_blue.set()
@@ -364,13 +364,13 @@ class Controller:
             pass
         await _cancel_tasks(self._blue_stream_tasks)
         if self._blue_task is not None and not self._blue_task.done():
-            try:
-                await asyncio.wait_for(self._blue_task, timeout=5)
-            except asyncio.TimeoutError:
-                self._blue_task.cancel()
-            except Exception:
-                pass
+            self._blue_task.cancel()
         self._blue_task = None
+        await self.event_bus.publish(Event(
+            type="round_end",
+            side="blue",
+            data={"action": "stop", "target": "blue"},
+        ))
 
     async def start_blue_patrol(
         self,

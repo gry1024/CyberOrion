@@ -192,3 +192,27 @@ def test_agent_runner_blocking_work_does_not_freeze_controller(monkeypatch) -> N
         assert elapsed < 0.05
 
     asyncio.run(run())
+
+
+def test_stopping_blocked_agent_returns_promptly(monkeypatch) -> None:
+    from cyberorion.core import controller as controller_mod
+    from cyberorion.core.controller import Controller
+
+    async def blocking_run(*_args, **_kwargs) -> dict:
+        time.sleep(1.0)
+        return {"output": "done", "tool_calls": [], "trace_items": []}
+
+    monkeypatch.setattr(controller_mod.AgentRunner, "run", blocking_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        agent = SimpleNamespace(name="fake-red")
+        await controller.start_red(agent=agent, prompt="test")
+
+        started = time.monotonic()
+        await controller.stop_red()
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 0.3
+
+    asyncio.run(run())
