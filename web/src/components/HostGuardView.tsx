@@ -115,7 +115,13 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <FadeIn className="w-full max-w-[480px]">
-        <div className="panel p-6">
+        <form
+          className="panel p-6"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void connect()
+          }}
+        >
           <div className="mb-4 flex items-center gap-2">
             <span className="text-[20px]">🛡</span>
             <h2 className="text-[14px] font-semibold text-fg">主机卫士</h2>
@@ -154,16 +160,17 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
             </div>
           </div>
           {error && <div className="mt-3 rounded border border-attacker/40 bg-attacker/5 p-2 text-[11px] text-attacker">{error}</div>}
-          <button onClick={connect} disabled={connecting || !host.trim()} className="mt-4 w-full rounded bg-blue px-4 py-2 text-[12px] font-medium text-bg transition-colors hover:bg-blue/80 disabled:opacity-40">
+          <button type="submit" disabled={connecting || !host.trim()} className="mt-4 w-full rounded bg-blue px-4 py-2 text-[12px] font-medium text-bg transition-colors hover:bg-blue/80 disabled:opacity-40">
             {connecting ? '连接中…' : '连接服务器'}
           </button>
-        </div>
+        </form>
       </FadeIn>
     </div>
   )
 }
 
 function EventRow({ ev }: { ev: ChatEvent }) {
+  const [expanded, setExpanded] = useState(false)
   const agent = String(ev.data.agent || 'guard_agent')
   const meta = agentMeta(agent)
 
@@ -187,7 +194,6 @@ function EventRow({ ev }: { ev: ChatEvent }) {
     )
   }
   if (ev.type === 'tool_output') {
-    const [expanded, setExpanded] = useState(false)
     const tool = String(ev.data.tool || '')
     const output = String(ev.data.output || '')
     return (

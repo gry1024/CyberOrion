@@ -125,6 +125,10 @@ controller = Controller(event_bus, session_state)
 controller_v2_state = SessionState()
 controller_v2 = ControllerV2(event_bus, controller_v2_state)
 
+_session_boot_task: asyncio.Task | None = None
+_session_boot_error = ""
+_pending_agent_starts: set[str] = set()
+
 # Bridge: tools mirror ledger writes into SessionState for frontend visibility.
 set_session_state_ref(session_state)
 
@@ -410,6 +414,9 @@ async def get_status() -> dict[str, Any]:
     """Return controller status + live VULN_LEDGER + session summary."""
     controller_status = controller.get_status()
     status = dict(controller_status)
+    status["session_starting"] = _session_boot_task is not None and not _session_boot_task.done()
+    status["session_boot_error"] = _session_boot_error
+    status["pending_agent_starts"] = sorted(_pending_agent_starts)
     status["ledger"] = snapshot_ledger()
     status["summary"] = _session_summary
     # 保留 v2 键供旧前端读取；AD/domain v2 状态独立于公网 CTF 作战台。
@@ -1353,13 +1360,93 @@ async def about() -> Any:
 # --------------------------------------------------------------------------- #
 # REST: session lifecycle
 # --------------------------------------------------------------------------- #
+
+
+def _session_booting() -> bool:
+    return _session_boot_task is not None and not _session_boot_task.done()
+
+
+async def _boot_session_once() -> None:
+    """Start the CTF arena session once; concurrent callers share the task."""
+    global _session_boot_error
+    if controller.get_status().get("session_active"):
+        return
+    _session_boot_error = ""
+    try:
+        await controller.start_session()
+    except Exception as exc:
+        _session_boot_error = f"{type(exc).__name__}: {exc}"[:400]
+        await event_bus.publish(Event(
+            type="error",
+            side="system",
+            data={"message": f"靶场启动失败: {_session_boot_error}", "source": "session_boot"},
+        ))
+        raise
+
+
+def _ensure_session_boot_task() -> asyncio.Task:
+    global _session_boot_task
+    if controller.get_status().get("session_active"):
+        async def done() -> None:
+            return None
+
+        _session_boot_task = None
+        return asyncio.create_task(done())
+    if _session_boot_task is None or _session_boot_task.done():
+        _session_boot_task = asyncio.create_task(_boot_session_once())
+    return _session_boot_task
+
+
+def _consume_background_error(task: asyncio.Task) -> None:
+    with suppress(asyncio.CancelledError, Exception):
+        task.result()
+
+
+def _schedule_agent_start(side: str, prompt: str) -> None:
+    """Schedule red/blue startup after session bootstrap without blocking REST."""
+    if side in _pending_agent_starts:
+        return
+    _pending_agent_starts.add(side)
+
+    async def run() -> None:
+        try:
+            await _ensure_session_boot_task()
+            if side == "red":
+                await controller.start_red(prompt=prompt)
+            elif side == "blue":
+                await controller.start_blue(prompt=prompt)
+        except (RuntimeError, ValueError) as exc:
+            await event_bus.publish(Event(
+                type="error",
+                side=side,
+                data={"message": str(exc)[:400], "source": f"{side}_start"},
+            ))
+        except Exception as exc:
+            await event_bus.publish(Event(
+                type="error",
+                side=side,
+                data={
+                    "message": f"{type(exc).__name__}: {exc}"[:400],
+                    "source": f"{side}_start",
+                },
+            ))
+        finally:
+            _pending_agent_starts.discard(side)
+
+    task = asyncio.create_task(run())
+    task.add_done_callback(_consume_background_error)
+
+
 @app.post("/api/session/start")
 async def session_start() -> dict[str, Any]:
     global _session_summary
+    if controller.get_status().get("session_active"):
+        return {"ok": True, "status": await get_status()}
     _session_summary = {}
     reset_state()
     try:
-        await controller.start_session()
+        task = _ensure_session_boot_task()
+        task.add_done_callback(_consume_background_error)
         return {"ok": True, "status": await get_status()}
     except (RuntimeError, ValueError) as e:
         return JSONResponse(
@@ -1371,7 +1458,14 @@ async def session_start() -> dict[str, Any]:
 @app.post("/api/session/stop")
 async def session_stop() -> dict[str, Any]:
     global _session_summary
+    global _session_boot_task
     _session_summary = _generate_summary()
+    if _session_boot_task is not None and not _session_boot_task.done():
+        _session_boot_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await _session_boot_task
+    _session_boot_task = None
+    _pending_agent_starts.clear()
     await controller.stop_session()
     await event_bus.publish(Event(
         type="session_end", side="system",
@@ -1385,9 +1479,10 @@ async def session_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/red/start")
 async def red_start() -> dict[str, Any]:
-    if not controller.get_status().get("session_active"):
-        await controller.start_session()
     prompt = _red_manual_prompt()
+    if not controller.get_status().get("session_active"):
+        _schedule_agent_start("red", prompt)
+        return {"ok": True, "status": await get_status()}
     try:
         await controller.start_red(prompt=prompt)
         return {"ok": True, "status": await get_status()}
@@ -1433,12 +1528,11 @@ async def red_stop() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @app.post("/api/blue/start")
 async def blue_start() -> dict[str, Any]:
-    if not controller.get_status().get("session_active"):
-        await controller.start_session()
     prompt = _blue_manual_prompt()
+    if not controller.get_status().get("session_active"):
+        _schedule_agent_start("blue", prompt)
+        return {"ok": True, "status": await get_status()}
     try:
-        # 非阻塞：后台运行蓝方 agent，立即返回。旧代码在此 await 120s，
-        # 把前端请求和 WebSocket 全部拖死（点击“开始”看起来毫无反应）。
         await controller.start_blue(prompt=prompt)
         return {"ok": True, "status": await get_status()}
     except (RuntimeError, ValueError) as e:
@@ -1557,12 +1651,12 @@ def _traffic_analysis_timeout(payload: dict) -> float:
         payload.get("analysis_timeout_sec")
         or payload.get("timeout_sec")
         or os.getenv("CO_TRAFFIC_ANALYSIS_TIMEOUT_SEC")
-        or "90"
+        or "25"
     )
     try:
         timeout = float(raw)
     except (TypeError, ValueError):
-        timeout = 90.0
+        timeout = 25.0
     return max(0.01, timeout)
 
 

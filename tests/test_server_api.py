@@ -353,6 +353,12 @@ def test_traffic_analyze_timeout_yields_fallback_report_and_completes(
         assert section in report["data"]["report"]
 
 
+def test_traffic_analysis_default_timeout_is_browser_safe() -> None:
+    import server as server_mod
+
+    assert server_mod._traffic_analysis_timeout({}) <= 30
+
+
 def test_traffic_analyze_timeout_interrupts_blocking_kb_lookup(
     client: TestClient,
     tmp_path: Path,

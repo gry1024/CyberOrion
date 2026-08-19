@@ -8,6 +8,7 @@ available only under /api/v2/* compatibility endpoints.
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -127,5 +128,42 @@ def test_public_control_routes_delegate_to_ctf_controller(monkeypatch) -> None:
             "blue_patrol_start:12",
             "blue_patrol_stop",
         ]
+
+    asyncio.run(run())
+
+
+def test_red_start_returns_immediately_while_session_bootstraps(monkeypatch) -> None:
+    """Clicking start must not hold the HTTP request on slow arena bootstrap."""
+    import server
+
+    calls: list[str] = []
+
+    class SlowController:
+        def get_status(self) -> dict:
+            return {"session_active": False}
+
+        async def start_session(self) -> None:
+            calls.append("start_session")
+            await asyncio.sleep(0.2)
+            calls.append("session_ready")
+
+        async def start_red(self, prompt: str = "") -> None:
+            calls.append("start_red")
+
+    async def status() -> dict:
+        return {"session_active": False, "session_starting": True}
+
+    monkeypatch.setattr(server, "controller", SlowController())
+    monkeypatch.setattr(server, "get_status", status)
+
+    async def run() -> None:
+        started = time.monotonic()
+        response = await server.red_start()
+        elapsed = time.monotonic() - started
+        await asyncio.sleep(0.25)
+
+        assert response["ok"] is True
+        assert elapsed < 0.05
+        assert calls == ["start_session", "session_ready", "start_red"]
 
     asyncio.run(run())

@@ -298,6 +298,9 @@ export interface ControllerStatus {
   red_paused: boolean
   blue_paused: boolean
   session_active: boolean
+  session_starting?: boolean
+  session_boot_error?: string
+  pending_agent_starts?: string[]
   scenario: string
   round: number
   ledger: Record<string, unknown>

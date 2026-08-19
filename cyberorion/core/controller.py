@@ -76,7 +76,7 @@ class Controller:
 
         try:
             from ..arena_reset import reset_all
-            reset_results = reset_all(selected_scenario)
+            reset_results = await asyncio.to_thread(reset_all, selected_scenario)
             await self.event_bus.publish(Event(
                 type="reset", side="system", data={"results": reset_results},
             ))
@@ -101,7 +101,7 @@ class Controller:
 
         try:
             from ..agent import build_red_agent
-            self._red_agent = build_red_agent()
+            self._red_agent = await asyncio.to_thread(build_red_agent)
         except Exception as exc:
             self._red_agent = None
             await self.event_bus.publish(Event(
@@ -111,18 +111,13 @@ class Controller:
             ))
 
         try:
-            from ..agents.blue_team import build_blue_team, set_event_bus
-            from ..scenarios import load_scenario
-            set_event_bus(self.event_bus)
-            try:
-                scenario_model = load_scenario()
-            except Exception:
-                scenario_model = None
-            self._blue_agent = build_blue_team(scenario_model)
+            self._blue_agent = await asyncio.to_thread(
+                self._build_blue_agent_for_session,
+            )
         except Exception:
             try:
                 from ..agent import build_cyberorion
-                self._blue_agent = build_cyberorion()
+                self._blue_agent = await asyncio.to_thread(build_cyberorion)
             except Exception as exc:
                 self._blue_agent = None
                 await self.event_bus.publish(Event(
@@ -141,6 +136,17 @@ class Controller:
                 "blue_agent": getattr(self._blue_agent, "name", None),
             },
         ))
+
+    def _build_blue_agent_for_session(self) -> Agent:
+        from ..agents.blue_team import build_blue_team, set_event_bus
+        from ..scenarios import load_scenario
+
+        set_event_bus(self.event_bus)
+        try:
+            scenario_model = load_scenario()
+        except Exception:
+            scenario_model = None
+        return build_blue_team(scenario_model)
 
     def set_scenario(self, name: str) -> None:
         """选择下一次会话使用的场景。"""

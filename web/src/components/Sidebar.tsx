@@ -34,6 +34,7 @@ export function Sidebar({
   const [busy, setBusy] = useState(false)
   const [dark, setDark] = useState(() => isDark())
   const active = status.session_active
+  const starting = Boolean(status.session_starting)
 
   const toggleTheme = () => {
     const next = !dark
@@ -47,7 +48,6 @@ export function Sidebar({
     setBusy(true)
     void (async () => {
       try {
-        if (!status.session_active) await api.sessionStart()
         await api.redStart()
         await api.blueStart()
         onView('arena')
@@ -76,11 +76,11 @@ export function Sidebar({
         <button
           className="sidebar-item"
           onClick={newSession}
-          disabled={busy}
-          title={active ? '重新开始对局' : '一键开始：会话 → 红方 → 蓝方'}
+          disabled={busy || starting}
+          title={active ? '重新开始对局' : '一键开始：启动当前靶场并派遣红蓝 Agent'}
         >
           <span style={{ fontSize: 13, lineHeight: 1, color: 'var(--color-accent)' }}>＋</span>
-          {active ? '重新开始对局' : '新建会话'}
+          {busy || starting ? '启动中…' : active ? '重新开始对局' : '新建会话'}
         </button>
         <div className="sidebar-section-title">工作台</div>
         {NAV.map((n) => (

@@ -21,8 +21,10 @@ export function OpsConsole() {
   const [sceneList, setSceneList] = useState<string[]>([])
   const [infoOpen, setInfoOpen] = useState(false)
   const active = status.session_active
+  const starting = Boolean(status.session_starting)
   const redRun = status.red_running
   const blueRun = status.blue_running
+  const pending = new Set(status.pending_agent_starts ?? [])
 
   const wrap = (fn: () => Promise<unknown>, label: string) => {
     setBusy(true)
@@ -32,7 +34,6 @@ export function OpsConsole() {
   const startAll = () => {
     setBusy(true)
     void call(async () => {
-      if (!status.session_active) await api.sessionStart()
       await api.redStart()
       await api.blueStart()
     }, '一键开始').finally(() => setBusy(false))
@@ -51,15 +52,17 @@ export function OpsConsole() {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {!active ? (
-        <button className="btn btn-primary" disabled={busy} onClick={startAll}>一键开始</button>
+        <button className="btn btn-primary" disabled={busy || starting} onClick={startAll}>
+          {starting ? '启动中…' : '一键开始'}
+        </button>
       ) : (
         <button className="btn btn-danger" disabled={busy} onClick={() => wrap(api.sessionStop, '停止会话')}>停止</button>
       )}
       {active && (
         <>
-          <button className="btn" disabled={busy || redRun} onClick={() => wrap(api.redStart, '红方')}>红方 ▶</button>
+          <button className="btn" disabled={busy || redRun || pending.has('red')} onClick={() => wrap(api.redStart, '红方')}>红方 ▶</button>
           <button className="btn" disabled={busy || !redRun} onClick={() => wrap(api.redStop, '红方')}>红方 ■</button>
-          <button className="btn" disabled={busy || blueRun} onClick={() => wrap(api.blueStart, '蓝方')}>蓝方 ▶</button>
+          <button className="btn" disabled={busy || blueRun || pending.has('blue')} onClick={() => wrap(api.blueStart, '蓝方')}>蓝方 ▶</button>
           <button className="btn" disabled={busy || !blueRun} onClick={() => wrap(api.blueStop, '蓝方')}>蓝方 ■</button>
         </>
       )}
@@ -88,6 +91,7 @@ export function OpsConsole() {
       <span className="ml-auto flex items-center gap-2 font-mono text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
         <span className="dot" style={{ background: connected ? 'var(--color-green)' : 'var(--color-red)' }} />
         {connected ? '在线' : '离线'}
+        {starting && <span>启动中</span>}
         {active && <span>回合 #{status.round ?? 0}</span>}
       </span>
       {infoOpen && <ScenarioInfoModal onClose={() => setInfoOpen(false)} />}

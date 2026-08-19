@@ -20,8 +20,10 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
   const { status, refreshStatus, clearSteps } = useArena()
   const [busy, setBusy] = useState(false)
   const active = status.session_active
+  const starting = Boolean(status.session_starting)
   const redRun = status.red_running
   const blueRun = status.blue_running
+  const pending = new Set(status.pending_agent_starts ?? [])
   const targetNames = targets.map((target) => target.name).join(' / ') || '等待靶机信息'
 
   const call = async (fn: () => Promise<unknown>, label: string) => {
@@ -40,7 +42,6 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
     onStart()
     clearSteps('red')
     clearSteps('blue')
-    if (!active) await api.sessionStart()
     await api.redStart()
     await api.blueStart()
   }, '启动当前靶场')
@@ -54,7 +55,9 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
         </div>
       </div>
       {!active ? (
-        <button className="btn btn-primary" disabled={busy || demoPlaying} onClick={startAll}>一键启动当前靶场</button>
+        <button className="btn btn-primary" disabled={busy || demoPlaying || starting} onClick={startAll}>
+          {starting ? '靶场启动中…' : '一键启动当前靶场'}
+        </button>
       ) : (
         <button className="btn btn-danger" disabled={busy} onClick={() => void call(api.sessionStop, '停止会话')}>停止</button>
       )}
@@ -63,14 +66,18 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
       </button>
       {active && (
         <>
-          <button className="btn" disabled={busy || redRun} onClick={() => void call(api.redStart, '红方')}>红方 ▶</button>
+          <button className="btn" disabled={busy || redRun || pending.has('red')} onClick={() => void call(api.redStart, '红方')}>
+            {pending.has('red') ? '红方待启动' : '红方 ▶'}
+          </button>
           <button className="btn" disabled={busy || !redRun} onClick={() => void call(api.redStop, '红方')}>红方 ■</button>
-          <button className="btn" disabled={busy || blueRun} onClick={() => void call(api.blueStart, '蓝方')}>蓝方 ▶</button>
+          <button className="btn" disabled={busy || blueRun || pending.has('blue')} onClick={() => void call(api.blueStart, '蓝方')}>
+            {pending.has('blue') ? '蓝方待启动' : '蓝方 ▶'}
+          </button>
           <button className="btn" disabled={busy || !blueRun} onClick={() => void call(api.blueStop, '蓝方')}>蓝方 ■</button>
         </>
       )}
       <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
-        {demoSession ? `演示日志 ${demoSession}` : active ? '会话运行中' : '未启动'}
+        {status.session_boot_error ? `启动失败：${status.session_boot_error}` : demoSession ? `演示日志 ${demoSession}` : starting ? '靶场启动中' : active ? '会话运行中' : '未启动'}
       </span>
     </div>
   )

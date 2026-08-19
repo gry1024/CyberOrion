@@ -214,7 +214,7 @@ export function TrafficView() {
       },
     )
     abortRef.current = ctrl
-  }, [running, source, csvFile, maxRows, handleSSEEvent])
+  }, [running, demo, source, csvFile, maxRows, handleSSEEvent])
 
   // 清理
   useEffect(() => {
