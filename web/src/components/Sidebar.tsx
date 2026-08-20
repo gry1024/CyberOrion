@@ -6,8 +6,6 @@
 // +has_metrics 三优的 session 抽取事件）。
 import { useState } from 'react'
 import { useArena } from '../arena'
-import { api } from '../api'
-import { pushToast } from '../toasts'
 import { Logo } from './Logo'
 import { isDark } from '../theme'
 import type { ViewKey } from '../types'
@@ -31,10 +29,8 @@ export function Sidebar({
   onView: (v: ViewKey) => void
 }) {
   const { connected, status } = useArena()
-  const [busy, setBusy] = useState(false)
   const [dark, setDark] = useState(() => isDark())
   const active = status.session_active
-  const starting = Boolean(status.session_starting)
 
   const toggleTheme = () => {
     const next = !dark
@@ -43,23 +39,7 @@ export function Sidebar({
     document.documentElement.classList.toggle('dark', next)
   }
 
-  const newSession = () => {
-    if (busy) return
-    setBusy(true)
-    void (async () => {
-      try {
-        await api.redStart()
-        await api.blueStart()
-        onView('arena')
-      } catch (e) {
-        pushToast(`一键开始失败：${e instanceof Error ? e.message : String(e)}`, {
-          title: '作战台',
-        })
-      } finally {
-        setBusy(false)
-      }
-    })()
-  }
+  const newSession = () => onView('arena')
 
   return (
     <aside className="sidebar">
@@ -76,11 +56,10 @@ export function Sidebar({
         <button
           className="sidebar-item"
           onClick={newSession}
-          disabled={busy || starting}
-          title={active ? '重新开始对局' : '一键开始：启动当前靶场并派遣红蓝 Agent'}
+          title={active ? '回到作战舱' : '进入作战舱选择靶场'}
         >
           <span style={{ fontSize: 13, lineHeight: 1, color: 'var(--color-accent)' }}>＋</span>
-          {busy || starting ? '启动中…' : active ? '重新开始对局' : '新建会话'}
+          {active ? '回到对局' : '进入作战台'}
         </button>
         <div className="sidebar-section-title">工作台</div>
         {NAV.map((n) => (

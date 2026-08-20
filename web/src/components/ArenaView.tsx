@@ -7,24 +7,20 @@ import { pushToast } from '../toasts'
 import { ChatStream } from './ChatStream'
 import { DispatchGraph } from './DispatchGraph'
 import { Modal } from './Modal'
+import { RangeCards } from './RangeCards'
 import type { HostStatus, ScenarioDetail, TargetInfo } from '../types'
 
-function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, targets }: {
+function BattleConsole({ onDemo, demoPlaying, demoSession }: {
   onDemo: () => void
-  onStart: () => void
   demoPlaying: boolean
   demoSession: string
-  sceneName: string
-  targets: TargetInfo[]
 }) {
   const { status, refreshStatus, clearSteps } = useArena()
   const [busy, setBusy] = useState(false)
   const active = status.session_active
-  const starting = Boolean(status.session_starting)
   const redRun = status.red_running
   const blueRun = status.blue_running
   const pending = new Set(status.pending_agent_starts ?? [])
-  const targetNames = targets.map((target) => target.name).join(' / ') || '等待靶机信息'
 
   const call = async (fn: () => Promise<unknown>, label: string) => {
     setBusy(true)
@@ -38,29 +34,8 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
     }
   }
 
-  const startAll = () => void call(async () => {
-    onStart()
-    clearSteps('red')
-    clearSteps('blue')
-    await api.redStart()
-    await api.blueStart()
-  }, '启动当前靶场')
-
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="mr-1 min-w-[240px]">
-        <div className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>CURRENT RANGE</div>
-        <div className="truncate text-[11.5px]" style={{ color: 'var(--color-fg-2)' }}>
-          {sceneName} · {targetNames}
-        </div>
-      </div>
-      {!active ? (
-        <button className="btn btn-primary" disabled={busy || demoPlaying || starting} onClick={startAll}>
-          {starting ? '靶场启动中…' : '一键启动当前靶场'}
-        </button>
-      ) : (
-        <button className="btn btn-danger" disabled={busy} onClick={() => void call(api.sessionStop, '停止会话')}>停止</button>
-      )}
       <button className="btn" disabled={busy || active || demoPlaying} onClick={onDemo}>
         {demoPlaying ? '演示中' : '演示'}
       </button>
@@ -77,7 +52,7 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
         </>
       )}
       <span className="ml-auto text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
-        {status.session_boot_error ? `启动失败：${status.session_boot_error}` : demoSession ? `演示日志 ${demoSession}` : starting ? '靶场启动中' : active ? '会话运行中' : '未启动'}
+        {status.session_boot_error ? `启动失败：${status.session_boot_error}` : demoSession ? `演示日志 ${demoSession}` : active ? '会话运行中' : '未启动'}
       </span>
     </div>
   )
@@ -139,7 +114,6 @@ export function ArenaView() {
   const playDemo = () => void demo.play().catch((error) => {
     pushToast(`演示启动失败：${error instanceof Error ? error.message : String(error)}`, { title: '作战台' })
   })
-  const clearDemo = () => demo.clear()
   const shownRedSteps = demo.redSteps.length || demo.playing ? demo.redSteps : redSteps
   const shownBlueSteps = demo.blueSteps.length || demo.playing ? demo.blueSteps : blueSteps
   const targets = scenarioDetail?.targets ?? scenario?.targets ?? []
@@ -158,6 +132,8 @@ export function ArenaView() {
           红 {status.red_running ? '●' : '○'} · 蓝 {status.blue_running ? '●' : '○'}
         </span>
       </div>
+
+      <RangeCards />
 
       <div className="flex flex-none gap-2 overflow-x-auto border-b px-3 py-2" style={{ borderColor: 'var(--color-hairline)' }}>
         {targets.map((target) => (
@@ -200,11 +176,8 @@ export function ArenaView() {
       <div className="flex-none border-t px-3 py-1.5" style={{ borderColor: 'var(--color-hairline)' }}>
         <BattleConsole
           onDemo={playDemo}
-          onStart={clearDemo}
           demoPlaying={demo.playing}
           demoSession={demo.sessionId}
-          sceneName={sceneName}
-          targets={targets}
         />
       </div>
       {scenarioOpen && scenarioDetail && (
