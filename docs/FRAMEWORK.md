@@ -17,11 +17,24 @@ CyberOrion 把一次真实 SOC 对抗搬进本地靶场：
   以 CyberSOCEval 知识问答（malware_analysis + attack_kb）与威胁情报推理
   （threat_intel）为基准。
 
+## 八大模块
+
+| 模块 | 入口 | 作用 |
+| --- | --- | --- |
+| 作战台 | sidebar → 作战台 | 红方 vs 蓝方 SUPER-AGENT 真实对抗，3 靶机 / round-by-round |
+| 流量分析 | sidebar → 流量分析 | 4 阶段流水线：规则检测 → LLM 语义分析 → 攻击链重建 → 报告生成 |
+| 基准测试 | sidebar → 基准测试 | CyberSOCEval 三套件（malware_analysis / attack_kb / threat_intel）双臂对比 |
+| 历史复盘 | sidebar → 历史复盘 | 会话详情：AI 复盘（storyline LLM 生成）+ 战役统计 + 红蓝对垒时间线 + 工具调用 + 报告 |
+| 主机卫士 | sidebar → 主机卫士 | SSH 单主机维护：4 阶段扫描分析（侦察/扫描/研判/加固）+ chat 模式 |
+| 技能模块 | sidebar → 技能模块 | 红蓝隔离的 Skill 目录浏览 |
+| 知识库 | sidebar → 知识库 | ATT&CK v18 = 13 战术的可视化导航与检索 |
+| 框架文档 | sidebar → 框架文档 | 本框架文档（即本文） |
+
 ## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Web 前端 (React19 + Vite)  作战台 / Benchmark / 历史 / 知识图谱  │
+│  Web 前端 (React19 + Vite)  作战台 / 流量分析 / 主机卫士 / 基准 / 历史 / 知识库 / 文档  │
 └──────────────▲───────────────────────────────▲──────────────────┘
         WS /ws │ 实时事件流              REST /api/* │ 控制与查询
 ┌──────────────┴───────────────────────────────┴──────────────────┐
@@ -61,7 +74,7 @@ thinking/tool_call/tool_output 事件实时转播到前端。
 
 ## 工具清单
 
-### 蓝队 13 工具
+### 蓝队 15 工具
 
 | 工具 | 用途 |
 | --- | --- |
@@ -77,6 +90,8 @@ thinking/tool_call/tool_output 事件实时转播到前端。
 | `remediate` | 清除后门：锁用户/删 SSH key/清 cron/删文件/杀进程 |
 | `search_attack_kb` | ATT&CK + 恶意软件知识库语义检索 |
 | `lookup_technique` | 按编号查 ATT&CK 技术（如 T1110 暴力破解） |
+| `analyze_traffic` | 分析网络流量异常：检测端口扫描/DoS/暴力破解/Web攻击/C2 外联（调用 TrafficDetector 规则引擎） |
+| `query_identity` | 按 IP 查询身份情报与关联信息，用于内鬼判定溯源 |
 
 ### 红队 6 工具
 
@@ -113,6 +128,18 @@ nmap_scan 侦察端口/服务
   → 扩大：读敏感文件、提权、找 flag（CVE 场景 submit_evidence 上传战利品）
   → claim_success 申报战果 → 服务端裁判验证 → 计入攻击真值
 ```
+
+### 一次流量分析（四阶段流水线）
+
+```
+数据源（synthetic | cicids csv）
+  → ① 规则阈值检测  rule_engine    纯 Python，处理全量事件 → TrafficAlert + 统计摘要
+  → ② LLM 语义分析  sem_analyst    流式，分析告警摘要 → ATT&CK 映射 + 威胁定性
+  → ③ 攻击链重建    chain_recon    流式，聚合告警 → 攻击者时间线叙事
+  → ④ 报告生成      report_writer  汇总产物 → 结构化 Markdown 分析报告
+```
+
+四阶段复用同一组 SSE 事件契约（`{type, side, data, timestamp}`），前端 ChatStream 直接渲染。
 
 ## 信息隔离与裁判机制
 
@@ -157,6 +184,18 @@ nmap_scan 侦察端口/服务
     恶意、0 误报、响应率 100%。
 - 侦察类动作（nmap_scan）标记 recon，不计入检测率分母（侦察不留日志，
   蓝方物理上无法检测）。
+
+## 流量分析演示
+
+- 「▶ 回放并分析」单按钮同时驱动：左栏流量回放 + 右栏 4 阶段 agent 流式研判。
+- 数据源：synthetic（合成流量，零依赖）或 cicids CSV（CICIDS2017 子集）。
+- 历史复盘有 `traffic_analysis` 类型会话：左栏事件流/告警列表 + 右栏 agent 链，K3 风格报告。
+
+## 主机卫士演示
+
+- 填入 SSH 凭据连接服务器 → 4 阶段自动扫描：系统侦察 / 安全扫描 / 威胁分析 / 加固建议。
+- 也可在 chat 自由提问，agent 按问题执行对应工具。
+- 适用于已上线服务器的合规检查与日常维护，与红蓝对抗解耦。
 
 ## 场景清单
 
