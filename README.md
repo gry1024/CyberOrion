@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/python-3.10+-blue">
   <img src="https://img.shields.io/badge/docker-optional-blue">
   <img src="https://img.shields.io/badge/cai__framework-0.5.10-blue">
-  <img src="https://img.shields.io/badge/tests-317-green">
+  <img src="https://img.shields.io/badge/tests-459-green">
   <img src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
@@ -31,7 +31,7 @@
 | **信息隔离** | 蓝方代码层面接触不到 attacks 表/ground_truth（静态测试看守）；指标引擎把红方真值与蓝方告警做时间-主机-技术三维对齐 |
 | **知识库 RAG** | 7030 条文档（ATT&CK v18 + Malpedia + CVE + 法规 + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
 | **三大基准套件** | malware_analysis（609 题）+ attack_kb 知识访问（+36pt）+ threat_intel 威胁情报（588 题），Jaccard 平均得分主指标，同 seed 同模型双臂对比 |
-| **SOC 大屏前端** | 作战台（双栏流式 + 子代理人像）/ 基准测试（K3 报告风格 + 内嵌题目）/ 历史复盘（红蓝对垒时间线 + AI 故事线全屏）/ 知识图谱 四视图 |
+| **SOC 大屏前端** | 作战台（双栏流式 + 靶机卡片高亮）/ 流量分析（事件流 + 4 阶段 agent 链）/ 主机卫士（4 阶段 SSH 扫描 + chat）/ 基准测试（K3 报告 + 内嵌题目）/ 历史复盘（红蓝对垒时间线 + AI 故事线全屏）/ 知识库 八视图 |
 
 **完整复现教程见 [docs/REPRODUCE.md](docs/REPRODUCE.md)**（环境 / 靶机 / 对局 / Benchmark / 故障排查逐条验证）。
 
@@ -122,7 +122,9 @@ python server.py             # → http://localhost:8000（API 文档在 /docs�
 4. 点 **停止** → 自动产出 `metrics.json`（检测率/响应率/双方分数）+
    `report.md`；
 5. **历史复盘**：选会话 → **红蓝对垒**时间线 + **AI 复盘**（可全屏展开）；
-6. **基准测试**：三套件报告区（K3 风格）+ 内嵌题目 + 技术报告。
+6. **流量分析**：左侧栏点 **「流量分析」** → 选数据源（synthetic / cicids）→ 点 **「▶ 回放并分析」**；左栏事件流/告警，右栏 4 阶段 agent 研判链；
+7. **主机卫士**：左侧栏点 **「主机卫士」** → 填 SSH 凭据连接 → 点 **「开始扫描」** 触发 4 阶段流水线，或在 chat 中提问；
+8. **基准测试**：三套件报告区（K3 风格）+ 内嵌题目 + 技术报告。
 
 **冒烟验证**（真实 LLM + docker 全链路硬断言；无 API key 自动 SKIP，不算失败）：
 
@@ -184,6 +186,7 @@ CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | **AI 接管开发指南**：环境事实、代码地图、铁律、任务食谱、已知坑 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构深挖：模块地图、数据流、团队设计、信息隔离、评分公式、扩展指南 |
+| [docs/FRAMEWORK.md](docs/FRAMEWORK.md) | 框架入门：八大模块概览、蓝队 4 角色矩阵、工具清单、流量分析/主机卫士演示 |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | 基准三套件：模式、跑法、评分、结果史、局限 |
 | [docs/REVIEW.md](docs/REVIEW.md) | 评审/验收指南：测试、冒烟、产物审计、UI 检查单、故障排查 |
 | [docs/CAI_IMPROVEMENTS.md](docs/CAI_IMPROVEMENTS.md) | 基于 CAI 框架做了什么（原生复用 vs 自建对照） |
@@ -192,7 +195,7 @@ CVE-Bench 场景用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 从
 ## Development
 
 ```bash
-<cai-repo>/cai_env/bin/python -m pytest tests/ -q   # 317 项测试，无 docker/key 也能全绿
+<cai-repo>/cai_env/bin/python -m pytest tests/ -q   # 459 项测试，无 docker/key 也能全绿
 ```
 
 `run.py` 是 legacy CLI 入口（旧同步回合制 Arena）：**不启动遥测与评分**——完整体验请用 `server.py`。
