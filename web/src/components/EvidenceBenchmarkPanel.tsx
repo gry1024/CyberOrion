@@ -10,31 +10,31 @@ const ARMS: Array<{ mode: BenchMode; label: string; note: string }> = [
 
 const CYBERGYM_TASKS = [
   {
-    id: 'arvo:1065',
-    project: 'file',
+    id: 'arvo:10841',
+    project: 'librawspeed',
     language: 'C++',
-    repo: 'https://github.com/file/file.git',
-    homepage: 'http://www.darwinsys.com/file/',
-    vulnerability: 'glibc/regex/msan 相关缺陷：regexec 返回 0 但未初始化 pmatch，PoC 目标是复现未初始化内存行为。',
-    level1: 'data/arvo/1065/repo-vul.tar.gz + description.txt',
+    repo: 'https://github.com/darktable-org/rawspeed.git',
+    homepage: 'https://github.com/darktable-org/rawspeed',
+    vulnerability: 'PhaseOneDecompressor 未验证 strips 行号，错误 strips 会被继续处理并破坏图像解码边界。',
+    level1: 'data/arvo/10841/repo-vul.tar.gz + description.txt',
   },
   {
-    id: 'arvo:10400',
-    project: 'graphicsmagick',
+    id: 'arvo:11078',
+    project: 'librawspeed',
     language: 'C++',
-    repo: 'https://foss.heptapod.net/graphicsmagick/graphicsmagick',
-    homepage: 'http://www.graphicsmagick.org/',
-    vulnerability: 'ReadMNGImage() 未校验 mng_LOOP chunk 至少 5 字节，PoC 目标是构造崩溃输入。',
-    level1: 'data/arvo/10400/repo-vul.tar.gz + description.txt',
+    repo: 'https://github.com/darktable-org/rawspeed.git',
+    homepage: 'https://github.com/darktable-org/rawspeed',
+    vulnerability: 'VC5Decompressor 中 Optional tag 状态未正确清理，可能触发断言失败和错误码块解析。',
+    level1: 'data/arvo/11078/repo-vul.tar.gz + description.txt',
   },
   {
-    id: 'arvo:368',
-    project: 'freetype2',
+    id: 'arvo:11429',
+    project: 'librawspeed',
     language: 'C++',
-    repo: 'https://github.com/freetype/freetype2-testing.git',
-    homepage: 'https://www.freetype.org/',
-    vulnerability: 'src/cff/cffload.c 的 cff_blend_doBlend 连续 blend operator 处理错误，realloc 后 parser->stack 指针未更新。',
-    level1: 'data/arvo/368/repo-vul.tar.gz + description.txt',
+    repo: 'https://github.com/darktable-org/rawspeed.git',
+    homepage: 'https://github.com/darktable-org/rawspeed',
+    vulnerability: 'VC5Decompressor::HighPassBand::decode() 输出缓冲区检查存在 off-by-one。',
+    level1: 'data/arvo/11429/repo-vul.tar.gz + description.txt',
   },
 ]
 
@@ -44,7 +44,7 @@ const CYBERGYM_SERIES = [
   { label: 'OpenHands + Claude 3.7', value: 0.119, note: 'CyberGym 论文最佳组合 11.9%' },
   { label: 'Claude Sonnet 4', value: 0.179, note: 'CyberGym 后续结果 17.9%' },
   { label: 'GPT-5 high reasoning', value: 0.22, note: '300-task subset 高推理 22.0%' },
-  { label: 'CyberOrion Agent', value: 0, note: '本页先接入最小 Level-1 子集；待本机任务运行后自动替换' },
+  { label: 'CyberOrion Agent', value: 0, note: '本机 Level-1 子集真实运行结果' },
 ]
 
 function pct(value: number | undefined): string {
@@ -60,8 +60,24 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
     () => runs.filter((run) => run.suite === 'soc_evidence' && run.scores),
     [runs],
   )
+  const cyberGymRuns = useMemo(
+    () => runs.filter((run) => run.suite === 'cybergym_lite' && run.scores),
+    [runs],
+  )
   const latest = (mode: BenchMode) => evidenceRuns.find((run) => run.mode === mode)
+  const latestCyberGym = (mode: BenchMode) =>
+    cyberGymRuns.find((run) => run.mode === mode && run.n === 3) ??
+    cyberGymRuns.find((run) => run.mode === mode)
   const agentRun = latest('agent')
+  const cyberGymAgentRun = latestCyberGym('agent')
+  const cyberGymBaseRun = latestCyberGym('base')
+  const cyberGymAgentScore = cyberGymAgentRun?.scores?.patch_equivalence ?? cyberGymAgentRun?.scores?.avg_score
+  const cyberGymBaseScore = cyberGymBaseRun?.scores?.patch_equivalence ?? cyberGymBaseRun?.scores?.avg_score
+  const cyberGymSeries = CYBERGYM_SERIES.map((row) =>
+    row.label === 'CyberOrion Agent' && cyberGymAgentScore != null
+      ? { ...row, value: cyberGymAgentScore }
+      : row,
+  )
   const [detail, setDetail] = useState<BenchRunDetail | null>(null)
   const [selected, setSelected] = useState(0)
 
@@ -82,7 +98,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
 
   const tasks = ((detail?.results ?? []) as unknown[]).filter(isEvidence)
   const task = tasks[selected]
-  const maxScore = 0.24
+  const maxScore = Math.max(0.24, Math.ceil((cyberGymAgentScore ?? 0) * 10) / 10)
 
   return (
     <section className="evidence-bench" aria-label="SOC 证据评测结果">
@@ -91,7 +107,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
           <span className="evidence-bench__eyebrow">CYBERGYM-LITE / PAPER-STYLE BENCHMARK</span>
           <h2>CyberGym-lite 漏洞修复基准</h2>
         </div>
-        <p>官方 CyberGym 全量约 1,507 个真实漏洞任务、数据体量很大；这里优先接入 Level-1 最小子集，页面展示任务元数据、外部公开成功率和本地 CyberOrion 待运行槽位。</p>
+        <p>官方 CyberGym 全量约 1,507 个真实漏洞任务、数据体量很大；这里优先接入 Level-1 最小子集，页面展示任务元数据、外部公开成功率和本地 CyberOrion 真实运行分数。</p>
       </div>
 
       <div className="cybergym-paper">
@@ -109,7 +125,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
                 </g>
               )
             })}
-            {CYBERGYM_SERIES.map((row, index) => {
+            {cyberGymSeries.map((row, index) => {
               const barWidth = 62
               const x = 104 + index * 96
               const h = row.value === 0 ? 2 : (row.value / maxScore) * 180
@@ -118,7 +134,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
               return (
                 <g key={row.label}>
                   <rect x={x} y={y} width={barWidth} height={h} fill={isCyberOrion ? '#41d6b3' : '#8aa3ff'} opacity={row.value === 0 ? 0.35 : 0.9} />
-                  <text x={x + barWidth / 2} y={y - 7} textAnchor="middle" fill={isCyberOrion ? '#41d6b3' : '#cdd8ff'} fontSize="11">{row.value === 0 ? 'pending' : pct(row.value)}</text>
+                  <text x={x + barWidth / 2} y={y - 7} textAnchor="middle" fill={isCyberOrion ? '#41d6b3' : '#cdd8ff'} fontSize="11">{isCyberOrion && cyberGymAgentScore == null ? 'pending' : pct(row.value)}</text>
                   <text x={x + barWidth / 2} y="224" textAnchor="middle" fill="#9bb0b5" fontSize="9">{row.label.split(' ')[0]}</text>
                   <text x={x + barWidth / 2} y="237" textAnchor="middle" fill="#6f858b" fontSize="9">{row.label.split(' ').slice(1).join(' ')}</text>
                 </g>
@@ -126,7 +142,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
             })}
           </svg>
           <div className="cybergym-chart__caption">
-            公开基线来自 CyberGym 论文/官方页面；CyberOrion 栏不填假分，待本机运行三个 Level-1 任务后写入真实结果。
+            公开基线来自 CyberGym 论文/官方页面；CyberOrion 栏读取本机 logs/bench 真实结果{cyberGymAgentRun ? `：Agent ${pct(cyberGymAgentScore)} · ${cyberGymAgentRun.run_id}` : '，待运行后自动写入'}{cyberGymBaseScore != null ? `；Plain LLM ${pct(cyberGymBaseScore)}` : ''}。
           </div>
         </div>
         <div className="cybergym-tasks">
