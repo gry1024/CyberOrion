@@ -326,8 +326,16 @@ export function HostGuardView() {
   const disconnect = useCallback(async () => {
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null }
     try { await api.hostguardDisconnect() } catch { /* ignore */ }
-    setStatus({ connected: false }); setMessages([]); setStreaming(false)
+    setStatus({ connected: false })
+    // 改进：断开保留 messages 历史，让用户可回顾
   }, [])
+
+  const clearConversation = useCallback(() => {
+    if (streaming) return
+    setMessages([])
+    setInput('')
+    setStreamingIdx(-1)
+  }, [streaming])
 
   if (!status.connected) return <ConnectForm onConnected={checkStatus} />
 
@@ -341,6 +349,7 @@ export function HostGuardView() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={startScan} disabled={streaming} className="rounded bg-blue px-3 py-1 text-[11px] font-medium text-bg transition-colors hover:bg-blue/80 disabled:opacity-40">{streaming ? '扫描中…' : '开始扫描'}</button>
+          <button onClick={clearConversation} disabled={streaming} className="rounded bg-overlay px-3 py-1 text-[11px] text-text-3 transition-colors hover:bg-hover hover:text-text-2 disabled:opacity-40">清空对话</button>
           <button onClick={disconnect} className="rounded bg-overlay px-3 py-1 text-[11px] text-text-3 transition-colors hover:bg-hover hover:text-attacker">断开</button>
         </div>
       </header>

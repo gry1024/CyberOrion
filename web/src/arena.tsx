@@ -201,13 +201,6 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
       // due to proxy/network, but as long as REST returns status we should
       // NOT show "backend offline".
       setConnected(true)
-      // 后端已无活动会话（可能错过了 session_end WS 事件）：清掉残留的
-      // 红蓝流与团队状态，避免终端显示上一会话的子代理输出。
-      if (!st.session_active) {
-        setRedSteps([])
-        setBlueSteps([])
-        setTeam({ active: {}, done: [], dispatched: {} })
-      }
     } catch {
       // REST request failed means backend is offline.
       setConnected(false)
@@ -656,11 +649,8 @@ export function ArenaProvider({ children }: { children: ReactNode }) {
             detail: String(d.session_id ?? ''),
             raw: d,
           })
-          // 会话结束：清空红蓝流与团队状态，终端回到空态——
-          // 不做“保留上一会话结果可见”，避免打开页面看到旧对局输出。
-          setRedSteps([])
-          setBlueSteps([])
-          setTeam({ active: {}, done: [], dispatched: {} })
+          // 改进：点停止后保留红蓝流输出，不自动清屏；下次手动点启动
+          // （startAll / 单边 ▶）时才清。
           void refreshStatus()
           void refreshAlerts()
           break

@@ -66,11 +66,11 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
       </button>
       {active && (
         <>
-          <button className="btn" disabled={busy || redRun || pending.has('red')} onClick={() => void call(api.redStart, '红方')}>
+          <button className="btn" disabled={busy || redRun || pending.has('red')} onClick={() => void call(async () => { clearSteps('red'); await api.redStart() }, '红方')}>
             {pending.has('red') ? '红方待启动' : '红方 ▶'}
           </button>
           <button className="btn" disabled={busy || !redRun} onClick={() => void call(api.redStop, '红方')}>红方 ■</button>
-          <button className="btn" disabled={busy || blueRun || pending.has('blue')} onClick={() => void call(api.blueStart, '蓝方')}>
+          <button className="btn" disabled={busy || blueRun || pending.has('blue')} onClick={() => void call(async () => { clearSteps('blue'); await api.blueStart() }, '蓝方')}>
             {pending.has('blue') ? '蓝方待启动' : '蓝方 ▶'}
           </button>
           <button className="btn" disabled={busy || !blueRun} onClick={() => void call(api.blueStop, '蓝方')}>蓝方 ■</button>
