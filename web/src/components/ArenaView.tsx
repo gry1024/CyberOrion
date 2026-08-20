@@ -7,7 +7,7 @@ import { pushToast } from '../toasts'
 import { ChatStream } from './ChatStream'
 import { DispatchGraph } from './DispatchGraph'
 import { Modal } from './Modal'
-import type { ScenarioDetail, TargetInfo } from '../types'
+import type { HostStatus, ScenarioDetail, TargetInfo } from '../types'
 
 function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, targets }: {
   onDemo: () => void
@@ -83,8 +83,48 @@ function BattleConsole({ onDemo, onStart, demoPlaying, demoSession, sceneName, t
   )
 }
 
+function TargetCard({
+  target,
+  hostState,
+}: {
+  target: TargetInfo
+  hostState: HostStatus | undefined
+}) {
+  // 状态映射：边框色 + 徽章文案 + 圆点。HostState = 'normal'|'alert'|'compromised'|'hardened'
+  const palette = {
+    compromised: { ring: 'border-attacker', dot: 'bg-attacker', badge: '🔥 已失陷' },
+    hardened: { ring: 'border-blue', dot: 'bg-blue', badge: '🛡 已加固' },
+    alert: { ring: 'border-warning', dot: 'bg-warning', badge: '⚠ 告警' },
+  } as const
+  const p = hostState && hostState.state !== 'normal' ? palette[hostState.state] : null
+  const ringColor = p?.ring ?? 'border-hairline'
+  const dotColor = p?.dot ?? 'bg-fg-4/40'
+  const tsText = hostState
+    ? new Date(hostState.ts * 1000).toLocaleTimeString('zh-CN', { hour12: false })
+    : ''
+  return (
+    <div
+      className={`min-w-[190px] border px-2 py-1.5 ${ringColor}`}
+      style={{ background: 'var(--color-bg-2)' }}
+    >
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 flex-none rounded-full ${dotColor}`} />
+        <span className="font-mono text-[11px]" style={{ color: 'var(--color-fg)' }}>{target.name}</span>
+        <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{target.ip || 'localhost'}</span>
+      </div>
+      <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
+        {target.services.map((svc) => `${svc.proto}:${svc.host_port}->${svc.container_port}`).join(' · ')}
+      </div>
+      <div className="mt-1 flex items-center justify-between font-mono text-[9.5px]" style={{ color: 'var(--color-fg-2)' }}>
+        <span>{p?.badge ?? '○ 静默'}</span>
+        {tsText && <span style={{ color: 'var(--color-fg-4)' }}>{tsText}</span>}
+      </div>
+    </div>
+  )
+}
+
 export function ArenaView() {
-  const { status, scenario, redSteps, blueSteps } = useArena()
+  const { status, scenario, redSteps, blueSteps, hosts } = useArena()
   const demo = useDemoReplay('red_adversary')
   const [scenarioOpen, setScenarioOpen] = useState(false)
   const [scenarioDetail, setScenarioDetail] = useState<ScenarioDetail | null>(null)
@@ -123,17 +163,11 @@ export function ArenaView() {
         {targets.map((target) => (
           <button
             key={target.name}
-            className="min-w-[190px] border px-2 py-1 text-left"
-            style={{ borderColor: 'var(--color-hairline)', background: 'var(--color-bg-2)' }}
+            type="button"
+            className="text-left"
             onClick={() => setScenarioOpen(true)}
           >
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[11px]" style={{ color: 'var(--color-fg)' }}>{target.name}</span>
-              <span className="font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>{target.ip || 'localhost'}</span>
-            </div>
-            <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
-              {target.services.map((svc) => `${svc.proto}:${svc.host_port}->${svc.container_port}`).join(' · ')}
-            </div>
+            <TargetCard target={target} hostState={hosts[target.name]} />
           </button>
         ))}
       </div>
