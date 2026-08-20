@@ -131,7 +131,7 @@
 
 **`ArenaView.tsx`**：
 - 第 41-47 行 `startAll`：**保留** `clearSteps('red')` / `clearSteps('blue')` —— 这是用户明确点启动的唯一入口
-- 第 69-76 行红方 ▶ / 蓝方 ▶ 按钮：**保留**对 `clearSteps` 的现有调用路径（如果有）或在 onClick 中补 `clearSteps('red')` / `clearSteps('blue')`
+- 第 69-76 行红方 ▶ / 蓝方 ▶ 按钮：当前 onClick 仅 `api.redStart/blueStart`，**需要在 onClick 中先调** `clearSteps('red')` / `clearSteps('blue')`，再 `api.redStart` / `api.blueStart`，确保单边重启也是「先清后启」语义
 
 **`TrafficView.tsx`**：
 - 第 186-217 行 `handleStart`：**保留**所有清空（已是「点开始时清」语义，且点停止只是 `abort` + `setRunning(false)`，不调任何 `setXxx([])`）
@@ -141,7 +141,7 @@
 - 第 326-330 行 `disconnect`：**改为**仅 `if (abortRef.current) abort` + `setStatus({connected:false})`，**删除** `setMessages([])` 与 `setStreaming(false)`（断开保留对话历史）
 - 第 303-311 行 `startScan`：**不调**清空，扫描结果累积到 `messages` 末尾
 - 第 313-324 行 `sendMessage`：**不调**清空，对话自然累积
-- 新增「清空对话」按钮（断开旁），让用户可手动清
+- 新增「清空对话」按钮（位置：header 上「断开」按钮**左侧**，文案「清空对话」），点击调 `setMessages([])` + `setStreaming(false)` + `setInput('')`，让用户可手动清
 
 ### 行为差异表
 
