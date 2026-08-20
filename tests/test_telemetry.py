@@ -164,6 +164,18 @@ class TestAuthLogParser:
         assert "3" in e3["summary"]
         assert "172.29.0.1" in e3["summary"]
 
+    def test_brute_force_suppresses_repeated_window_events(self):
+        p = AuthLogParser(host="weak_ssh", source="auth")
+        line = ("Jul 25 10:00:0{} sshd[12]: Invalid user user{} "
+                "from 172.29.0.1 port 5100{}")
+        assert p.feed(line.format(1, 1, 1), ts=1000.0) is not None
+        assert p.feed(line.format(2, 2, 2), ts=1010.0) is not None
+        high = p.feed(line.format(3, 3, 3), ts=1020.0)
+        assert high is not None
+        assert high["severity"] == "high"
+        assert p.feed(line.format(4, 4, 4), ts=1030.0) is None
+        assert p.feed(line.format(5, 5, 5), ts=1040.0) is None
+
     def test_brute_force_window_expires(self):
         p = AuthLogParser(host="weak_ssh", source="auth")
         line = ("Jul 25 10:00:00 sshd[12]: Failed password for root "

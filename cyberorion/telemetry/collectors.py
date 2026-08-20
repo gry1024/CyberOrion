@@ -62,8 +62,9 @@ class AuthLogParser:
     """Stateful parser for sshd auth logs.
 
     - ``Failed password`` / ``Invalid user`` -> T1110 (brute force),
-      severity ``medium``; >=3 failures from the same IP within 60s ->
-      severity ``high`` with an aggregated summary (count + IP).
+      severity ``medium``; the 3rd failure from the same IP within 60s ->
+      severity ``high`` with an aggregated summary (count + IP). Later
+      failures inside the same window are suppressed to avoid alert floods.
     - ``Accepted password`` -> T1078 (valid accounts), severity ``medium``.
     """
 
@@ -90,12 +91,14 @@ class AuthLogParser:
             user_m = _RE_FAILED_USER.search(text)
             user = user_m.group(1) if user_m else "?"
             count = self._record_failure(ip, ts)
-            if count >= self.BRUTE_THRESHOLD:
+            if count == self.BRUTE_THRESHOLD:
                 return self._event(
                     ts, "T1110", "high",
                     f"SSH brute force: {count} failed logins from {ip} "
                     f"within {int(self.WINDOW_S)}s (user={user})",
                     text)
+            if count > self.BRUTE_THRESHOLD:
+                return None
             return self._event(
                 ts, "T1110", "medium",
                 f"SSH failed login: user={user} from {ip}", text)
@@ -104,12 +107,14 @@ class AuthLogParser:
             user_m = _RE_INVALID_USER.search(text)
             user = user_m.group(1) if user_m else "?"
             count = self._record_failure(ip, ts)
-            if count >= self.BRUTE_THRESHOLD:
+            if count == self.BRUTE_THRESHOLD:
                 return self._event(
                     ts, "T1110", "high",
                     f"SSH brute force: {count} failed logins from {ip} "
                     f"within {int(self.WINDOW_S)}s (invalid user={user})",
                     text)
+            if count > self.BRUTE_THRESHOLD:
+                return None
             return self._event(
                 ts, "T1110", "medium",
                 f"SSH invalid user: {user} from {ip}", text)
