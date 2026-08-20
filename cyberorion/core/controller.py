@@ -640,16 +640,43 @@ class Controller:
                     since=None,
                     technique=None,
                     text=None,
-                    limit=20,
+                    limit=50,
                 )
             except Exception:
                 rows = []
         output_lines = []
+        # Auto-escalate medium/high-severity events into alerts so the blue
+        # team gets credit for detection in scripted mode (the actual agent
+        # does this via tools/blue/alerts.py:report_finding, but for the
+        # deterministic fallback we synthesize the same rows from telemetry).
+        SEVERITIES_ESCALATE = {"medium", "high", "critical"}
+        alerted_ids: set[int] = set()
+        for row in rows:
+            sev = (row.get("severity") or "").lower()
+            if sev not in SEVERITIES_ESCALATE:
+                continue
+            verdict = "malicious" if sev in {"high", "critical"} else "suspicious"
+            try:
+                alert_id = await asyncio.to_thread(
+                    self.store.insert_alert,
+                    host=row.get("host") or "weak_ssh",
+                    technique=row.get("technique") or "",
+                    verdict=verdict,
+                    confidence=0.85 if sev == "high" else (0.95 if sev == "critical" else 0.6),
+                    evidence=str(row.get("summary") or row.get("raw") or "")[:300],
+                    source_tool="scripted_soc_blue",
+                )
+                if alert_id:
+                    alerted_ids.add(alert_id)
+            except Exception:
+                pass
         for row in rows[:10]:
             output_lines.append(
                 f"{row.get('host')} {row.get('severity')} {row.get('technique') or '-'} {row.get('summary')}"
             )
         query_output = "\n".join(output_lines) if output_lines else "当前未检索到认证遥测；保留 SSH 弱口令验证结论，建议补齐 /var/log/sshd.log 采集。"
+        if alerted_ids:
+            query_output += f"\n[已上报告警] 共 {len(alerted_ids)} 条 (source=scripted_soc_blue)"
         await self._publish_step("blue", "tool_call", {"agent": "watcher", "tool": "query_logs", "args": "host=weak_ssh"})
         await self._publish_step("blue", "tool_output", {"agent": "watcher", "tool": "query_logs", "output": query_output})
         tool_calls.append({"tool": "query_logs", "result": query_output})

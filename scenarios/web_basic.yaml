@@ -36,7 +36,7 @@ targets:
         host_port: 22222
         proto: ssh
     logs:
-      auth: /var/log/sshd.log
+      auth: /var/log/auth.log
     ground_truth:
       # From weak_ssh/Dockerfile (chpasswd).
       creds:

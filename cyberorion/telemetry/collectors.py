@@ -469,6 +469,21 @@ class TelemetryCollector:
             except Exception as exc:  # docker binary missing, etc.
                 if ready is not None:
                     ready.set()
+                # Fallback (RUN BEFORE RETRY SLEEP): non-container deployment
+                # has no docker; if the configured path is a real host file,
+                # tail it directly so weak_ssh auth events still reach telemetry.
+                try:
+                    import os as _os
+                    if _os.path.isfile(path) and _os.access(path, _os.R_OK):
+                        log.info(
+                            "telemetry: using host-tail fallback for %s:%s",
+                            host, path)
+                        offset = await self._tail_host_file(
+                            kind, parser, host, log_name, path, offset)
+                        continue
+                except Exception as fb_exc:
+                    log.warning(
+                        "telemetry: host-tail fallback failed: %s", fb_exc)
                 if not warned:
                     log.warning("telemetry: cannot tail %s:%s (%s); retrying",
                                 container, path, exc)
@@ -778,3 +793,60 @@ class TelemetryCollector:
             await asyncio.wait_for(self._stopped.wait(), timeout=seconds)
         except asyncio.TimeoutError:
             pass
+
+    async def _tail_host_file(
+        self, kind, parser, host, log_name, path, offset,
+    ):
+        """Tail ``path`` on the host (no docker). Mirrors the docker variant:
+        tracks line offset across reconnects, parses each line, sleeps on
+        ``RETRY_INTERVAL`` when the file is gone. Returns updated offset.
+        """
+        import os as _os
+        generic_count = 0
+        warned = False
+        while not self._stopped.is_set():
+            if not (_os.path.isfile(path) and _os.access(path, _os.R_OK)):
+                if not warned:
+                    log.warning("telemetry: host file gone: %s", path)
+                    warned = True
+                await self._sleep(RETRY_INTERVAL)
+                continue
+            warned = False
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "tail", "-n", f"+{offset + 1}", "-F", path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except Exception as exc:
+                log.warning("telemetry: cannot host-tail %s: %s", path, exc)
+                await self._sleep(RETRY_INTERVAL)
+                continue
+            try:
+                assert proc.stdout is not None
+                while not self._stopped.is_set():
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    text = line.decode('utf-8', 'replace').rstrip('\n')
+                    offset += 1
+                    generic_count = await self._handle_line(
+                        kind, parser, host, log_name, text, generic_count)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("telemetry: host-tail %s error: %s", path, exc)
+            finally:
+                if proc is not None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        await proc.wait()
+                    except Exception:
+                        pass
+            if not self._stopped.is_set():
+                await self._sleep(RETRY_INTERVAL)
+        return offset
+
