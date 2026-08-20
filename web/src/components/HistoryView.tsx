@@ -538,18 +538,8 @@ function SessionDetailView({ session }: { session: SessionInfo }) {
 }
 
 // ---------------------------------------------------------------------------
-// session list helpers (grouped by type)
+// session list helpers
 // ---------------------------------------------------------------------------
-
-function SessionGroupHeader({ title, count }: { title: string; count: number }) {
-  return (
-    <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-      <span className="text-[9px] uppercase tracking-[0.15em] text-text-3">{title}</span>
-      <span className="text-[9px] tabular-nums text-text-4">{count}</span>
-      <span className="ml-2 h-px flex-1 bg-hairline" />
-    </div>
-  )
-}
 
 function SessionListItem({
   s,
@@ -649,8 +639,8 @@ export function HistoryView() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* left: session list */}
       <FadeIn className="flex w-[280px] flex-none flex-col overflow-hidden border-r border-hairline">
-      <aside className="panel flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-        <header className="panel-title">
+      <aside className="panel flex h-full w-full flex-col overflow-hidden">
+        <header className="panel-title flex-none">
           <span>历史会话</span>
           <button
             onClick={load}
@@ -659,38 +649,53 @@ export function HistoryView() {
             刷新
           </button>
         </header>
-        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
-          {sessions.length === 0 && (
-            <div className="py-16 text-center text-[11px] text-text-3">
-              暂无历史会话
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* 上半：红蓝对抗 */}
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex flex-none items-center gap-2 px-3 pt-2 pb-1">
+              <span className="text-[9px] uppercase tracking-[0.15em] text-text-3">红蓝对抗</span>
+              <span className="text-[9px] tabular-nums text-text-4">{arenaSessions.length}</span>
+              <span className="ml-2 h-px flex-1 bg-hairline" />
             </div>
-          )}
-          {arenaSessions.length > 0 && (
-            <>
-              <SessionGroupHeader title="作战台" count={arenaSessions.length} />
-              {arenaSessions.map((s) => (
-                <SessionListItem
-                  key={s.id}
-                  s={s}
-                  selected={selected?.id === s.id}
-                  onSelect={setSelected}
-                />
-              ))}
-            </>
-          )}
-          {trafficSessions.length > 0 && (
-            <>
-              <SessionGroupHeader title="流量分析" count={trafficSessions.length} />
-              {trafficSessions.map((s) => (
-                <SessionListItem
-                  key={s.id}
-                  s={s}
-                  selected={selected?.id === s.id}
-                  onSelect={setSelected}
-                />
-              ))}
-            </>
-          )}
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {arenaSessions.length === 0 ? (
+                <div className="py-8 text-center text-[11px] text-text-3">暂无红蓝对抗会话</div>
+              ) : (
+                arenaSessions.map((s) => (
+                  <SessionListItem
+                    key={s.id}
+                    s={s}
+                    selected={selected?.id === s.id}
+                    onSelect={setSelected}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+          {/* 分隔 */}
+          <div className="my-1 h-px flex-none bg-hairline" />
+          {/* 下半：流量分析 */}
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex flex-none items-center gap-2 px-3 pt-2 pb-1">
+              <span className="text-[9px] uppercase tracking-[0.15em] text-text-3">流量分析</span>
+              <span className="text-[9px] tabular-nums text-text-4">{trafficSessions.length}</span>
+              <span className="ml-2 h-px flex-1 bg-hairline" />
+            </div>
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {trafficSessions.length === 0 ? (
+                <div className="py-8 text-center text-[11px] text-text-3">暂无流量分析会话</div>
+              ) : (
+                trafficSessions.map((s) => (
+                  <SessionListItem
+                    key={s.id}
+                    s={s}
+                    selected={selected?.id === s.id}
+                    onSelect={setSelected}
+                  />
+                ))
+              )}
+            </div>
+          </section>
         </div>
       </aside>
       </FadeIn>
