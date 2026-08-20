@@ -48,6 +48,11 @@
 4. 蓝方团队用检测工具查询 `events`/`snapshots`（代码层面接触不到 `attacks`），`report_finding` 写 `alerts` 表，处置工具（`block_ip`/`harden_service`）埋点 `source='response'` 防御事件；
 5. `stop_session` → `finalize_session`：`compute_metrics` 对齐 attacks × alerts 出指标 → `generate_judge_report` 出报告 → 落盘 `metrics.json` + `report.md` → 发 `score` 事件。
 
+除上述红蓝对抗主线外，还有两条**独立流水线**（不与红蓝 agent 共享上下文/遥测 store）：
+
+- **流量分析**（`traffic/`，见 §10）：数据源（synthetic | cicids csv）→ 规则引擎检测 → 3 个 LLM agent 分析 → SSE 流，前端 `/api/traffic/analyze/stream` 消费；
+- **主机卫士**（`hostguard/`，见 §11）：SSH 连接单台主机 → 4 阶段扫描分析 → SSE 流，前端 `/api/hostguard/scan/stream` 消费。
+
 ---
 
 ## 2. 模块地图（真实文件清单）
@@ -62,7 +67,7 @@ cyberorion/                          # 仓库根
 ├── cyberorion/                      # 源码包
 │   ├── agents/
 │   │   ├── blue_team.py             蓝队 SUPER-AGENT 团队（指挥官 + dispatch_task）
-│   │   ├── blue.py                  旧单体蓝队（13 业务工具 + Skill，兼容/回退）
+│   │   ├── blue.py                  旧单体蓝队（15 业务工具 + Skill，兼容/回退）
 │   │   └── red.py                   红方自主渗透者（6 业务工具 + Skill + 草稿板）
 │   ├── core/
 │   │   ├── controller_v2.py         V2 会话生命周期 + 红蓝 agent loop 控制
@@ -91,9 +96,17 @@ cyberorion/                          # 仓库根
 │   ├── scenarios/loader.py          YAML → 校验过的 dataclass（Scenario/Target/...）
 │   ├── tools/
 │   │   ├── _common.py               场景配置常量（CO_* 覆盖）、TOOL_CALL_LOG、docker 辅助
-│   │   ├── blue/                    query/network/processes/files/alerts/respond/kb
+│   │   ├── blue/                    alerts/query/network/processes/files/respond/kb/traffic/skills
 │   │   ├── red/                     recon(nmap)/ssh/web(http)/claim(裁判)
 │   │   └── dvwa.py                  DVWA 安全审计/加固工具（旧单体蓝队使用）
+│   ├── traffic/                     流量分析流水线（4 阶段 Agent + 规则引擎，见 §10）
+│   │   ├── pipeline.py              run_traffic_analysis_pipeline：SSE 流
+│   │   ├── detector.py              TrafficDetector 规则引擎（端口扫描/爆破/横向）
+│   │   ├── feeder.py / synthetic.py / loaders.py    UnifiedEvent 数据源与加载
+│   ├── hostguard/                   主机卫士流水线（4 阶段 SSH 扫描，见 §11）
+│   │   ├── pipeline.py              run_hostguard_pipeline：SSE 流
+│   │   ├── ssh_client.py            SSHClient：paramiko 封装 + 输出流
+│   │   └── key_store.py             内存临时密钥存储（不落盘）
 │   ├── arena_reset.py               靶场重置（恢复易受攻击基线，§7）
 │   ├── agent.py                     兼容层：旧 Arena 的 agent 构建/提示词入口
 │   ├── arena.py                     旧同步回合制 Arena（run.py 使用）
@@ -103,7 +116,7 @@ cyberorion/                          # 仓库根
 │   └── viz.py                       终端可视化 + HTML 回放
 ├── web/                             React 19 + Vite + Tailwind v4 前端
 ├── skills/{red,blue}/*/SKILL.md     红蓝隔离的渐进式 Skill 内容
-├── tests/                           pytest 316 项（16 个文件，见 REVIEW.md）
+├── tests/                           pytest 459 项（见 REVIEW.md）
 └── scripts/                         e2e_smoke / e2e_fight / run_bench / gen_cve_scenario /
                                      cve_target.sh / reset_targets.sh / smoke_* / run_cyborg
 ```
@@ -304,7 +317,37 @@ FastAPI 单实例：`EventBus` + `SessionState` + `ControllerV2`；`/api/*` 与 
 
 ---
 
-## 10. 代码风格原则（实际遵循的约定）
+## 10. 流量分析流水线（cyberorion/traffic/）
+
+四阶段流水线，每阶段一个 agent，SSE 流式输出思考链/工具调用/报告。设计动机：规则引擎（纯 Python）先处理全量 `UnifiedEvent` 生成告警摘要（<2K tokens），再交给 LLM 做语义分析与攻击链重建，避免原始流量直接塞进 LLM 上下文。
+
+| 阶段 | Agent | 实现 | 职责 |
+| --- | --- | --- | --- |
+| ① 规则阈值检测 | rule_engine | `TrafficDetector`（纯 Python） | 全量事件 → TrafficAlert + 统计摘要 |
+| ② LLM 语义分析 | sem_analyst | LLM 流式 | 分析告警摘要 → ATT&CK 映射 + 威胁定性 |
+| ③ 攻击链重建 | chain_recon | LLM 流式 | 聚合告警 → 攻击者时间线叙事 |
+| ④ 报告生成 | report_writer | LLM 流式 | 汇总产物 → 结构化 Markdown 分析报告 |
+
+输出是 `AsyncIterator[Event]`，与 `EventBus.Event` 同构（`{type, side, data, timestamp}`），`side='blue'`，`data.agent` 对应 TRAFFIC_ROLES 的 key。前端复用 ChatStream 组件渲染。
+
+数据源：`synthetic`（默认，零依赖合成流量）/ `cicids` csv（CICIDS2017 子集，按 `max_rows` 截断）。入口：`POST /api/traffic/analyze/stream` → `server.py` → `run_traffic_analysis_pipeline`。
+
+## 11. 主机卫士流水线（cyberorion/hostguard/）
+
+四阶段 SSH 扫描流水线，SSE 事件格式与 §10 完全同构：
+
+| 阶段 | Agent | 职责 |
+| --- | --- | --- |
+| ① 系统侦察 | recon_agent | 系统信息/网络/端口/服务概览 |
+| ② 安全扫描 | scanner_agent | 进程/用户/日志/文件权限审计 |
+| ③ 威胁分析 | analyst_agent | ATT&CK 映射 + 风险评估 |
+| ④ 加固建议 | hardener_agent | 可执行加固方案 |
+
+用户也可在 chat 中提问，agent 根据问题执行对应工具。实现：`pipeline.py` + `ssh_client.py`（paramiko 封装）+ `key_store.py`（临时密钥存储，不落盘）。入口：`POST /api/hostguard/scan/stream` 与 `/api/hostguard/chat/stream`；连接状态 `GET /api/hostguard/status`。
+
+---
+
+## 12. 代码风格原则（实际遵循的约定）
 
 **高内聚低耦合——每个模块单一职责**：
 
@@ -324,33 +367,33 @@ FastAPI 单实例：`EventBus` + `SessionState` + `ControllerV2`；`/api/*` 与 
 
 ---
 
-## 11. 扩展指南
+## 13. 扩展指南
 
-### 11.1 新增一个蓝队工具
+### 13.1 新增一个蓝队工具
 
 1. 在 `cyberorion/tools/blue/` 选合适模块（或新建），写 `@function_tool` 函数，遵守：store 经 `get_store()` 获取 + `_require_store()` 守卫、输出 `_clip`、失败返回字符串；
 2. 在 `tools/blue/__init__.py` 导出；
 3. 在 `agents/blue_team.py::_ROLE_SPECS` 把工具加进目标角色的 `tools` 列表（同步更新该角色 prompt 的工具说明）；
 4. 加测试（参照 `tests/test_blue_tools.py`，store 用临时目录实例化）。
 
-### 11.2 新增一个团队角色
+### 13.2 新增一个团队角色
 
 在 `_ROLE_SPECS` 加一条：`{"role_key": {"title": "中文名", "tools": [...], "prompt": "职责 SOP" + _CONCLUSION_BLOCK}}`；在指挥官的 `_ORCHESTRATOR_TEMPLATE` 团队清单与 SOP 里登记该角色；`dispatch_task` 会自动识别（非法 role 返回可选清单）。加 `tests/test_blue_team.py` 风格测试。
 
-### 11.3 新增一个场景
+### 13.3 新增一个场景
 
 1. 写 `scenarios/<name>.yaml`：`network.subnet` + `targets.<name>`（container/ip/services/logs/ground_truth，可选 `mode`/`briefing`/`grader`）；
 2. `docker-compose.yml` 加对应服务（重靶机挂 profile）；
 3. `CO_SCENARIO=<name> python server.py` 或 UI 下拉框选择（`GET /api/scenarios` 自动列出全部 yaml）；
 4. 若是 CVE-Bench 场景：用 `scripts/gen_cve_scenario.py <CVE-ID> --variant one_day` 自动生成（读 CVE-Bench 的 metadata/NVD/compose，写 `mode: cve` + grader 块）。
 
-### 11.4 新增一个基准套件
+### 13.4 新增一个基准套件
 
 在 `cyberorion/bench/` 新建模块（参照 `cybersoceval.py`）：实现 `run_bench(...) -> dict`（含 `run_id/scores/results` 并落盘 `logs/bench/`）与 `list_runs(...)`；在 server.py 的 bench 端点里按套件名分发（当前端点硬编码 cybersoceval，需要加一个路由层）。套件内新模式：往 `MODES` 加元组项并在 `run_bench` 里实现分支即可（UI 运行卡片目前只暴露 base/rag，legacy 模式走 CLI/API）。
 
 ---
 
-## 12. 配置（环境变量）
+## 14. 配置（环境变量）
 
 `.env` 放 CAI 仓库根（`<cai-repo>/.env`），`server.py`/`run.py`/e2e 脚本启动时自动加载（`setdefault` 语义）。模板 [.env.example](../.env.example)。
 
