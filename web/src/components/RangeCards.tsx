@@ -1,5 +1,6 @@
 // RangeCards — 作战台顶部三张靶场卡片(web_basic / web_plus / ad_domain)。
-// 点卡片主体 = 仅切换场景;卡片内「启动」/「停止」按钮 = 显式控制红蓝。
+// 仅负责场景选择；红蓝启停统一由 OpsConsole 控制，避免「一键启动」与
+// 「一任务一靶机环境」语义冲突。
 import { useState } from 'react'
 import { useArena } from '../arena'
 import { api } from '../api'
@@ -29,12 +30,8 @@ const RANGES: RangeSpec[] = [
   },
 ]
 
-function rangeById(id: string): RangeSpec | undefined {
-  return RANGES.find((r) => r.id === id)
-}
-
 export function RangeCards() {
-  const { status, scenario, refreshStatus, refreshScenario, clearSteps } = useArena()
+  const { status, scenario, refreshStatus, refreshScenario } = useArena()
   const [busy, setBusy] = useState<string | null>(null)
   const active = status.session_active
   const currentId = scenario?.name ?? status.scenario ?? ''
@@ -56,43 +53,6 @@ export function RangeCards() {
     }
   }
 
-  const start = async (id: string) => {
-    if (busy) return
-    setBusy(id)
-    try {
-      if (id !== currentId) {
-        await api.selectScenario(id)
-        await refreshScenario()
-      }
-      clearSteps('red')
-      clearSteps('blue')
-      await api.redStart()
-      await api.blueStart()
-      await refreshStatus()
-    } catch (e) {
-      pushToast(`启动靶场失败：${e instanceof Error ? e.message : String(e)}`, {
-        title: '作战台',
-      })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const stop = async () => {
-    if (busy) return
-    setBusy('stop')
-    try {
-      await api.sessionStop()
-      await refreshStatus()
-    } catch (e) {
-      pushToast(`停止会话失败：${e instanceof Error ? e.message : String(e)}`, {
-        title: '作战台',
-      })
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <div
       className="flex flex-none gap-2 overflow-x-auto border-b px-3 py-2"
@@ -101,7 +61,6 @@ export function RangeCards() {
       {RANGES.map((r) => {
         const isCurrent = r.id === currentId
         const isRunning = isCurrent && active
-        const isThisBusy = busy === r.id || (busy === 'stop' && isCurrent)
         const ringStyle = isCurrent
           ? { borderColor: 'var(--color-accent)', background: 'var(--color-bg-2)' }
           : { borderColor: 'var(--color-hairline)', background: 'var(--color-bg-2)' }
@@ -125,7 +84,7 @@ export function RangeCards() {
             }}
             className="min-w-[200px] cursor-pointer border px-3 py-2 transition-colors"
             style={ringStyle}
-            title={`选中 ${r.name}(不启动)`}
+            title={`选中 ${r.name}（不启动；红蓝启停请用 OpsConsole）`}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-[12.5px] font-semibold" style={{ color: 'var(--color-fg)' }}>
@@ -151,42 +110,11 @@ export function RangeCards() {
             >
               {r.tagline}
             </div>
-            <div className="mt-2 flex items-center gap-1.5">
-              {!isRunning ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={Boolean(isThisBusy) || Boolean(status.session_starting)}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void start(r.id)
-                  }}
-                  style={{ height: 22, fontSize: 11 }}
-                >
-                  {status.session_starting && isCurrent ? '启动中…' : '启动'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={Boolean(isThisBusy)}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void stop()
-                  }}
-                  style={{ height: 22, fontSize: 11 }}
-                >
-                  停止
-                </button>
-              )}
-              {isCurrent && (
-                <span
-                  className="font-mono text-[10px]"
-                  style={{ color: 'var(--color-fg-4)' }}
-                >
-                  {rangeById(currentId)?.name ?? currentId}
-                </span>
-              )}
+            <div
+              className="mt-1 truncate font-mono text-[10px]"
+              style={{ color: 'var(--color-fg-4)' }}
+            >
+              {isCurrent ? '点击重新选择或到 OpsConsole 启红蓝' : '点击选中'}
             </div>
           </div>
         )
