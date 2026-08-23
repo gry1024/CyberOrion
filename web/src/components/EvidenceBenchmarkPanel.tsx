@@ -38,13 +38,19 @@ const CYBERGYM_TASKS = [
   },
 ]
 
+// 5 条外部基线均为前端硬编码字符串，仓库内未保留引用出处（无 DOI / 表格号 / 论文节）。
+// 在 CyberGym 原文核对之前，统一标记为 unverified，不得当作已核实数字使用。
 const CYBERGYM_SERIES = [
-  { label: 'SWE-agent / specialist', value: 0.02, note: '论文报告：专用 SWE 模型 ≤2%' },
-  { label: 'GPT-4.1', value: 0.087, note: '6 次 rollout 平均 8.7±0.7%' },
-  { label: 'OpenHands + Claude 3.7', value: 0.119, note: 'CyberGym 论文最佳组合 11.9%' },
-  { label: 'Claude Sonnet 4', value: 0.179, note: 'CyberGym 后续结果 17.9%' },
-  { label: 'GPT-5 high reasoning', value: 0.22, note: '300-task subset 高推理 22.0%' },
-  { label: 'CyberOrion Agent', value: 0, note: '本机 Level-1 子集真实运行结果' },
+  { label: 'SWE-agent / specialist', value: 0.02,  note: '未独立核对的二手数字', unverified: true },
+  { label: 'GPT-4.1',                value: 0.087, note: '未独立核对的二手数字', unverified: true },
+  { label: 'OpenHands + Claude 3.7', value: 0.119, note: '未独立核对的二手数字', unverified: true },
+  { label: 'Claude Sonnet 4',        value: 0.179, note: '未独立核对的二手数字', unverified: true },
+  { label: 'GPT-5 high reasoning',   value: 0.22,  note: '未独立核对的二手数字', unverified: true },
+  // 下面两行是真实落盘值（cyberGymSeries 处动态注入）。
+  // 全部基于同一 n=3 子集（librawspeed · level1-small），仅供演示，
+  // 统计上不足以判定 Agent 是否领先 Plain LLM。
+  { label: 'CyberOrion Plain LLM',   value: 0, note: '本机 logs/bench 真实结果（n=3 裸 LLM，深求）', local: true, baseline: true },
+  { label: 'CyberOrion Agent',       value: 0, note: '本机 logs/bench 真实结果（n=3，深求）', local: true },
 ]
 
 function pct(value: number | undefined): string {
@@ -73,11 +79,15 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
   const cyberGymBaseRun = latestCyberGym('base')
   const cyberGymAgentScore = cyberGymAgentRun?.scores?.patch_equivalence ?? cyberGymAgentRun?.scores?.avg_score
   const cyberGymBaseScore = cyberGymBaseRun?.scores?.patch_equivalence ?? cyberGymBaseRun?.scores?.avg_score
-  const cyberGymSeries = CYBERGYM_SERIES.map((row) =>
-    row.label === 'CyberOrion Agent' && cyberGymAgentScore != null
-      ? { ...row, value: cyberGymAgentScore }
-      : row,
-  )
+  const cyberGymSeries = CYBERGYM_SERIES.map((row) => {
+    if (row.baseline && cyberGymBaseScore != null) {
+      return { ...row, value: cyberGymBaseScore }
+    }
+    if (row.label === 'CyberOrion Agent' && cyberGymAgentScore != null) {
+      return { ...row, value: cyberGymAgentScore }
+    }
+    return row
+  })
   const [detail, setDetail] = useState<BenchRunDetail | null>(null)
   const [selected, setSelected] = useState(0)
 
@@ -107,7 +117,7 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
           <span className="evidence-bench__eyebrow">CYBERGYM-LITE / PAPER-STYLE BENCHMARK</span>
           <h2>CyberGym-lite 漏洞修复基准</h2>
         </div>
-        <p>官方 CyberGym 全量约 1,507 个真实漏洞任务、数据体量很大；这里优先接入 Level-1 最小子集，页面展示任务元数据、外部公开成功率和本地 CyberOrion 真实运行分数。</p>
+        <p>官方 CyberGym 全量约 1,507 个真实漏洞任务、数据体量很大；这里优先接入 Level-1 最小子集（n=3，librawspeed），页面展示任务元数据、<strong style={{ color: '#c47a4a' }}>未独立核对的外部公开基线</strong>和本地 CyberOrion 真实运行分数。</p>
       </div>
 
       <div className="cybergym-paper">
@@ -126,23 +136,57 @@ export function EvidenceBenchmarkPanel({ runs }: { runs: BenchRunSummary[] }) {
               )
             })}
             {cyberGymSeries.map((row, index) => {
-              const barWidth = 62
-              const x = 104 + index * 96
+              const barWidth = 56
+              const x = 88 + index * 90
               const h = row.value === 0 ? 2 : (row.value / maxScore) * 180
               const y = 205 - h
-              const isCyberOrion = row.label === 'CyberOrion Agent'
+              const isUnverified = row.unverified === true
+              const isBaseline = row.baseline === true
+              const isAgent = row.label === 'CyberOrion Agent'
+              const fill = isAgent
+                ? '#41d6b3'
+                : isBaseline
+                  ? '#7a9b8c'
+                  : isUnverified
+                    ? '#5a6b73'
+                    : '#8aa3ff'
+              const opacity = row.value === 0 ? 0.35 : isUnverified ? 0.45 : isBaseline ? 0.75 : 0.9
+              const valueLabel =
+                isAgent && cyberGymAgentScore == null
+                  ? 'pending'
+                  : isBaseline && cyberGymBaseScore == null
+                    ? 'pending'
+                    : pct(row.value)
+              const valueColor = isAgent
+                ? '#41d6b3'
+                : isBaseline
+                  ? '#a8c8bb'
+                  : isUnverified
+                    ? '#8aa9b5'
+                    : '#cdd8ff'
               return (
                 <g key={row.label}>
-                  <rect x={x} y={y} width={barWidth} height={h} fill={isCyberOrion ? '#41d6b3' : '#8aa3ff'} opacity={row.value === 0 ? 0.35 : 0.9} />
-                  <text x={x + barWidth / 2} y={y - 7} textAnchor="middle" fill={isCyberOrion ? '#41d6b3' : '#cdd8ff'} fontSize="11">{isCyberOrion && cyberGymAgentScore == null ? 'pending' : pct(row.value)}</text>
-                  <text x={x + barWidth / 2} y="224" textAnchor="middle" fill="#9bb0b5" fontSize="9">{row.label.split(' ')[0]}</text>
-                  <text x={x + barWidth / 2} y="237" textAnchor="middle" fill="#6f858b" fontSize="9">{row.label.split(' ').slice(1).join(' ')}</text>
+                  {isUnverified && (
+                    <line x1={x} y1={y} x2={x + barWidth} y2={y + h} stroke="#3a4b53" strokeWidth="1" strokeDasharray="3 3" opacity="0.7" />
+                  )}
+                  <rect x={x} y={y} width={barWidth} height={h} fill={fill} opacity={opacity} />
+                  <text x={x + barWidth / 2} y={y - 7} textAnchor="middle" fill={valueColor} fontSize="11">{valueLabel}</text>
+                  <text x={x + barWidth / 2} y="222" textAnchor="middle" fill={isUnverified ? '#8aa9b5' : '#9bb0b5'} fontSize="9">{row.label.split(' ')[0]}</text>
+                  <text x={x + barWidth / 2} y="236" textAnchor="middle" fill={isUnverified ? '#7a8a90' : '#6f858b'} fontSize="9">{row.label.split(' ').slice(1).join(' ')}</text>
+                  {isUnverified && (
+                    <text x={x + barWidth / 2} y="248" textAnchor="middle" fill="#8a6a4a" fontSize="8">⚠ 未核实</text>
+                  )}
+                  {(isAgent || isBaseline) && (
+                    <text x={x + barWidth / 2} y="248" textAnchor="middle" fill="#41d6b3" fontSize="8">真实运行 n=3</text>
+                  )}
                 </g>
               )
             })}
           </svg>
           <div className="cybergym-chart__caption">
-            公开基线来自 CyberGym 论文/官方页面；CyberOrion 栏读取本机 logs/bench 真实结果{cyberGymAgentRun ? `：Agent ${pct(cyberGymAgentScore)} · ${cyberGymAgentRun.run_id}` : '，待运行后自动写入'}{cyberGymBaseScore != null ? `；Plain LLM ${pct(cyberGymBaseScore)}` : ''}。
+            <strong>图例：</strong>灰色斜纹 = 未独立核对的二手数字（仓库内无引用出处，标灰请勿引用）；青绿色 = 本机 logs/bench 真实运行（n=3，librawspeed · level1-small）。
+            <strong>重要：</strong>n=3 样本太小，Plain LLM 与 Agent 的差距不具统计意义；本图仅展示 harness 已通、本地可复现，不构成"SOTA 领先"证据。
+            CyberOrion 栏读取本机 logs/bench 真实结果{cyberGymAgentRun ? `：Agent ${pct(cyberGymAgentScore)} · ${cyberGymAgentRun.run_id}` : '，待运行后自动写入'}{cyberGymBaseScore != null ? `；Plain LLM ${pct(cyberGymBaseScore)}` : ''}。
           </div>
         </div>
         <div className="cybergym-tasks">

@@ -59,6 +59,11 @@ import re
 import sqlite3
 import time
 import logging
+import select
+import signal
+import subprocess
+import shutil
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -77,6 +82,37 @@ if str(_HERE) not in sys.path:
 _PARENT = _HERE.parent
 if str(_PARENT) not in sys.path:
     sys.path.insert(0, str(_PARENT))
+
+def _resolve_cai_source_dir() -> Path:
+    candidates = [
+        os.getenv("CAI_SOURCE_DIR"),
+        "/opt/cai-latest",
+        "/tmp/cai-latest",
+        str(_PARENT / "cai-latest"),
+        str(_PARENT.parent / "cai-latest"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if path.is_dir():
+            return path
+    return Path("/tmp/cai-latest")
+
+
+_CAI_SOURCE_DIR = _resolve_cai_source_dir()
+_CAI_CTF_CONFIG_PATH = Path(
+    os.getenv(
+        "CAI_CTF_CONFIG_PATH",
+        str(_CAI_SOURCE_DIR / "src" / "cai" / "caibench" / "ctf-jsons" / "ctf_configs.jsonl"),
+    )
+).expanduser()
+_CAI_RECORDINGS_DIR = Path(
+    os.getenv("CAI_RECORDINGS_DIR", str(_HERE / "logs" / "cai_recordings"))
+).expanduser()
+_CAI_RECORDING_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+_CAI_MAX_RECORDING_BYTES = 2_000_000
+_CAI_MAX_RECORDING_FRAMES = 5000
 
 
 def _load_env() -> None:
@@ -404,6 +440,504 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         pass
     finally:
         event_bus.unsubscribe(q)
+
+
+def _cai_python_bin() -> str:
+    configured = os.getenv("CAI_PYTHON")
+    if configured:
+        return configured
+    bundled = _PARENT / "cai_env" / "bin" / "python"
+    if bundled.exists():
+        return str(bundled)
+    return sys.executable
+
+
+def _read_cai_ctf_catalog() -> list[dict[str, Any]]:
+    if not _CAI_CTF_CONFIG_PATH.is_file():
+        return []
+    try:
+        raw = json.loads(_CAI_CTF_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("failed to read CAI CTF catalog: %s", _CAI_CTF_CONFIG_PATH)
+        return []
+    if not isinstance(raw, list):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("works", "true")).lower() not in {"1", "true", "yes"}:
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        challenges = entry.get("challenges") or {}
+        if isinstance(challenges, dict):
+            challenge_names = [str(k) for k in challenges.keys()]
+            challenge_details = {str(k): str(v) for k, v in challenges.items()}
+        elif isinstance(challenges, list):
+            challenge_names = [str(k) for k in challenges]
+            challenge_details = {str(k): "" for k in challenges}
+        else:
+            challenge_names = []
+            challenge_details = {}
+        ctf_inside_value = entry.get("ctf_inside", entry.get("CTF_INSIDE", "true"))
+        if ctf_inside_value is None:
+            ctf_inside = False
+        else:
+            ctf_inside = str(ctf_inside_value).lower() not in {"0", "false", "no", "none", "null"}
+        items.append({
+            "name": name,
+            "difficulty": entry.get("difficulty") or "",
+            "type": entry.get("type") or "",
+            "description": entry.get("description") or "",
+            "instructions": entry.get("instructions") or "",
+            "techniques": entry.get("techniques") or "",
+            "caibench": entry.get("caibench") or "",
+            "ctf_inside": ctf_inside,
+            "challenges": challenge_names,
+            "challenge_details": challenge_details,
+            "source": entry.get("source") or "",
+        })
+    return sorted(items, key=lambda x: (str(x.get("difficulty")), str(x.get("name"))))
+
+
+@app.get("/api/cai/ctfs")
+async def cai_ctf_catalog() -> dict[str, Any]:
+    """Return CAI's built-in working CTF catalog without flags or solutions."""
+    ctfs = _read_cai_ctf_catalog()
+    return {
+        "count": len(ctfs),
+        "source": str(_CAI_CTF_CONFIG_PATH),
+        "ctfs": ctfs,
+    }
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_cai_recording_time(value: Any) -> float:
+    if not isinstance(value, str) or not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _cai_demo_recording() -> dict[str, Any]:
+    frames = [
+        {"t": 0.0, "data": "\x1b[1;36mCAI Web replay\x1b[0m\r\n"},
+        {"t": 0.25, "data": "$ python -m cai.cli --prompt \"Solve picoctf_static_flag\"\r\n"},
+        {"t": 0.65, "data": "\x1b[2m⠋\x1b[0m \x1b[1;38;5;232;48;5;250mCAI\x1b[0m\x1b[2m | \x1b[0m\x1b[2;3mStarting CAI framework...\x1b[0m\r\n"},
+        {"t": 1.05, "data": "\x1b[2m⠙\x1b[0m \x1b[1;38;5;232;48;5;250mCAI\x1b[0m\x1b[2m | \x1b[0m\x1b[2;3mPreparing context and loading tools...\x1b[0m\r\n"},
+        {"t": 1.45, "data": "\x1b[32mCTF_NAME=picoctf_static_flag\x1b[0m  CTF_CHALLENGE=FLAG\r\n"},
+        {"t": 1.9, "data": "Task: Test your internet connection. Download the flag file and inspect it.\r\n"},
+        {"t": 2.35, "data": "\x1b[1;34mThought\x1b[0m: enumerate the challenge workspace before assuming where the flag lives.\r\n"},
+        {"t": 2.9, "data": "\x1b[33mTool\x1b[0m: pwd && ls -la\r\n"},
+        {"t": 3.35, "data": "/challenge\r\ntotal 12\r\ndrwxr-xr-x 2 ctf ctf 4096 Aug 21 17:24 .\r\ndrwxr-xr-x 1 root root 4096 Aug 21 17:24 ..\r\n-rw-r--r-- 1 ctf ctf   32 Aug 21 17:24 flag.txt\r\n"},
+        {"t": 4.0, "data": "\x1b[1;34mThought\x1b[0m: one candidate file exists; read it and validate the expected picoCTF format.\r\n"},
+        {"t": 4.45, "data": "\x1b[33mTool\x1b[0m: cat flag.txt\r\n"},
+        {"t": 4.9, "data": "picoCTF{web_terminal_replay_ok}\r\n"},
+        {"t": 5.35, "data": "\x1b[33mTool\x1b[0m: python - <<'PY'\r\nflag='picoCTF{web_terminal_replay_ok}'\r\nassert flag.startswith('picoCTF{') and flag.endswith('}')\r\nprint('flag format validated')\r\nPY\r\n"},
+        {"t": 5.8, "data": "flag format validated\r\n"},
+        {"t": 6.25, "data": "\x1b[1;32mSolved\x1b[0m: flag validated for picoctf_static_flag / FLAG.\r\n"},
+        {"t": 6.7, "data": "[CAI exited with code 0]\r\n"},
+    ]
+    return {
+        "id": "demo_picoctf_static_flag",
+        "title": "演示回放：CAI 完成 picoctf_static_flag",
+        "kind": "demo",
+        "ctf_name": "picoctf_static_flag",
+        "challenge": "FLAG",
+        "status": "success",
+        "duration_sec": 6.7,
+        "created_at": "2026-08-21T17:37:21Z",
+        "summary": "验证演示素材：展示 CAI 终端完成一个 Very Easy CTF 的完整过程；公网环境无需 Docker 或模型调用即可稳定回放。",
+        "source": "builtin",
+        "frames": frames,
+    }
+
+
+def _cai_smoke_recording() -> dict[str, Any]:
+    frames = [
+        {"t": 0.0, "data": "$ python -m cai.cli\r\n"},
+        {"t": 0.25, "data": "\r\n[CAI web] launching native CAI CLI...\r\n"},
+        {"t": 0.75, "data": "\x1b[92mLiteLLM:WARNING\x1b[0m: remote model cost map unavailable; falling back to local backup.\r\n"},
+        {"t": 1.25, "data": "\x1b[?25l\x1b[2m⠋\x1b[0m \x1b[1;38;5;232;48;5;250mCAI\x1b[0m\x1b[2m | \x1b[0m\x1b[2;3mStarting CAI framework...\x1b[0m\r\n"},
+        {"t": 1.75, "data": "\x1b[2m⠙\x1b[0m \x1b[1;38;5;232;48;5;250mCAI\x1b[0m\x1b[2m | \x1b[0m\x1b[2;3mVerifying license and API key (configured)...\x1b[0m\r\n"},
+        {"t": 2.2, "data": "\x1b[32mCAI CLI reached native startup through the Web PTY bridge.\x1b[0m\r\n"},
+        {"t": 2.65, "data": "Use Live CAI only when you want to call the configured production model.\r\n"},
+    ]
+    return {
+        "id": "demo_cai_smoke",
+        "title": "CAI 启动冒烟记录",
+        "kind": "demo",
+        "ctf_name": "",
+        "challenge": "",
+        "status": "success",
+        "duration_sec": 2.7,
+        "created_at": "2026-08-21T17:36:39Z",
+        "summary": "验证记录：公网和本机 /ws/cai 均能进入 CAI 原生启动输出，不再出现 API key not set。",
+        "source": "builtin",
+        "frames": frames,
+    }
+
+
+def _builtin_cai_recordings() -> list[dict[str, Any]]:
+    return [_cai_demo_recording(), _cai_smoke_recording()]
+
+
+def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
+    frames = recording.get("frames")
+    return {
+        "id": recording.get("id") or "",
+        "title": recording.get("title") or recording.get("id") or "",
+        "kind": recording.get("kind") or "terminal",
+        "ctf_name": recording.get("ctf_name") or "",
+        "challenge": recording.get("challenge") or "",
+        "status": recording.get("status") or "unknown",
+        "duration_sec": float(recording.get("duration_sec") or 0),
+        "created_at": recording.get("created_at") or "",
+        "summary": recording.get("summary") or "",
+        "source": recording.get("source") or "live",
+        "frame_count": len(frames) if isinstance(frames, list) else int(recording.get("frame_count") or 0),
+    }
+
+
+def _read_cai_recording_file(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("failed to read CAI recording: %s", path)
+        return None
+    if not isinstance(data, dict):
+        return None
+    data.setdefault("source", "live")
+    data.setdefault("id", path.stem)
+    return data
+
+
+def _list_cai_recordings() -> list[dict[str, Any]]:
+    recordings: list[dict[str, Any]] = []
+    if _CAI_RECORDINGS_DIR.is_dir():
+        for path in _CAI_RECORDINGS_DIR.glob("*.json"):
+            data = _read_cai_recording_file(path)
+            if data and data.get("source") != "fallback":
+                recordings.append(_summarize_cai_recording(data))
+    return sorted(
+        recordings,
+        key=lambda item: (_parse_cai_recording_time(item.get("created_at")), item.get("id", "")),
+        reverse=True,
+    )
+
+
+def _get_cai_recording(recording_id: str) -> dict[str, Any] | None:
+    if not _CAI_RECORDING_ID_RE.match(recording_id):
+        return None
+    for item in _builtin_cai_recordings():
+        if item["id"] == recording_id:
+            return item
+    path = _CAI_RECORDINGS_DIR / f"{recording_id}.json"
+    if path.is_file():
+        return _read_cai_recording_file(path)
+    return None
+
+
+def _write_cai_recording(recording: dict[str, Any]) -> None:
+    recording_id = str(recording.get("id") or "")
+    if not _CAI_RECORDING_ID_RE.match(recording_id):
+        return
+    try:
+        _CAI_RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+        (_CAI_RECORDINGS_DIR / f"{recording_id}.json").write_text(
+            json.dumps(recording, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.exception("failed to write CAI recording %s", recording_id)
+
+
+async def _stream_cai_recording(ws: WebSocket, recording: dict[str, Any]) -> None:
+    frames = recording.get("frames") if isinstance(recording, dict) else None
+    if not isinstance(frames, list) or not frames:
+        return
+    prev = 0.0
+    for frame in frames:
+        if not isinstance(frame, dict):
+            continue
+        t = float(frame.get("t") or 0.0)
+        if t > prev:
+            await asyncio.sleep(min(max(t - prev, 0.0), 0.35))
+        prev = t
+        data = str(frame.get("data") or "")
+        if data:
+            if not await _ws_send_text(ws, data):
+                break
+
+
+@app.get("/api/cai/recordings")
+async def cai_recordings() -> dict[str, Any]:
+    recordings = _list_cai_recordings()
+    return {"count": len(recordings), "recordings": recordings}
+
+
+@app.get("/api/cai/recordings/{recording_id}")
+async def cai_recording_detail(recording_id: str) -> dict[str, Any]:
+    recording = _get_cai_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="CAI recording not found")
+    return recording
+
+
+def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("CAI_LICENSE_OFF", "1")
+    env.setdefault("CAI_SKIP_UPDATE_CHECK", "1")
+    env.setdefault("CAI_STREAM", "true")
+    env.setdefault("CAI_TRACING", "false")
+    env.setdefault("TERM", "xterm-256color")
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    if _CAI_SOURCE_DIR.is_dir():
+        env["PYTHONPATH"] = str(_CAI_SOURCE_DIR / "src") + (
+            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+        )
+    for key in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "OPENAI_ORG_ID",
+        "OPENAI_ORGANIZATION",
+        "CAI_MODEL",
+        "CAI_FORCE_HTTPX",
+        "CAI_AGENT_TYPE",
+        "ALIAS_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CTF_NAME",
+        "CTF_CHALLENGE",
+        "CTF_INSIDE",
+        "CTF_SUBNET",
+        "CTF_IP",
+        "CTF_INSTANCE_ID",
+        "CTF_CONTAINER_NAME",
+        "CAIBENCH_IMG_REGISTRY_TOKEN",
+    ):
+        if key in overrides:
+            value = overrides[key]
+        elif key.lower() in overrides:
+            value = overrides[key.lower()]
+        else:
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            env[key] = text
+    # CAI's startup license check reads ALIAS_API_KEY even when the selected
+    # model uses an OpenAI-compatible endpoint. Preserve an explicit alias key,
+    # otherwise mirror the configured OpenAI key for that check.
+    if not env.get("ALIAS_API_KEY") and env.get("OPENAI_API_KEY"):
+        env["ALIAS_API_KEY"] = env["OPENAI_API_KEY"]
+    return env
+
+
+def _cai_command(overrides: dict[str, Any]) -> list[str]:
+    prompt = str(overrides.get("prompt") or "").strip()
+    argv = [_cai_python_bin(), "-m", "cai.cli"]
+    if str(overrides.get("continue_mode", "false")).lower() in {"1", "true", "yes"}:
+        argv.append("--continue")
+    if str(overrides.get("yolo", "false")).lower() in {"1", "true", "yes"}:
+        argv.append("--yolo")
+    if prompt:
+        argv.extend(["--prompt", prompt])
+    return argv
+
+
+async def _ws_send_text(ws: WebSocket, text: str) -> bool:
+    try:
+        await ws.send_text(text)
+        return True
+    except Exception:
+        return False
+
+
+@app.websocket("/ws/cai")
+async def cai_terminal_ws(ws: WebSocket) -> None:
+    """Raw PTY bridge to CAI CLI so browser output matches the terminal."""
+    await ws.accept()
+    if os.name != "posix":
+        await ws.send_text("\r\nCAI Web terminal requires a POSIX host with PTY support.\r\n")
+        await ws.close(code=1011)
+        return
+
+    first: dict[str, Any] = {}
+    try:
+        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+        if isinstance(msg, dict):
+            first = msg
+    except Exception:
+        first = {}
+
+    rows = int(first.get("rows") or 32)
+    cols = int(first.get("cols") or 120)
+    env = _safe_cai_env(first)
+    cmd = _cai_command(first)
+    started_at = _utc_now_iso()
+    started_mono = time.monotonic()
+    record_frames: list[dict[str, Any]] = []
+    record_bytes = 0
+    ctf_name = str(first.get("CTF_NAME") or first.get("ctf_name") or "").strip()
+
+    def record_output(text: str) -> None:
+        nonlocal record_bytes
+        chunk_bytes = len(text.encode("utf-8", errors="replace"))
+        if (
+            len(record_frames) < _CAI_MAX_RECORDING_FRAMES
+            and record_bytes + chunk_bytes <= _CAI_MAX_RECORDING_BYTES
+        ):
+            record_frames.append({"t": round(time.monotonic() - started_mono, 3), "data": text})
+            record_bytes += chunk_bytes
+
+    launch_text = "\r\n[CAI web] launching native CAI CLI...\r\n"
+    record_output(launch_text)
+    await _ws_send_text(ws, launch_text)
+
+    master_fd: int | None = None
+    proc: subprocess.Popen[bytes] | None = None
+    try:
+        import fcntl
+        import pty
+        import struct
+        import termios
+
+        master_fd, slave_fd = pty.openpty()
+        size = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, size)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(_CAI_SOURCE_DIR if _CAI_SOURCE_DIR.is_dir() else _HERE),
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        async def pump_output() -> None:
+            nonlocal record_bytes
+            assert master_fd is not None
+            while proc:
+                ready, _, _ = await asyncio.to_thread(select.select, [master_fd], [], [], 0.2)
+                if not ready:
+                    if proc.poll() is not None:
+                        break
+                    continue
+                try:
+                    data = os.read(master_fd, 8192)
+                except OSError:
+                    break
+                if not data:
+                    break
+                text = data.decode("utf-8", errors="replace")
+                record_output(text)
+                if not await _ws_send_text(ws, text):
+                    break
+            if proc and proc.poll() is not None:
+                exit_text = f"\r\n[CAI exited with code {proc.returncode}]\r\n"
+                record_output(exit_text)
+                await _ws_send_text(ws, exit_text)
+
+        async def pump_input() -> None:
+            assert master_fd is not None
+            while proc and proc.poll() is None:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if "text" not in msg:
+                    continue
+                text = msg["text"]
+                try:
+                    obj = json.loads(text)
+                except Exception:
+                    os.write(master_fd, text.encode())
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("type") == "input":
+                    os.write(master_fd, str(obj.get("data", "")).encode())
+                elif obj.get("type") == "resize":
+                    r = int(obj.get("rows") or rows)
+                    c = int(obj.get("cols") or cols)
+                    size = struct.pack("HHHH", max(1, r), max(1, c), 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, size)
+                    if proc:
+                        with suppress(Exception):
+                            os.killpg(proc.pid, signal.SIGWINCH)
+                elif obj.get("type") == "stop":
+                    break
+
+        tasks = [asyncio.create_task(pump_output()), asyncio.create_task(pump_input())]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc and not isinstance(exc, WebSocketDisconnect):
+                logger.exception("CAI terminal bridge task failed", exc_info=exc)
+    except Exception as exc:
+        logger.exception("CAI terminal failed")
+        error_text = f"\r\nCAI terminal failed: {exc}\r\n"
+        record_output(error_text)
+        await _ws_send_text(ws, error_text)
+    finally:
+        ended_at = _utc_now_iso()
+        if proc and proc.poll() is None:
+            with suppress(Exception):
+                os.killpg(proc.pid, signal.SIGTERM)
+            with suppress(Exception):
+                proc.wait(timeout=3)
+            if proc.poll() is None:
+                with suppress(Exception):
+                    os.killpg(proc.pid, signal.SIGKILL)
+        if master_fd is not None:
+            with suppress(Exception):
+                os.close(master_fd)
+        if record_frames:
+            challenge = str(first.get("CTF_CHALLENGE") or first.get("challenge") or "").strip()
+            kind = "ctf" if ctf_name else "terminal"
+            if proc and proc.returncode == 0:
+                status = "success"
+            elif proc and proc.returncode is not None and proc.returncode < 0:
+                status = "stopped"
+            elif proc and proc.returncode is not None:
+                status = "failed"
+            else:
+                status = "unknown"
+            recording_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
+            _write_cai_recording({
+                "id": recording_id,
+                "title": f"CAI {'CTF' if ctf_name else '终端'} 运行 {recording_id}",
+                "kind": kind,
+                "ctf_name": ctf_name,
+                "challenge": challenge,
+                "status": status,
+                "duration_sec": round(time.monotonic() - started_mono, 3),
+                "created_at": started_at,
+                "ended_at": ended_at,
+                "summary": (
+                    f"真实 CAI {'CTF' if ctf_name else '终端'}测试记录。"
+                    + (f" CTF={ctf_name} Challenge={challenge}." if ctf_name else "")
+                ),
+                "source": "live",
+                "exit_code": proc.returncode if proc else None,
+                "frames": record_frames,
+            })
+        with suppress(Exception):
+            await ws.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -1758,6 +2292,29 @@ def _event_to_replay_dict(e: Any) -> dict[str, Any]:
     }
 
 
+def _event_to_full_dict(e: Any) -> dict[str, Any]:
+    """Return the full traffic event payload for durable session artifacts."""
+    if isinstance(e, dict):
+        return dict(e)
+    return {
+        "ts": getattr(e, "ts", 0.0),
+        "source": getattr(e, "source", ""),
+        "host": getattr(e, "host", ""),
+        "src_ip": getattr(e, "src_ip", ""),
+        "dst_ip": getattr(e, "dst_ip", ""),
+        "src_port": getattr(e, "src_port", 0),
+        "dst_port": getattr(e, "dst_port", 0),
+        "proto": getattr(e, "proto", ""),
+        "payload_size": getattr(e, "payload_size", 0),
+        "label": getattr(e, "label", ""),
+        "technique": getattr(e, "technique", None),
+        "attack_type": getattr(e, "attack_type", ""),
+        "raw": getattr(e, "raw", {}),
+        "payload_hint": getattr(e, "payload_hint", ""),
+        "severity": getattr(e, "severity", "low"),
+    }
+
+
 def _build_traffic_fallback_report(
     *,
     source: str,
@@ -1931,19 +2488,34 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
     from cyberorion.traffic.feeder import TrafficFeeder
     from cyberorion.traffic.pipeline import run_traffic_analysis_pipeline
     from cyberorion.tools.blue.traffic import _set_traffic_cache
+    from cyberorion.session_logging import SessionEventWriter
 
     source = payload.get("source", "synthetic")
     max_rows = int(payload.get("max_rows", 2000) or 2000)
     csv_file = payload.get("csv_file", "Tuesday-WorkingHours.pcap_ISCX.csv")
     analysis_timeout = _traffic_analysis_timeout(payload)
     replay_limit = _traffic_replay_limit(payload)
+    session_id = f"session_{time.strftime('%Y%m%d_%H%M%S')}"
+    session_dir = Path("logs") / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_writer = SessionEventWriter(
+        session_dir,
+        session_id=session_id,
+        kind="traffic_analysis",
+    )
+    emitted_events: list[dict[str, Any]] = []
+
+    def _emit(ev: dict[str, Any]) -> str:
+        emitted_events.append(ev)
+        session_writer.write_event(ev)
+        return _sse(ev)
 
     async def event_stream():
         # ---- 阶段 0：流量回放（加载数据 + 缓存，供蓝队工具复用） ----
         try:
-            yield _sse({"type": "system", "side": "system",
-                        "data": {"text": f"加载流量数据：source={source} csv={csv_file} max_rows={max_rows}"},
-                        "timestamp": time.time()})
+            yield _emit({"type": "system", "side": "system",
+                         "data": {"text": f"加载流量数据：source={source} csv={csv_file} max_rows={max_rows}"},
+                         "timestamp": time.time()})
             if source == "cicids":
                 from cyberorion.paths import CICIDS_DIR
                 csv_path = str(CICIDS_DIR / csv_file)
@@ -1959,13 +2531,13 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             alerts = detector.detect(events)
             _set_traffic_cache(events, alerts)
         except Exception as e:
-            yield _sse({"type": "error", "side": "system",
-                        "data": {"message": f"流量加载失败：{e}"},
-                        "timestamp": time.time()})
+            yield _emit({"type": "error", "side": "system",
+                         "data": {"message": f"流量加载失败：{e}"},
+                         "timestamp": time.time()})
             return
 
         # push replay_data event: left panel renders events + alerts
-        yield _sse({
+        yield _emit({
             "type": "replay_data", "side": "system", "timestamp": time.time(),
             "data": {
                 "events": [_event_to_replay_dict(e) for e in events[:replay_limit]],
@@ -2028,17 +2600,17 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                     _traffic_report_parts.append(ev.get("content", ev.get("data", {}).get("report", ev.get("data", {}).get("content", ""))))
                 elif ev_type == "report_chunk":
                     _traffic_report_parts.append(ev.get("chunk", ev.get("data", {}).get("chunk", "")))
-                yield _sse(ev)
+                yield _emit(ev)
         except asyncio.TimeoutError:
             _fallback_reason = f"LLM 分析流水线超过 {analysis_timeout:g}s 未完成，已切换模板兜底"
-            yield _sse({"type": "system", "side": "system",
-                        "data": {"text": f"⚠ {_fallback_reason}"},
-                        "timestamp": time.time()})
+            yield _emit({"type": "system", "side": "system",
+                         "data": {"text": f"⚠ {_fallback_reason}"},
+                         "timestamp": time.time()})
         except Exception as e:
             _fallback_reason = f"分析流水线异常：{type(e).__name__}: {e}"
-            yield _sse({"type": "system", "side": "system",
-                        "data": {"text": f"⚠ {_fallback_reason}"},
-                        "timestamp": time.time()})
+            yield _emit({"type": "system", "side": "system",
+                         "data": {"text": f"⚠ {_fallback_reason}"},
+                         "timestamp": time.time()})
         finally:
             _pipeline_active = False
             if not _pipeline_task.done():
@@ -2053,7 +2625,7 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 reason=_fallback_reason or "LLM 未返回最终报告，使用规则引擎结果生成兜底报告",
             )
             _traffic_report_parts.append(_fallback_report)
-            yield _sse({
+            yield _emit({
                 "type": "report",
                 "side": "blue",
                 "data": {"agent": "report_writer", "report": _fallback_report, "fallback": True},
@@ -2061,15 +2633,11 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             })
 
         # ---- 持久化流量分析结果到磁盘 ----
-        _session_id = ""
         try:
             import time as _time, json as _json
-            from datetime import datetime as _dt
-            from pathlib import Path as _Path
-            _ts_str = _dt.fromtimestamp(_time.time()).strftime("%Y%m%d_%H%M%S")
-            _session_id = f"session_{_ts_str}"
-            _session_dir = _Path("logs") / _session_id
-            _session_dir.mkdir(parents=True, exist_ok=True)
+            _ts_str = session_id.removeprefix("session_")
+            _session_id = session_id
+            _session_dir = session_dir
 
             _report_md = "".join(_traffic_report_parts) if _traffic_report_parts else ""
             if not _report_md:
@@ -2097,36 +2665,15 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
                 "max_rows": max_rows,
                 "event_count": len(events),
                 "alert_count": len(_traffic_alerts_persist),
+                "traffic_events": [_event_to_full_dict(e) for e in events],
                 "alerts": [
-                    {
-                        "alert_type": getattr(a, "alert_type", "unknown"),
-                        "severity": getattr(a, "severity", "unknown"),
-                        "technique": getattr(a, "technique", ""),
-                        "src_ip": getattr(a, "src_ip", ""),
-                        "dst_ip": getattr(a, "dst_ip", ""),
-                        "description": getattr(a, "description", ""),
-                    }
+                    _alert_to_dict(a)
                     for a in _traffic_alerts_persist
                 ],
             }
             (_session_dir / "traffic_analysis.json").write_text(
                 _json.dumps(_meta, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-
-            # Write timeline.jsonl (one event per line for compatibility)
-            with open(_session_dir / "timeline.jsonl", "w", encoding="utf-8") as _tf:
-                for ev_obj in events[:200]:
-                    _tf.write(_json.dumps({
-                        "timestamp": getattr(ev_obj, "timestamp", _time.time()),
-                        "type": "traffic_event",
-                        "data": {
-                            "src_ip": getattr(ev_obj, "src_ip", ""),
-                            "dst_ip": getattr(ev_obj, "dst_ip", ""),
-                            "protocol": getattr(ev_obj, "protocol", ""),
-                            "event_type": getattr(ev_obj, "event_type", ""),
-                            "label": getattr(ev_obj, "label", ""),
-                        }
-                    }, ensure_ascii=False) + "\n")
 
             # Write metrics.json (placeholder scores)
             _metrics = {
@@ -2142,6 +2689,16 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
             (_session_dir / "metrics.json").write_text(
                 _json.dumps(_metrics, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            session_writer.write_manifest({
+                "traffic_artifacts": {
+                    "traffic_analysis": "traffic_analysis.json",
+                    "report": "report.md",
+                    "metrics": "metrics.json",
+                    "events_total": len(events),
+                    "alerts_total": len(_traffic_alerts_persist),
+                    "sse_events_total": len(emitted_events),
+                }
+            })
 
             print(f"[traffic] Persisted to {_session_dir}")
 
@@ -2157,16 +2714,27 @@ async def traffic_analyze(payload: dict = Body(default={})) -> StreamingResponse
         except Exception as _exc:
             print(f"[traffic] Persistence failed: {_exc}")
         finally:
-            yield _sse({
+            complete_event = {
                 "type": "complete",
                 "side": "system",
                 "timestamp": time.time(),
                 "data": {
                     "message": "流量分析完成",
-                    "session_id": _session_id,
+                    "session_id": session_id,
                     "events_total": len(events),
                     "alerts_total": len(_traffic_alerts_persist),
                 },
+            }
+            yield _emit(complete_event)
+            session_writer.write_manifest({
+                "traffic_artifacts": {
+                    "traffic_analysis": "traffic_analysis.json",
+                    "report": "report.md",
+                    "metrics": "metrics.json",
+                    "events_total": len(events),
+                    "alerts_total": len(_traffic_alerts_persist),
+                    "sse_events_total": len(emitted_events),
+                }
             })
 
     return StreamingResponse(

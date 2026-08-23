@@ -3,7 +3,52 @@
 export type Side = 'red' | 'blue' | 'system'
 
 /** Top-level view switch in the header. */
-export type ViewKey = 'arena' | 'traffic' | 'bench' | 'history' | 'hostguard' | 'kb' | 'skills' | 'docs'
+export type ViewKey = 'cai' | 'arena' | 'traffic' | 'bench' | 'history' | 'hostguard' | 'kb' | 'skills' | 'docs'
+
+export interface CaiCtfItem {
+  name: string
+  difficulty: string
+  type: string
+  description: string
+  instructions: string
+  techniques: string
+  caibench: string
+  ctf_inside: boolean
+  challenges: string[]
+  challenge_details: Record<string, string>
+  source: string
+}
+
+export interface CaiCtfCatalog {
+  count: number
+  source: string
+  ctfs: CaiCtfItem[]
+}
+
+export interface CaiRecordingFrame {
+  t: number
+  data: string
+}
+
+export interface CaiRecordingSummary {
+  id: string
+  title: string
+  kind: 'demo' | 'ctf' | 'terminal' | string
+  ctf_name: string
+  challenge: string
+  status: string
+  duration_sec: number
+  created_at: string
+  summary: string
+  source: 'builtin' | 'live' | string
+  frame_count: number
+}
+
+export interface CaiRecording extends CaiRecordingSummary {
+  ended_at?: string
+  exit_code?: number | null
+  frames: CaiRecordingFrame[]
+}
 
 export interface ArenaEvent {
   type: string

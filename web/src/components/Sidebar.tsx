@@ -1,9 +1,4 @@
-// Sidebar — Cursor/VSCode 式左侧边栏（208px，平铺列表导航）
-// 顶部：品牌；「新建会话」= 列表首项；分组导航；底部极简状态。
-//
-// 新增：每个任务入口都有「演示」按钮，回放历史 session 的真实事件流
-// （绝对禁止凭空生成 —— 后端 /api/demo/{task_type} 从历史 score+has_report
-// +has_metrics 三优的 session 抽取事件）。
+// Sidebar — CAI-first navigation.
 import { useState } from 'react'
 import { useArena } from '../arena'
 import { Logo } from './Logo'
@@ -11,13 +6,8 @@ import { isDark } from '../theme'
 import type { ViewKey } from '../types'
 
 const NAV: { key: ViewKey; label: string }[] = [
-  { key: 'arena', label: '作战台' },
-  { key: 'traffic', label: '流量分析' },
-  { key: 'bench', label: '基准测试' },
-  { key: 'history', label: '历史复盘' },
-  { key: 'hostguard', label: '主机卫士' },
-  { key: 'skills', label: '技能模块' },
-  { key: 'kb', label: '知识库' },
+  { key: 'cai', label: 'CAI 终端' },
+  { key: 'history', label: 'CAI 历史' },
   { key: 'docs', label: '框架文档' },
 ]
 
@@ -28,9 +18,8 @@ export function Sidebar({
   view: ViewKey
   onView: (v: ViewKey) => void
 }) {
-  const { connected, status } = useArena()
+  const { connected } = useArena()
   const [dark, setDark] = useState(() => isDark())
-  const active = status.session_active
 
   const toggleTheme = () => {
     const next = !dark
@@ -39,7 +28,7 @@ export function Sidebar({
     document.documentElement.classList.toggle('dark', next)
   }
 
-  const newSession = () => onView('arena')
+  const newSession = () => onView('cai')
 
   return (
     <aside className="sidebar">
@@ -56,10 +45,10 @@ export function Sidebar({
         <button
           className="sidebar-item"
           onClick={newSession}
-          title={active ? '回到作战舱' : '进入作战舱选择靶场'}
+          title="进入 CAI 原生终端"
         >
           <span style={{ fontSize: 13, lineHeight: 1, color: 'var(--color-accent)' }}>＋</span>
-          {active ? '回到对局' : '进入作战台'}
+          CAI 终端
         </button>
         <div className="sidebar-section-title">工作台</div>
         {NAV.map((n) => (

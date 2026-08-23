@@ -22,6 +22,7 @@ from cai.sdk.agents import Agent
 from .agent_runner import AgentRunner
 from .event_bus import Event, EventBus
 from .session_state import SessionState
+from ..session_logging import EventBusSessionLogger, SessionEventWriter
 
 
 class Controller:
@@ -63,6 +64,7 @@ class Controller:
         self.collector: Any = None
         self.ground_truth: Any = None
         self.last_metrics: dict[str, Any] | None = None
+        self._event_logger: EventBusSessionLogger | None = None
 
     async def start_session(self, scenario: str | None = None) -> None:
         """重置靶场、绑定遥测并构建默认红蓝 Agent。"""
@@ -810,6 +812,9 @@ class Controller:
             type="session_end", side="system",
             data={"snapshot": self.state.snapshot(), "session_id": self.session_id},
         ))
+        if self._event_logger is not None:
+            await self._event_logger.stop()
+            self._event_logger = None
 
     def _start_telemetry(self, scenario: Any | None = None) -> None:
         """创建本轮 telemetry.db、采集器和红队地面真值通道。"""
@@ -826,6 +831,15 @@ class Controller:
         self.store = TelemetryStore(
             session_dir / "telemetry.db", session_id=self.session_id,
         )
+        self._event_logger = EventBusSessionLogger(
+            self.event_bus,
+            SessionEventWriter(
+                session_dir,
+                session_id=self.session_id,
+                kind="arena",
+            ),
+        )
+        self._event_logger.start()
         scenario_model = scenario
         if scenario_model is None:
             try:

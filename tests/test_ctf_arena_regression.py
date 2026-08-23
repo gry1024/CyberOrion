@@ -75,6 +75,50 @@ def test_ctf_controller_binds_telemetry_store_for_blue_tools(
     asyncio.run(run())
 
 
+def test_ctf_controller_persists_full_runtime_events(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from cyberorion import arena_reset
+    from cyberorion.core.controller import Controller
+    from cyberorion.core.event_bus import Event
+    from cyberorion.telemetry.collectors import TelemetryCollector
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(arena_reset, "reset_all", lambda _scenario: {"status": "ok"})
+    monkeypatch.setattr(TelemetryCollector, "start", lambda _self: None)
+    monkeypatch.setattr(TelemetryCollector, "stop", lambda _self: asyncio.sleep(0))
+
+    async def run() -> None:
+        bus = EventBus()
+        controller = Controller(bus, SessionState(), build_agents_on_start=False)
+        await controller.start_session("web_basic")
+        assert controller.store is not None
+        session_dir = Path(controller.store.path).parent
+
+        full_output = "FULL-TOOL-OUTPUT:" + "x" * 6000
+        await bus.publish(Event(
+            type="tool_output",
+            side="red",
+            data={"tool": "long_tool", "output": "short", "raw_output": full_output},
+        ))
+        await controller.stop_session()
+
+        runtime_log = session_dir / "runtime_events.jsonl"
+        timeline_log = session_dir / "timeline.jsonl"
+        llm_log = session_dir / "llm_trace.jsonl"
+        manifest = session_dir / "log_manifest.json"
+
+        assert runtime_log.is_file()
+        assert timeline_log.is_file()
+        assert llm_log.is_file()
+        assert manifest.is_file()
+        assert full_output in runtime_log.read_text(encoding="utf-8")
+        assert full_output in timeline_log.read_text(encoding="utf-8")
+        assert full_output in llm_log.read_text(encoding="utf-8")
+
+    asyncio.run(run())
+
+
 def test_public_control_routes_delegate_to_ctf_controller(monkeypatch) -> None:
     """Catches regressions where public controls return hard-coded V2 errors."""
     import server

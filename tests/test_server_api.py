@@ -54,6 +54,178 @@ def test_scenarios_list(client: TestClient) -> None:
     assert data["active"] in data["scenarios"] or data["active"]
 
 
+def test_cai_ctf_catalog_filters_working_and_hides_flags(
+    tmp_path: Path,
+    monkeypatch,
+    client: TestClient,
+) -> None:
+    import server as server_mod
+
+    catalog = tmp_path / "ctf_configs.jsonl"
+    catalog.write_text(
+        json.dumps([
+            {
+                "name": "picoctf_static_flag",
+                "difficulty": "Very Easy",
+                "type": "IT",
+                "description": "sanity challenge",
+                "instructions": "download the flag",
+                "challenges": {"FLAG": "hint only"},
+                "flag_commands": {"FLAG": "cat /app/flag.txt"},
+                "works": "true",
+                "caibench": "base",
+                "ctf_inside": "True",
+            },
+            {
+                "name": "broken",
+                "difficulty": "Hard",
+                "challenges": {"FLAG": "broken"},
+                "flag_commands": {"FLAG": "cat /root/root.txt"},
+                "works": "false",
+            },
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server_mod, "_CAI_CTF_CONFIG_PATH", catalog)
+
+    r = client.get("/api/cai/ctfs")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["count"] == 1
+    assert data["ctfs"][0]["name"] == "picoctf_static_flag"
+    assert data["ctfs"][0]["challenges"] == ["FLAG"]
+    assert data["ctfs"][0]["challenge_details"] == {"FLAG": "hint only"}
+    assert "broken" not in r.text
+    assert "flag_commands" not in r.text
+    assert "cat /app/flag.txt" not in r.text
+
+
+def test_cai_command_defaults_to_plain_interactive_cli() -> None:
+    import server as server_mod
+
+    cmd = server_mod._cai_command({})
+
+    assert cmd[-2:] == ["-m", "cai.cli"]
+    assert "--prompt" not in cmd
+    assert "--continue" not in cmd
+
+
+def test_cai_command_only_prompts_when_requested() -> None:
+    import server as server_mod
+
+    cmd = server_mod._cai_command({"prompt": "solve", "continue_mode": True})
+
+    assert "--prompt" in cmd
+    assert "solve" in cmd
+    assert "--continue" in cmd
+
+
+def test_cai_env_preserves_false_boolean_override(monkeypatch) -> None:
+    import server as server_mod
+
+    monkeypatch.delenv("CTF_INSIDE", raising=False)
+
+    env = server_mod._safe_cai_env({"CTF_INSIDE": False})
+
+    assert env["CTF_INSIDE"] == "False"
+
+
+def test_cai_env_forwards_model_credentials(monkeypatch) -> None:
+    import server as server_mod
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("ALIAS_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_BASE", "https://model.example/v1")
+    monkeypatch.setenv("CAI_MODEL", "deepseek-chat")
+
+    env = server_mod._safe_cai_env({})
+
+    assert env["OPENAI_API_KEY"] == "test-key"
+    assert env["ALIAS_API_KEY"] == "test-key"
+    assert env["OPENAI_API_BASE"] == "https://model.example/v1"
+    assert env["CAI_MODEL"] == "deepseek-chat"
+
+
+def test_cai_env_preserves_explicit_alias_key(monkeypatch) -> None:
+    import server as server_mod
+
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setenv("ALIAS_API_KEY", "alias-key")
+
+    env = server_mod._safe_cai_env({})
+
+    assert env["ALIAS_API_KEY"] == "alias-key"
+
+
+def test_cai_recordings_exclude_builtin_demo_from_history(client: TestClient) -> None:
+    r = client.get("/api/cai/recordings")
+
+    assert r.status_code == 200
+    data = r.json()
+    ids = {item["id"] for item in data["recordings"]}
+    assert "demo_picoctf_static_flag" not in ids
+
+
+def test_cai_recording_detail_returns_replay_frames(client: TestClient) -> None:
+    r = client.get("/api/cai/recordings/demo_picoctf_static_flag")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["id"] == "demo_picoctf_static_flag"
+    assert isinstance(data["frames"], list)
+    assert data["frames"][0]["data"]
+
+
+def test_cai_recordings_include_live_runs_and_detail(
+    tmp_path: Path,
+    monkeypatch,
+    client: TestClient,
+) -> None:
+    import server as server_mod
+
+    recordings = tmp_path / "recordings"
+    recordings.mkdir()
+    (recordings / "live_bad.json").write_text(
+        json.dumps({
+            "id": "live_bad",
+            "source": "live",
+            "title": "old failed live run",
+            "frames": [{"t": 0, "data": "Preparing context and calling models ..."}],
+        }),
+        encoding="utf-8",
+    )
+    (recordings / "fallback_good.json").write_text(
+        json.dumps({
+            "id": "fallback_good",
+            "source": "fallback",
+            "kind": "ctf",
+            "title": "verified fallback CTF",
+            "created_at": "2026-08-21T17:37:21Z",
+            "frames": [{"t": 0, "data": "Solved"}],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server_mod, "_CAI_RECORDINGS_DIR", recordings)
+
+    r = client.get("/api/cai/recordings")
+
+    assert r.status_code == 200
+    ids = {item["id"] for item in r.json()["recordings"]}
+    assert "fallback_good" not in ids
+    assert "live_bad" in ids
+
+    detail = client.get("/api/cai/recordings/live_bad")
+
+    assert detail.status_code == 200
+    assert detail.json()["frames"][0]["data"] == "Preparing context and calling models ..."
+
+    fallback_detail = client.get("/api/cai/recordings/fallback_good")
+
+    assert fallback_detail.status_code == 200
+    assert fallback_detail.json()["source"] == "fallback"
+
+
 def test_alerts_and_events_empty_without_session(client: TestClient) -> None:
     # No session started in tests -> controller.store is None -> [].
     r = client.get("/api/alerts")
@@ -273,6 +445,64 @@ def test_traffic_analyze_stream_replays_reports_and_completes(
     report_text = report["data"]["report"]
     for section in ("执行摘要", "IoC 指标列表", "攻击时间线", "处置建议"):
         assert section in report_text
+
+
+def test_traffic_analyze_persists_complete_runtime_logs(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Traffic history must persist the full run, not only UI replay snippets."""
+    import cyberorion.storyline as storyline
+    import cyberorion.traffic.pipeline as pipeline
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(storyline, "generate_storyline", lambda _session_dir: "# ok")
+
+    def no_llm() -> tuple[object, str]:
+        raise RuntimeError("offline test")
+
+    monkeypatch.setattr(pipeline, "_build_client", no_llm)
+
+    with client.stream(
+        "POST",
+        "/api/traffic/analyze",
+        json={"source": "synthetic", "max_rows": 370, "replay_limit": 12},
+    ) as response:
+        assert response.status_code == 200
+        events = _parse_sse_events("".join(response.iter_text()))
+
+    complete = next(event for event in events if event.get("type") == "complete")
+    session_id = complete["data"]["session_id"]
+    session_dir = tmp_path / "logs" / session_id
+
+    runtime_log = session_dir / "runtime_events.jsonl"
+    llm_log = session_dir / "llm_trace.jsonl"
+    manifest = session_dir / "log_manifest.json"
+    traffic_json = session_dir / "traffic_analysis.json"
+
+    assert runtime_log.is_file()
+    assert llm_log.is_file()
+    assert manifest.is_file()
+    assert traffic_json.is_file()
+
+    runtime_text = runtime_log.read_text(encoding="utf-8")
+    assert '"type": "replay_data"' in runtime_text
+    assert '"type": "report"' in runtime_text
+    assert '"type": "complete"' in runtime_text
+    assert "truncated" not in runtime_text
+
+    llm_text = llm_log.read_text(encoding="utf-8")
+    assert '"type": "thinking"' in llm_text
+    assert '"type": "tool_output"' in llm_text
+
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["log_files"]["runtime_events"] == "runtime_events.jsonl"
+    assert manifest_data["log_files"]["llm_trace"] == "llm_trace.jsonl"
+
+    traffic_data = json.loads(traffic_json.read_text(encoding="utf-8"))
+    assert traffic_data["event_count"] == 370
+    assert len(traffic_data["traffic_events"]) == 370
 
 
 def test_traffic_analyze_replay_limit_keeps_first_sse_frame_small(

@@ -24,8 +24,8 @@ from typing import Any
 
 # 事件时间线条目上限（telemetry.db events 表）。
 MAX_EVENTS = 500
-# timeline entries cap (prevent LLM streaming chunks from flooding frontend).
-MAX_TIMELINE = 300
+# timeline entries cap (keeps replay rich while preventing frontend freezes).
+MAX_TIMELINE = 1000
 # 摘要 / 证据字段的展示截断长度。
 _CLIP = 300
 # severity >= medium 的非 response 事件进入时间线（kind="event"）。
@@ -36,7 +36,9 @@ _JSONL_TIMELINE_EVENTS = ("session_started", "session_ended",
                           "red_action", "blue_action",
                           "session_start", "session_end",
                           "round_start", "round_end",
-                          "tool_call", "tool_output")
+                          "tool_call", "tool_output", "thinking",
+                          "report", "system", "replay_data",
+                          "traffic_event", "complete")
 # response 事件 summary 的工具名前缀（"remediate: lock_user ..."）。
 _TOOL_PREFIX_RE = re.compile(r"^([a-z_]{3,30}):\s*(.*)$")
 
@@ -256,6 +258,21 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
             title = f"{side.upper()} output: {d.get('tool') or d.get('name') or ''}"
         elif event == "thinking":
             title = f"{side.upper()} thinking"
+        elif event == "report":
+            title = f"{side.upper()} report"
+        elif event == "system":
+            title = "system"
+        elif event == "replay_data":
+            title = f"traffic replay: {d.get('events_total') or 0} events"
+        elif event == "complete":
+            title = d.get("message") or "complete"
+        elif event == "traffic_event":
+            title = _clip(
+                f"{d.get('proto') or d.get('protocol') or ''} "
+                f"{d.get('src_ip') or ''} -> {d.get('dst_ip') or ''} "
+                f"{d.get('label') or d.get('event_type') or ''}",
+                120,
+            )
         else:
             title = event
         detail = ""
@@ -269,6 +286,19 @@ def _timeline_from_jsonl(entries: list[dict]) -> list[dict]:
             detail = str(d.get("output") or "")[:300]
         elif event == "thinking":
             detail = str(d.get("text") or "")[:300]
+        elif event == "report":
+            detail = str(d.get("report") or d.get("content") or "")[:300]
+        elif event == "system":
+            detail = str(d.get("text") or d.get("message") or "")[:300]
+        elif event == "replay_data":
+            detail = _clip(
+                f"source={d.get('source') or ''}, alerts={len(d.get('alerts') or [])}, replay_limit={d.get('replay_limit') or ''}",
+                300,
+            )
+        elif event == "traffic_event":
+            detail = _clip(json.dumps(d, ensure_ascii=False, default=str), 300)
+        elif event == "complete":
+            detail = _clip(json.dumps(d, ensure_ascii=False, default=str), 300)
         else:
             detail = str(
                 d.get("output") or d.get("description") or
@@ -341,6 +371,56 @@ def _timeline_from_artifacts(
 # --------------------------------------------------------------------------- #
 # 主入口
 # --------------------------------------------------------------------------- #
+def _timeline_from_traffic_artifact(traffic: Any) -> list[dict]:
+    """Build rich replay timeline entries from traffic_analysis.json."""
+    if not isinstance(traffic, dict):
+        return []
+    items: list[dict] = []
+    for i, ev in enumerate(traffic.get("traffic_events") or []):
+        if not isinstance(ev, dict):
+            continue
+        ts = float(ev.get("ts") or i)
+        proto = ev.get("proto") or ev.get("protocol") or ""
+        src = ev.get("src_ip") or ev.get("src") or ""
+        dst = ev.get("dst_ip") or ev.get("dst") or ""
+        label = ev.get("label") or ev.get("attack_type") or ev.get("event_type") or ""
+        detail = {
+            "src_port": ev.get("src_port"),
+            "dst_port": ev.get("dst_port"),
+            "payload_size": ev.get("payload_size"),
+            "attack_type": ev.get("attack_type"),
+            "payload_hint": ev.get("payload_hint"),
+            "raw": ev.get("raw"),
+        }
+        items.append({
+            "ts": ts,
+            "kind": "traffic_event",
+            "side": "system",
+            "title": _clip(f"{proto} {src} -> {dst} {label}", 120),
+            "detail": _clip(json.dumps(detail, ensure_ascii=False, default=str), 500),
+            "technique": ev.get("technique") or "",
+            "success": None,
+        })
+    for i, alert in enumerate(traffic.get("alerts") or []):
+        if not isinstance(alert, dict):
+            continue
+        ts = float(alert.get("ts") or (len(items) + i))
+        title = _clip(
+            f"[{alert.get('severity') or 'unknown'}] {alert.get('alert_type') or alert.get('title') or 'traffic alert'}",
+            120,
+        )
+        items.append({
+            "ts": ts + 0.0001,
+            "kind": "alert",
+            "side": "blue",
+            "title": title,
+            "detail": _clip(alert.get("description") or alert.get("evidence") or "", 500),
+            "technique": alert.get("technique") or alert.get("technique_id") or "",
+            "success": None,
+        })
+    return items
+
+
 def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
     """构建单个历史会话的详情 JSON（``GET /api/sessions/{id}/detail``）。
 
@@ -389,7 +469,20 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
             except Exception:
                 pass
 
-    jsonl_entries = _load_timeline_jsonl(session_dir / "timeline.jsonl")
+    jsonl_entries = _load_timeline_jsonl(session_dir / "runtime_events.jsonl")
+    if not jsonl_entries:
+        jsonl_entries = _load_timeline_jsonl(session_dir / "timeline.jsonl")
+
+    traffic_artifact: dict[str, Any] = {}
+    traffic_file = session_dir / "traffic_analysis.json"
+    if traffic_file.is_file():
+        try:
+            loaded = json.loads(
+                traffic_file.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(loaded, dict):
+                traffic_artifact = loaded
+        except Exception:
+            traffic_artifact = {}
 
     responses = [e for e in events if (e.get("source") or "") == "response"]
     tool_calls = _merge_tool_calls(
@@ -424,6 +517,8 @@ def build_session_detail(session_dir: "str | Path") -> dict[str, Any]:
     storyline_md = _read("storyline.md")
     timeline = _timeline_from_db(attacks, alerts, events) \
         + _timeline_from_jsonl(jsonl_entries)
+    if traffic_artifact:
+        timeline += _timeline_from_traffic_artifact(traffic_artifact)
     if not timeline:
         timeline = _timeline_from_artifacts(
             session_dir, session_id, session_type, metrics, report_md,

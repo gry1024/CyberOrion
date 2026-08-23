@@ -1,10 +1,11 @@
 // App — Kimi 式布局：左侧 240px 侧边栏 + 主内容区
 // 视图切换由侧边栏驱动；作战台 = 双栏红蓝流式输出（Kimi chat 风格）。
 //
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArenaProvider } from './arena'
 import type { ViewKey } from './types'
 import { Sidebar } from './components/Sidebar'
+import { CaiTerminalView } from './components/CaiTerminalView'
 import { ArenaView } from './components/ArenaView'
 import { TrafficView } from './components/TrafficView'
 import { BenchmarkView } from './components/BenchmarkView'
@@ -16,13 +17,22 @@ import { AboutView } from './components/AboutView'
 import { Toaster } from './components/Toaster'
 
 export default function App() {
-  const [view, setView] = useState<ViewKey>('arena')
+  const [view, setView] = useState<ViewKey>('cai')
+
+  useEffect(() => {
+    const onCaiReplay = () => setView('cai')
+    window.addEventListener('cai-replay-request', onCaiReplay)
+    return () => window.removeEventListener('cai-replay-request', onCaiReplay)
+  }, [])
 
   return (
     <ArenaProvider>
       <div className="flex h-full overflow-hidden">
         <Sidebar view={view} onView={setView} />
         <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
+          <div className={view === 'cai' ? 'flex min-h-0 flex-1' : 'hidden'} aria-hidden={view !== 'cai'}>
+            <CaiTerminalView active={view === 'cai'} />
+          </div>
           {view === 'arena' && <ArenaView />}
           {view === 'traffic' && <TrafficView />}
           {view === 'bench' && (

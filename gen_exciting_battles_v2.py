@@ -4,7 +4,7 @@ from __future__ import annotations
 import json, time
 from pathlib import Path
 
-LOGS_DIR = Path('/opt/cyberorion/logs')
+LOGS_DIR = Path(__file__).resolve().parent / 'logs'
 TIMESTAMP_FMT = '%Y%m%d_%H%M%S'
 
 

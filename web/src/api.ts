@@ -3,6 +3,9 @@
 import type {
   AgentRoleSpec,
   AlertRow,
+  CaiCtfCatalog,
+  CaiRecording,
+  CaiRecordingSummary,
   BenchMode,
   BenchQuestionPreview,
   BenchRunDetail,
@@ -89,6 +92,12 @@ async function getText(path: string): Promise<string> {
 }
 
 export const api = {
+  getCaiCtfs: () => get('/api/cai/ctfs') as Promise<CaiCtfCatalog>,
+  getCaiRecordings: () =>
+    get('/api/cai/recordings') as Promise<{ count: number; recordings: CaiRecordingSummary[] }>,
+  getCaiRecording: (id: string) =>
+    get(`/api/cai/recordings/${encodeURIComponent(id)}`) as Promise<CaiRecording>,
+
   getStatus: () => get('/api/status') as Promise<ControllerStatus>,
   getScenario: () => get('/api/scenario') as Promise<ScenarioInfo>,
   getScenarios: () => get('/api/scenarios') as Promise<ScenarioList>,
