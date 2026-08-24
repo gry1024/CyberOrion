@@ -1318,6 +1318,9 @@ def _scan_sessions() -> list[dict[str, Any]]:
             "id": d.name,
             "dir": str(d),
             "has_report": (d / "report.md").is_file(),
+            "has_report_pdf": (d / "report.pdf").is_file(),
+            "report_pdf_url": f"/api/sessions/{d.name}/report/pdf"
+            if (d / "report.pdf").is_file() else "",
             "has_metrics": metrics_file.is_file(),
             "score": score,
             "scenario": scenario_name,
@@ -1454,6 +1457,15 @@ async def session_report(session_id: str) -> Any:
         return path
     return {"id": session_id,
             "report": path.read_text(encoding="utf-8", errors="replace")}
+
+
+@app.get("/api/sessions/{session_id}/report/pdf")
+async def session_report_pdf(session_id: str) -> Any:
+    """Return the final compiled PDF for one history session."""
+    path = _session_file(session_id, "report.pdf")
+    if isinstance(path, JSONResponse):
+        return path
+    return FileResponse(path, media_type="application/pdf", filename=f"{session_id}.pdf")
 
 
 @app.get("/api/sessions/{session_id}/metrics")

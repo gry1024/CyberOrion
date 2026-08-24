@@ -872,9 +872,38 @@ class Controller:
         if self.store is not None:
             try:
                 from ..eval.report import finalize_session
-                self.last_metrics = finalize_session(
-                    self.store, Path(self.store.path).parent,
-                )
+                session_dir = Path(self.store.path).parent
+                self.last_metrics = finalize_session(self.store, session_dir)
+                try:
+                    from ..reporting import generate_report_artifacts
+
+                    report_text = (session_dir / "report.md").read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                    timeline_text = (session_dir / "timeline.jsonl").read_text(
+                        encoding="utf-8", errors="replace"
+                    ) if (session_dir / "timeline.jsonl").is_file() else ""
+                    await generate_report_artifacts(
+                        {
+                            "id": self.session_id,
+                            "task_type": "purple_team",
+                            "status": "success",
+                            "summary": f"攻防演练场景：{self.store.scenario_name}",
+                            "scenario": self.store.scenario_name,
+                            "metrics": self.last_metrics,
+                            "frames": [
+                                {"data": report_text},
+                                {"data": timeline_text},
+                            ],
+                            "recommendations": [
+                                "由安全人员复核红蓝双方证据、检测与处置结论。",
+                                "对未验证结论补充原始遥测和攻击证据后再执行变更。",
+                            ],
+                        },
+                        session_dir,
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
             try:

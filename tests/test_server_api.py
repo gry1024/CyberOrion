@@ -259,6 +259,34 @@ def test_cai_recordings_include_live_runs_and_detail(
     assert fallback_detail.json()["source"] == "fallback"
 
 
+def test_session_report_pdf_endpoint_and_history_flag(
+    tmp_path: Path,
+    monkeypatch,
+    client: TestClient,
+) -> None:
+    import server as server_mod
+
+    logs_dir = tmp_path / "logs"
+    session_id = "session_20260824_184900"
+    session_dir = logs_dir / session_id
+    session_dir.mkdir(parents=True)
+    (session_dir / "report.md").write_text("报告内容用于验证历史会话 PDF 报告入口。" * 2, encoding="utf-8")
+    (session_dir / "metrics.json").write_text("{}", encoding="utf-8")
+    (session_dir / "timeline.jsonl").write_text('{"kind":"test"}\n', encoding="utf-8")
+    (session_dir / "report.pdf").write_bytes(b"%PDF-1.4 test")
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+
+    listing = client.get("/api/sessions")
+    assert listing.status_code == 200
+    item = next(row for row in listing.json() if row["id"] == session_id)
+    assert item["has_report_pdf"] is True
+    assert item["report_pdf_url"].endswith(f"/api/sessions/{session_id}/report/pdf")
+
+    response = client.get(f"/api/sessions/{session_id}/report/pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+
+
 def test_alerts_and_events_empty_without_session(client: TestClient) -> None:
     # No session started in tests -> controller.store is None -> [].
     r = client.get("/api/alerts")
