@@ -78,8 +78,8 @@ RETRIEVAL_MIN_SCORE = 0.45
 
 _ANSWER_INSTRUCTION = (
     "请先简要推理（不超过3句话），然后在【最后一行】严格输出："
-    "ANSWER: [\"A\"]（只包含你选定的选项字母，JSON 数组格式）。"
-    "选择你认为最正确的选项；如果多个选项都合理，选择最有把握的一个。"
+    "ANSWER: [\"A\",\"C\"]（只包含所有正确选项的字母，JSON 数组格式）。"
+    "本题可能有一个或多个正确答案；不要加入仅仅看似合理但不正确的选项。"
 )
 
 # RAG 提示迭代版本号（记录进 run dict，便于对比不同提示的效果）。
@@ -122,6 +122,7 @@ ARM_LABELS = {
     "bare": "纯 LLM（无框架增强）",
     "framework": "CyberOrion 框架（知识库层：两段式检索 + playbook 注入 + 作答规则）",
 }
+METHODOLOGY_STATUS = "external_track"
 
 # 检索到的知识条目的“证据地位”（v7 起）：条目只描述家族的【典型】行为，
 # 不是本题样本的确定事实（题目引用具体沙箱报告、报告内容未随题提供）。
@@ -129,22 +130,22 @@ ARM_LABELS = {
 # 让模型过度采信 playbook：SBX008 提到窃取数据就选数据窃取选项、KB 没提
 # 逃避技术就漏选 “All of the above”——n=100 全对率 0.140→0.100 负增益的
 # 主因。v7 改为“佐证之一，绝不据此断定/排除”，判断以题目文本为准。
-# run_bench 支持的全部 suite（单一事实源）；attack_kb 套件的 mode 白名单
-# 见 bench/attack_kb.py 的 MODES。
-SUITES = ("malware_analysis", "attack_kb", "threat_intel", "soc_evidence", "cybergym_lite")
+# 兼容旧调用方；真正的单一事实源是 bench/registry.py。
+from .registry import SUITES as _SUITE_REGISTRY
+SUITES = tuple(_SUITE_REGISTRY)
 
 # rag_g 模式追加的作答规则（接在 rag v2 的 3 条要求之后）。
 _GUESS_RULES = (
     "4. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案（如 ANSWER: []）。\n"
     "5. 当题目引用的沙箱报告内容未随题提供时，基于 MITRE ATT&CK 知识"
-    "和选项间的相对合理性给出最佳猜测（宁缺毋滥，只选最有把握的选项）。\n\n"
+    "和选项间的相对合理性给出最佳猜测（宁缺毋滥，至少选择最有把握的一个选项）。\n\n"
 )
 
 # rag v7（默认）同款规则，编号接在知识使用指引/逐项裁决之后。
 _GUESS_RULES_V5 = (
     "6. 【禁止弃答】每题必须选出你认为最可能的选项，不得输出空答案。\n"
     "7. 当题目引用的沙箱报告内容未随题提供时，基于检索到的家族/类别"
-    "行为资料和选项间的相对合理性给出最佳猜测（宁缺毋滥，只选最有把握的选项）。\n\n"
+    "行为资料和选项间的相对合理性给出最佳猜测（宁缺毋滥，至少选择最有把握的一个选项）。\n\n"
 )
 
 # 沙箱报告摘要的生成上限：MITRE 映射最多取前 _REPORT_MITRE_CAP 条、
@@ -360,8 +361,8 @@ def load_questions(path: "str | Path" = DEFAULT_QUESTIONS,
             gold = q.get("correct_options")
             if not isinstance(gold, list) or not gold:
                 raise ValueError(f"第 {i} 题 correct_options 必须是非空数组")
-            # 单选模式：只取第一个正确选项作为标准答案
-            gold_letters = sorted({str(gold[0]).strip().upper()})
+            # 官方协议按完整答案集合评分；不得截断多答案题。
+            gold_letters = sorted({str(item).strip().upper() for item in gold})
             valid = {chr(ord("A") + k) for k in range(len(options))}
             if any(a not in valid for a in gold_letters):
                 raise ValueError(f"第 {i} 题 correct_options 超出选项范围")
@@ -457,17 +458,13 @@ def majority_vote(sample_preds: list[list[str]], k: int) -> list[str]:
 def grade(pred: list[str], gold: list[str]) -> tuple[bool, float]:
     """返回 (exact_match, jaccard)。pred 为空时 (False, 0.0)。
 
-    单选模式：只比较第一个选项。多选模式：Jaccard 部分得分。
+    官方协议：完整答案集合完全相等才是 exact match；Jaccard 提供部分分。
     """
     p, g = set(pred), set(gold)
     if not g:
         return False, 0.0
     if not p:
         return False, 0.0
-    # 单选题（gold 只有1个选项）：exact match 判断第一个选项是否正确
-    if len(g) == 1:
-        match = len(p & g) > 0
-        return match, 1.0 if match else 0.0
     jaccard = len(p & g) / len(p | g)
     return p == g, jaccard
 
@@ -877,7 +874,9 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                     on_progress=None, run_id: "str | None" = None,
                     sc_k: int = SC_K,
                     sc_temperature: float = SC_TEMPERATURE,
-                    suite: str = "malware_analysis") -> dict:
+                    suite: str = "malware_analysis",
+                    profile: str = "daily",
+                    dataset_version: "str | None" = None) -> dict:
     """跑一次基准并持久化结果，返回 run dict。
 
     Args:
@@ -896,6 +895,87 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             旧的两参数回调也兼容）。
         sc_k / sc_temperature: sc 模式的每题采样数与采样温度。
     """
+    if mode == "compare":
+        # 同一父 run 下固定相同数据、模型和 seed。交互套件比较三臂；
+        # QA 套件只比较有意义的 base/rag 两臂。
+        if suite in ("secalertbench", "excytin", "cage2"):
+            arm_modes = ["base", "single", "agent"]
+        elif suite == "soc_contract":
+            arm_modes = ["base", "single", "agent"]
+        elif suite == "soc_evidence":
+            arm_modes = ["base", "rag", "agent"]
+        elif suite == "cybergym_lite":
+            arm_modes = ["base", "agent"]
+        else:
+            arm_modes = ["base", "rag"]
+        parent_id = run_id or time.strftime(
+            f"%Y%m%d_%H%M%S_{suite}_compare_n{n}")
+        arms = []
+        started_compare = time.time()
+        for arm_index, arm_mode in enumerate(arm_modes):
+            def arm_progress(done: int, total: int, errors: int = 0,
+                             *, _offset: int = arm_index) -> None:
+                if on_progress:
+                    on_progress(_offset * total + done,
+                                len(arm_modes) * total, errors)
+            arms.append(await run_bench(
+                n=n, mode=arm_mode, seed=seed, questions_path=questions_path,
+                log_dir=log_dir, concurrency=concurrency, llm=llm, kb=kb,
+                on_progress=arm_progress, run_id=f"{parent_id}_{arm_mode}",
+                sc_k=sc_k, sc_temperature=sc_temperature, suite=suite,
+                profile=profile, dataset_version=dataset_version))
+        primary = arms[-1].get("scores") or {}
+        arm_scores = {arm["mode"]: arm.get("scores") for arm in arms}
+        single_score = (arm_scores.get("single") or arm_scores.get("base") or {}).get(
+            "avg_score", 0.0)
+        agent_score = (arm_scores.get("agent") or arm_scores.get("rag") or {}).get(
+            "avg_score", 0.0)
+        def row_score(row: dict) -> float:
+            if isinstance(row.get("metrics"), dict):
+                return float(row["metrics"].get("task_success", 0.0))
+            if row.get("native_reward") is not None:
+                return float(row["native_reward"])
+            if row.get("reward") is not None:
+                return float(row["reward"])
+            if "gold" in row and "pred" in row:
+                return 1.0 if row.get("gold") == row.get("pred") else 0.0
+            return float(row.get("jaccard", 0.0))
+
+        reference = (next((a for a in arms if a["mode"] == "single"), None)
+                     or next((a for a in arms if a["mode"] == "base"), arms[0]))
+        agent_arm = next((a for a in arms if a["mode"] in ("agent", "rag")), arms[-1])
+        paired = [row_score(a) - row_score(b) for b, a in zip(
+            reference.get("results") or [], agent_arm.get("results") or [])]
+        from .external_common import bootstrap_ci
+        parent = {
+            "schema_version": 3, "run_id": parent_id, "suite": suite,
+            "mode": "compare", "arm": None, "profile": profile,
+            "n": arms[-1].get("n", n), "seed": seed,
+            "model": arms[-1].get("model"),
+            "started_at": started_compare, "finished_at": time.time(),
+            "elapsed_sec": round(time.time() - started_compare, 2),
+            "scores": primary, "results": [], "status": (
+                "error" if all(a.get("status") == "error" for a in arms) else "done"),
+            "llm_errors": sum(int(a.get("llm_errors", 0)) for a in arms),
+            "error": next((a.get("error") for a in arms if a.get("error")), None),
+            "methodology_status": arms[-1].get("methodology_status"),
+            "benchmark_provenance": arms[-1].get("benchmark_provenance"),
+            "comparison": {
+                "arms": [{"run_id": a["run_id"], "mode": a["mode"],
+                          "scores": a.get("scores")} for a in arms],
+                "primary_metric": "avg_score",
+                "agent_minus_reference": round(agent_score - single_score, 4),
+                "paired_n": len(paired),
+                "paired_delta_ci": bootstrap_ci(paired, seed + 100),
+                "shared": {"n": n, "seed": seed, "model": arms[-1].get("model")},
+            },
+        }
+        out_dir = Path(log_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"{parent_id}.json"
+        out.write_text(json.dumps(parent, ensure_ascii=False, indent=2), encoding="utf-8")
+        parent["path"] = str(out)
+        return parent
     if suite == "attack_kb":
         from . import attack_kb
         return await attack_kb.run_bench(
@@ -914,11 +994,32 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             n=n, mode=mode, seed=seed, log_dir=log_dir,
             concurrency=concurrency, llm=llm, kb=kb,
             on_progress=on_progress, run_id=run_id)
+    if suite == "soc_contract":
+        from . import soc_contract
+        return await soc_contract.run_bench(
+            n=n, mode=mode, seed=seed, profile=profile,
+            dataset_version=dataset_version, log_dir=log_dir,
+            concurrency=concurrency, llm=llm,
+            on_progress=on_progress, run_id=run_id)
     if suite == "cybergym_lite":
         from . import cybergym_lite
         return await cybergym_lite.run_bench(
             n=n, mode=mode, seed=seed, log_dir=log_dir,
             concurrency=concurrency, llm=llm, kb=kb,
+            on_progress=on_progress, run_id=run_id)
+    if suite == "live_paired":
+        from . import live_paired
+        return await live_paired.run_bench(
+            n=n, mode=mode, seed=seed, profile=profile,
+            dataset_version=dataset_version, log_dir=log_dir,
+            on_progress=on_progress, run_id=run_id)
+    if suite in ("secalertbench", "excytin", "cage2"):
+        from .registry import module_for
+        module = module_for(suite)
+        return await module.run_bench(
+            n=n, mode=mode, seed=seed, profile=profile,
+            dataset_version=dataset_version, log_dir=log_dir,
+            concurrency=concurrency, llm=llm,
             on_progress=on_progress, run_id=run_id)
     if suite != "malware_analysis":
         raise ValueError(f"未知 suite: {suite!r}（支持 {SUITES}）")
@@ -959,14 +1060,13 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                 if mode in ("rag", "sc"):
                     # v5：两段式检索（家族类别 + 题干；低分时并入选项文本
                     # 重检）。
-                    kb_docs = await asyncio.to_thread(
-                        retrieve_for_question, kb, q, RAG_TOP_K)
+                    # 检索是短时本地只读操作；直接执行可避免部分 CAI/
+                    # asyncio 环境在 asyncio.run() 退出时等待默认线程池。
+                    kb_docs = retrieve_for_question(kb, q, RAG_TOP_K)
                 else:
                     # legacy（rag_fs / rag_g）：保持 v2 的题干单段检索，
                     # 用于新旧配方对比。
-                    kb_docs = await asyncio.to_thread(kb.search,
-                                                      q["question"],
-                                                      RAG_TOP_K)
+                    kb_docs = kb.search(q["question"], RAG_TOP_K)
             except Exception:
                 kb_docs = []
         system, user = build_prompt(q, prompt_mode, kb_docs)
@@ -1017,11 +1117,21 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     await asyncio.gather(*(answer(i, q) for i, q in enumerate(questions)))
     finished = time.time()
     results = [r for r in rows if r is not None]
+    scores = compute_scores(results)
+    from .assets import sha256_file
+    from .external_common import bootstrap_ci
+    scores["confidence_intervals"] = {
+        "correct_mc_pct": bootstrap_ci(
+            [1.0 if row["exact"] else 0.0 for row in results], seed),
+        "avg_score": bootstrap_ci(
+            [float(row["jaccard"]) for row in results], seed + 1),
+    }
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     run_id = run_id or f"{ts}_{suite}_{mode}_n{len(results)}"
     llm_errors = err_questions
     run = {
+        "schema_version": 3,
         "run_id": run_id,
         "suite": suite,
         "mode": mode,
@@ -1037,7 +1147,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "started_at": started,
         "finished_at": finished,
         "elapsed_sec": round(finished - started, 1),
-        "scores": compute_scores(results),
+        "scores": scores,
         "results": results,
         # LLM endpoint 故障可见性：失败题数 + 首条错误信息；全部失败时
         # status="error"（持久化 + 由 server 经 WS/REST 透出）。
@@ -1045,6 +1155,32 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "error": first_llm_error[0] if llm_errors else None,
         "status": ("error" if results and llm_errors == len(results)
                    else "done"),
+        "methodology_status": "external_track",
+        "methodology": {
+            "official_alignment": "official questions.json schema, full correct_options set, Jaccard and exact-match scorer",
+            "differences": [
+                "CyberOrion plaintext ANSWER parser replaces upstream guided JSON correct_answers runner",
+                "CyberOrion prompt and optional RAG context differ from the upstream prompt constructor",
+                "one upstream row with empty correct_options is excluded as unscorable",
+                "not directly comparable to the official leaderboard",
+            ],
+        },
+        "benchmark_provenance": {
+            "name": "CyberSOCEval malware_analysis",
+            "upstream_url": "https://github.com/meta-llama/PurpleLlama",
+            "protocol": "complete_answer_set_exact_match_and_jaccard",
+            # 使用自有纯文本 harness（规避 endpoint 的 json_object 问题），
+            # 数据和 scorer 对齐，但提示/runner 不完全相同，不能冒充官方跑分。
+            "comparable_to_upstream": False,
+            "sample_scope": "full" if len(results) == len(load_questions()) else "subset",
+            "dataset_version": dataset_version or "local-PurpleLlama-checkout",
+            "upstream_n": 609, "usable_n": len(load_questions()),
+            "excluded": [{"idx": 424, "reason": "empty correct_options"}],
+            "dataset_file": str(Path(questions_path)),
+            "dataset_sha256": sha256_file(questions_path),
+            "sample_manifest": [row["idx"] for row in results],
+            "seed": seed,
+        },
     }
     if is_sc:
         run["sc_k"] = sc_k
@@ -1086,6 +1222,12 @@ def list_runs(log_dir: "str | Path" = DEFAULT_LOG_DIR) -> list[dict]:
                 "error": run.get("error"),
                 "llm_errors": run.get("llm_errors", 0),
                 "path": str(p),
+                "profile": run.get("profile"),
+                "methodology_status": run.get("methodology_status") or (
+                    "legacy_invalid_gold_v1"
+                    if (run.get("suite") or "malware_analysis") in
+                    ("malware_analysis", "threat_intel") else "engineering_only"),
+                "benchmark_provenance": run.get("benchmark_provenance"),
             })
         except Exception:
             continue

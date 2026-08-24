@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from cyberorion.bench.cybersoceval import SUITES, run_bench  # noqa: E402
 
 
 def _print_result(run: dict) -> None:
-    s = run["scores"]
+    s = run.get("scores") or {}
     arm = run.get("arm") or "-"
     print(f"\n== 运行 {run['run_id']} ==")
     print(f"  suite={run.get('suite', 'malware_analysis')}  "
@@ -35,15 +36,36 @@ def _print_result(run: dict) -> None:
           f"耗时={run['elapsed_sec']}s")
     if run.get("suite_desc"):
         print(f"  {run['suite_desc']}")
-    print(f"  correct_mc_pct（全对率）: {s['correct_mc_pct']:.3f}")
-    print(f"  avg_score（Jaccard 部分分）: {s['avg_score']:.3f}")
-    print(f"  parse_fail（解析失败数）: {s['parse_fail']}")
-    print("  按难度：")
-    for diff, g in s.get("by_difficulty", {}).items():
-        print(f"    {diff:<8} n={g['n']:<4} correct={g['correct_mc_pct']:.3f}"
-              f"  avg={g['avg_score']:.3f}")
-    print(f"  逐题报告（完整题干/选项/模型回答）："
-          f"{run.get('report') or run['path'].replace('.json', '.md')}")
+    if "correct_mc_pct" in s:
+        print(f"  correct_mc_pct（全对率）: {s['correct_mc_pct']:.3f}")
+        print(f"  avg_score（Jaccard/兼容主分）: {s.get('avg_score', 0):.3f}")
+        print(f"  parse_fail（解析失败数）: {s.get('parse_fail', 0)}")
+        if s.get("by_difficulty"):
+            print("  按难度：")
+        for diff, group in s.get("by_difficulty", {}).items():
+            print(f"    {diff:<8} n={group['n']:<4} "
+                  f"correct={group['correct_mc_pct']:.3f}  "
+                  f"avg={group['avg_score']:.3f}")
+    else:
+        # 外部套件保留各自原生指标，不强行映射为 MC/Jaccard。
+        preferred = (
+            "accuracy", "attack_recall", "precision", "f1", "pr_auc",
+            "native_reward", "official_reward", "mean_reward",
+            "availability_penalty", "illegal_action_rate", "task_success",
+        )
+        shown = False
+        for name in preferred:
+            value = s.get(name)
+            if isinstance(value, (int, float)):
+                print(f"  {name}: {value:.4f}")
+                shown = True
+        if not shown:
+            print("  scores: " + json.dumps(s, ensure_ascii=False, default=str))
+    report = run.get("report")
+    if report:
+        print(f"  报告：{report}")
+    elif run.get("path"):
+        print(f"  运行产物：{run['path']}")
 
 
 def _print_compare(base: dict, rag: dict) -> None:
@@ -104,13 +126,16 @@ async def _main() -> None:
                         choices=list(SUITES),
                         help="attack_kb = ATT&CK 知识库访问能力测试（仅 "
                              "base/rag）")
-    parser.add_argument("--n", type=int, default=100, help="题目数（<=100）")
+    parser.add_argument("--n", type=int, default=100, help="任务数；外部大数据可运行代表子集")
     parser.add_argument("--mode", default="both",
-                        choices=["base", "rag", "both", "sc", "sc_base",
-                                 "rag_fs", "rag_g"],
+                        choices=["base", "rag", "single", "agent", "paired", "both", "compare",
+                                 "sc", "sc_base", "rag_fs", "rag_g"],
                         help="rag=默认 v5 配方；rag_fs/sc/sc_base/rag_g "
                              "为 legacy 对比模式（仅 malware_analysis）")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--profile", choices=["daily", "publication"],
+                        default="daily", help="daily=固定代表集；publication=全量/官方协议")
+    parser.add_argument("--dataset-version", default=None)
     parser.add_argument("--sc-k", type=int, default=3,
                         help="sc/sc_base 模式每题采样次数")
     parser.add_argument("--sc-temp", type=float, default=0.7,
@@ -121,29 +146,42 @@ async def _main() -> None:
     args = parser.parse_args()
 
     base_run = rag_run = None
-    if args.mode in ("base", "both"):
-        print(f"[run_bench] suite={args.suite} base 模式启动：n={args.n} "
-              f"seed={args.seed}", flush=True)
-        base_run = await run_bench(n=args.n, mode="base", seed=args.seed,
-                                   suite=args.suite)
-        _print_result(base_run)
+    if args.mode == "compare":
+        print(f"[run_bench] suite={args.suite} compare 启动：n={args.n} "
+              f"profile={args.profile} seed={args.seed}", flush=True)
+        run = await run_bench(
+            n=args.n, mode="compare", seed=args.seed, suite=args.suite,
+            profile=args.profile, dataset_version=args.dataset_version)
+        _print_result(run)
+        comparison = run.get("comparison") or {}
+        for arm in comparison.get("arms") or []:
+            print(f"  {arm['mode']}: {arm['scores'].get('avg_score')}")
+        print(f"  agent-reference Δ: {comparison.get('agent_minus_reference')}")
+        return
+    requested_modes = (["base", "rag"] if args.mode == "both" else [args.mode])
+    for selected_mode in requested_modes:
+        if selected_mode in ("sc", "sc_base", "rag_fs", "rag_g"):
+            continue
+        print(f"[run_bench] suite={args.suite} {selected_mode} 模式启动：n={args.n} "
+              f"profile={args.profile} seed={args.seed}", flush=True)
+        run = await run_bench(
+            n=args.n, mode=selected_mode, seed=args.seed, suite=args.suite,
+            profile=args.profile, dataset_version=args.dataset_version)
+        _print_result(run)
         if args.show_questions:
-            _print_questions(base_run)
-    if args.mode in ("rag", "both"):
-        print(f"[run_bench] suite={args.suite} rag 模式启动：n={args.n} "
-              f"seed={args.seed}", flush=True)
-        rag_run = await run_bench(n=args.n, mode="rag", seed=args.seed,
-                                  suite=args.suite)
-        _print_result(rag_run)
-        if args.show_questions:
-            _print_questions(rag_run)
+            _print_questions(run)
+        if selected_mode == "base":
+            base_run = run
+        elif selected_mode == "rag":
+            rag_run = run
     if args.mode in ("sc", "sc_base", "rag_fs", "rag_g"):
         print(f"[run_bench] suite={args.suite} {args.mode} 模式启动："
               f"n={args.n} seed={args.seed} k={args.sc_k} temp={args.sc_temp}",
               flush=True)
         run = await run_bench(n=args.n, mode=args.mode, seed=args.seed,
                               sc_k=args.sc_k, sc_temperature=args.sc_temp,
-                              suite=args.suite)
+                              suite=args.suite, profile=args.profile,
+                              dataset_version=args.dataset_version)
         _print_result(run)
         if args.show_questions:
             _print_questions(run)
@@ -152,4 +190,22 @@ async def _main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(_main())
+    try:
+        asyncio.run(_main())
+    except Exception as exc:
+        # 外部资产缺失和 live harness 未注入都属于可预期的结构化跳过，
+        # 绝不能伪造成零分或成功 run。未知异常仍原样抛出，保留诊断栈。
+        code = getattr(exc, "code", None)
+        if code in {"benchmark_asset_missing", "live_benchmark_unavailable"}:
+            skipped = {
+                "status": "skipped",
+                "code": code,
+                "reason": str(exc),
+                "suite": getattr(exc, "suite", None),
+            }
+            asset = getattr(exc, "asset", None)
+            if asset is not None:
+                skipped["asset"] = asset
+            print(json.dumps(skipped, ensure_ascii=False, indent=2))
+            raise SystemExit(3) from None
+        raise

@@ -13,7 +13,8 @@ CyberOrion 把一次真实 SOC 对抗搬进本地靶场：
   一样靠日志/网络/进程/文件遥测发现攻击，上报、处置、复查；
 - **裁判**在服务端：红方 `claim_success` 由服务端用 ground truth 客观验证，
   蓝方 `report_finding` 与遥测攻击真值比对计算检测率/MTTD/蓝队分；
-- **Benchmark** 用同一模型对比「裸模型 vs 框架」两臂，量化脚手架的价值：
+- **Benchmark** 用同一模型、同数据、同总预算比较普通 LLM、单体 ReAct 与
+  SUPER-AGENT，并按公开认可主榜、外部大规模轨和内部契约轨分层：
   以 CyberSOCEval 知识问答（malware_analysis + attack_kb）与威胁情报推理
   （threat_intel）为基准。
 
@@ -23,7 +24,7 @@ CyberOrion 把一次真实 SOC 对抗搬进本地靶场：
 | --- | --- | --- |
 | 作战台 | sidebar → 作战台 | 红方 vs 蓝方 SUPER-AGENT 真实对抗，3 靶机 / round-by-round |
 | 流量分析 | sidebar → 流量分析 | 4 阶段流水线：规则检测 → LLM 语义分析 → 攻击链重建 → 报告生成 |
-| 基准测试 | sidebar → 基准测试 | CyberSOCEval 三套件（malware_analysis / attack_kb / threat_intel）双臂对比 |
+| 基准测试 | sidebar → 基准测试 | CyberSOCEval、ExCyTIn、CAGE-2、SecAlertBench 与内部契约轨 |
 | 历史复盘 | sidebar → 历史复盘 | 会话详情：AI 复盘（storyline LLM 生成）+ 战役统计 + 红蓝对垒时间线 + 工具调用 + 报告 |
 | 主机卫士 | sidebar → 主机卫士 | SSH 单主机维护：4 阶段扫描分析（侦察/扫描/研判/加固）+ chat 模式 |
 | 技能模块 | sidebar → 技能模块 | 红蓝隔离的 Skill 目录浏览 |
@@ -156,19 +157,12 @@ nmap_scan 侦察端口/服务
 
 ## Benchmark 成绩
 
-同一模型、同一批任务、同一 seed，「裸模型 vs CyberOrion 框架」两臂对比
-（`logs/bench/` 真实运行记录，deepseek-v4-flash，n=100 seed=42）。
-**主指标 = Jaccard 平均得分**（多选每题按 交集÷并集 部分给分，比 exact
-全对更公平地反映能力；单选套件 Jaccard == 正确率）：
-
-| 套件 | 纯 LLM | CyberOrion 框架 | Δ | 说明 |
-| --- | --- | --- | --- | --- |
-| **ATT&CK 知识检索**（attack_kb，单选 检测描述→技术编号） | 51% | **87%** | **+36pt** | 答案就在知识库：框架臂检索注入即对号甄别 |
-| **恶意软件分析**（malware_analysis，609 题多选） | 39.0% | **48.6%** | **+9.6pt** | v8.3 报告摘要+API/哈希证据注入，全对率 0.12→0.25 |
-| **威胁情报推理**（threat_intel，CrowdStrike 588 题多选） | 57.0% | 56.5% | ≈持平 | 题干自包含，框架知识层增益有限（诚实基线） |
-
-完整逐题结果（题干/选项/模型作答/判定）在 UI「基准测试」页每个套件区块
-内直接可见；技术报告弹窗含评测设计/方法/指标定义/局限。
+Benchmark 按外部公开数据适配轨（CyberSOCEval、ExCyTIn、CAGE-2、
+SecAlertBench）、内部 runtime-loop 契约轨、paired live Docker 轨和工程轨
+分层展示；只有 runner/scorer 完全对齐时才标记官方可比，不合成不透明总分。旧版
+CyberSOCEval 曾截断多答案并采用宽松包含式评分，相关历史数字已标记
+`legacy_invalid_gold_v1`，不能作为当前成绩。新结果必须显示数据版本、样本量、
+完整/代表集状态、文件哈希、运行臂和方法学状态；详见 [BENCHMARK.md](BENCHMARK.md)。
 
 ## 攻防演示（红蓝对垒）
 

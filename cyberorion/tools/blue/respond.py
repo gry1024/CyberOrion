@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 
@@ -26,7 +27,8 @@ _FAILURE_PREFIXES = ("非法", "无法", "加固失败", "回滚失败", "未知
                      "处置失败")
 
 
-def _record_response(action: str, host: str, detail: str) -> None:
+def _record_response(action: str, host: str, detail: str,
+                     related_alert_id: int = 0) -> None:
     """把一次防御处置写入事件表（source='response'），供评分统计。
 
     永远不抛异常：无绑定 store（无活动会话）或写入失败时静默跳过，
@@ -36,9 +38,23 @@ def _record_response(action: str, host: str, detail: str) -> None:
         store = get_store()
         if store is None:
             return
+        related = None
+        if related_alert_id:
+            related = store.get_alert(int(related_alert_id))
+        if related is None:
+            related = next((row for row in store.query_alerts(limit=100)
+                            if row.get("host") == host
+                            and row.get("verdict") in ("malicious", "suspicious")), None)
+        payload = {
+            "schema": "cyberorion.response.v2", "action": action,
+            "effect": "verified", "target": host, "detail": detail,
+            "related_alert_id": related.get("id") if related else None,
+        }
         store.insert_event(
-            host=host, source="response", technique="",
+            host=host, source="response",
+            technique=(related.get("technique") if related else "") or "",
             severity="info", summary=f"{action}: {detail}",
+            raw=json.dumps(payload, ensure_ascii=False),
         )
     except Exception:
         pass
@@ -158,13 +174,15 @@ def _sshd_block(ip: str, flag: str, container: str) -> "tuple[bool, str]":
 
 
 @function_tool
-def block_ip(ip: str, container: str = "", duration_minutes: int = 0) -> str:
+def block_ip(ip: str, container: str = "", duration_minutes: int = 0,
+             related_alert_id: int = 0) -> str:
     """在目标容器上用 iptables 封禁一个 IP。
 
     Args:
         ip: 要封禁的 IPv4 地址（攻击来源）。
         container: 目标名或容器名；空串表示场景内全部目标。
         duration_minutes: >0 时定时自动解封（分钟）；0 表示永久封禁。
+        related_alert_id: 触发本次处置的蓝队告警 id；未知时填 0。
 
     Returns:
         每个容器的实际执行结果。
@@ -196,7 +214,7 @@ def block_ip(ip: str, container: str = "", duration_minutes: int = 0) -> str:
     if ok_any:
         # 埋点：评分引擎据此统计防御响应动作。
         _record_response("block_ip", ",".join(targets),
-                         f"封禁 {ip} -> {','.join(targets)}")
+                         f"封禁 {ip} -> {','.join(targets)}", related_alert_id)
     return _clip("\n".join(lines))
 
 
@@ -242,7 +260,8 @@ def unblock_ip(ip: str, container: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 @function_tool
-def harden_service(target: str, service: str, action: str) -> str:
+def harden_service(target: str, service: str, action: str,
+                   related_alert_id: int = 0) -> str:
     """加固目标服务配置。
 
     Args:
@@ -250,6 +269,7 @@ def harden_service(target: str, service: str, action: str) -> str:
         service: 服务名："ssh" 或 "dvwa"。
         action: ssh -> apply / audit / rollback；
                 dvwa -> set_high / patch_cookie_bypass。
+        related_alert_id: 触发本次处置的蓝队告警 id；未知时填 0。
 
     Returns:
         执行与验证结果；验证失败会明确说明失败。
@@ -284,7 +304,7 @@ def harden_service(target: str, service: str, action: str) -> str:
     # 埋点：audit 是只读操作不算防御动作；失败结果不计入响应统计。
     if action != "audit" and not result.startswith(_FAILURE_PREFIXES):
         _record_response("harden_service", container,
-                         f"{target}/{service}/{action} 已执行")
+                         f"{target}/{service}/{action} 已执行", related_alert_id)
     return result
 
 
@@ -716,7 +736,8 @@ _REMEDIATORS = {
 
 
 @function_tool
-def remediate(host: str, action: str, target_detail: str) -> str:
+def remediate(host: str, action: str, target_detail: str,
+              related_alert_id: int = 0) -> str:
     """对已确认失陷的主机执行清除式处置（杀进程/删webshell/删后门账户等）。
 
     Args:
@@ -730,6 +751,7 @@ def remediate(host: str, action: str, target_detail: str) -> str:
             clear_cron     - 清空用户的 crontab，target_detail=用户名；
             restart_service- 重启服务，target_detail=apache2/httpd/mysql/sshd。
         target_detail: 动作对象（pid / 路径 / 用户名 / 服务名）。
+        related_alert_id: 触发本次处置的蓝队告警 id；未知时填 0。
 
     Returns:
         执行与复查结果；失败会明确说明原因，绝不谎报成功。
@@ -747,5 +769,6 @@ def remediate(host: str, action: str, target_detail: str) -> str:
 
     result = handler(container, detail)
     if not result.startswith(_FAILURE_PREFIXES):
-        _record_response("remediate", container, f"{act} {detail} 已执行")
+        _record_response("remediate", container, f"{act} {detail} 已执行",
+                         related_alert_id)
     return _clip(result)

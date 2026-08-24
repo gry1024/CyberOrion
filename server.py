@@ -39,8 +39,8 @@ Endpoints:
     POST /api/blue/stop          - Stop blue team
     POST /api/blue/patrol/start  - Start blue auto-patrol loop
     POST /api/blue/patrol/stop   - Stop blue auto-patrol loop
-    POST /api/bench/run          - Start a bench run (background; suite=
-                                   malware_analysis|attack_kb)
+    POST /api/bench/run          - Start a versioned daily/publication bench run
+    GET  /api/bench/suites       - Suite tiers, modes and external asset status
     GET  /api/bench/runs         - List past/running bench runs with scores
     GET  /api/bench/run/{id}     - Bench run status/detail
     GET  /api/bench/run/{id}/task/{idx} - Full drill-down of one task result
@@ -280,12 +280,19 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动 KB 自动更新守护进程 + 关闭时清理。"""
     global _kb_update_stop, _kb_update_task
     _kb_update_stop = asyncio.Event()
-    try:
-        from cyberorion.kb.auto_update import auto_update_loop
-        _kb_update_task = asyncio.create_task(auto_update_loop(_kb_update_stop))
-        logger.info("KB auto-update daemon started")
-    except Exception as e:
-        logger.warning("KB auto-update daemon failed to start: %s", e)
+    # 单元测试和显式离线模式不得启动后台网络抓取；否则 TestClient 关闭时
+    # 会等待仍在 urllib 超时中的 worker，也违反“无网络测试可运行”的约定。
+    offline = bool(os.getenv("PYTEST_CURRENT_TEST")) or os.getenv(
+        "CYBERORION_DISABLE_KB_AUTO_UPDATE", "").lower() in {"1", "true", "yes"}
+    if not offline:
+        try:
+            from cyberorion.kb.auto_update import auto_update_loop
+            _kb_update_task = asyncio.create_task(auto_update_loop(_kb_update_stop))
+            logger.info("KB auto-update daemon started")
+        except Exception as e:
+            logger.warning("KB auto-update daemon failed to start: %s", e)
+    else:
+        _kb_update_task = None
     yield
     if _kb_update_stop:
         _kb_update_stop.set()
@@ -1859,10 +1866,11 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
     """启动一次后台基准运行（suite/mode 白名单见 bench 模块常量），
     立即返回 run_id。"""
     from cyberorion.bench import cybersoceval as bench_mod
-    from cyberorion.bench import attack_kb as attack_kb_mod
+    from cyberorion.bench.registry import module_for
+    from cyberorion.bench.assets import ASSETS, asset_status, cybersoceval_asset_status
 
     try:
-        n = max(1, min(int(payload.get("n", 100)), 609))
+        n = max(1, min(int(payload.get("n", 100)), 10000))
         seed = int(payload.get("seed", 42))
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "error": "n/seed 必须是整数"},
@@ -1874,21 +1882,24 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
              "error": f"suite 必须是 {'/'.join(bench_mod.SUITES)}"},
             status_code=400)
     mode = str(payload.get("mode", "base"))
+    profile = str(payload.get("profile", "daily"))
+    dataset_version = payload.get("dataset_version")
+    if profile not in ("daily", "publication"):
+        return JSONResponse({"ok": False, "error": "profile 必须是 daily/publication"},
+                            status_code=400)
+    if suite == "live_paired":
+        return JSONResponse({
+            "ok": False, "code": "live_benchmark_unavailable",
+            "error": ("live_paired 需要在隔离环境中由 CLI/代码显式注入经审计的 "
+                      "harness；Web API 不会自动重置正在运行的 Docker"),
+        }, status_code=503)
+    if suite in ASSETS and not asset_status(suite)["available"]:
+        return JSONResponse(
+            {"ok": False, "code": "benchmark_asset_missing",
+             "error": "外部 benchmark 资产未配置", "asset": asset_status(suite)},
+            status_code=503)
     # mode 白名单随 suite 而定（同一事实源：各 bench 模块的 MODES）。
-    if suite == "attack_kb":
-        from cyberorion.bench import attack_kb as _m
-        allowed_modes = _m.MODES
-    elif suite == "threat_intel":
-        from cyberorion.bench import threat_intel as _m
-        allowed_modes = _m.MODES
-    elif suite == "soc_evidence":
-        from cyberorion.bench import soc_evidence as _m
-        allowed_modes = _m.MODES
-    elif suite == "cybergym_lite":
-        from cyberorion.bench import cybergym_lite as _m
-        allowed_modes = _m.MODES
-    else:
-        allowed_modes = bench_mod.MODES
+    allowed_modes = tuple(getattr(module_for(suite), "MODES", bench_mod.MODES)) + ("compare",)
     if mode not in allowed_modes:
         return JSONResponse(
             {"ok": False,
@@ -1901,6 +1912,7 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
         run_id += "x"
     state: dict[str, Any] = {
         "run_id": run_id, "suite": suite, "mode": mode, "n": n, "seed": seed,
+        "profile": profile, "dataset_version": dataset_version,
         "status": "running", "progress": {"done": 0, "total": n},
         "scores": None, "path": None, "error": None, "llm_errors": 0,
     }
@@ -1924,6 +1936,7 @@ async def bench_run(payload: dict = Body(default={})) -> Any:
         try:
             run = await bench_mod.run_bench(
                 n=n, mode=mode, seed=seed, suite=suite,
+                profile=profile, dataset_version=dataset_version,
                 on_progress=on_progress, run_id=run_id)
             # 全部题目 LLM 失败时 run["status"]=="error"（bench 模块判定），
             # 原样透出；部分失败仍为 done，但带 llm_errors + 首条错误信息。
@@ -1964,12 +1977,31 @@ async def bench_runs() -> list[dict[str, Any]]:
             runs.insert(0, {
                 "run_id": state["run_id"], "suite": state.get("suite"),
                 "mode": state["mode"],
+                "profile": state.get("profile"),
                 "n": state["n"], "seed": state["seed"],
                 "status": state["status"], "progress": state["progress"],
                 "scores": state["scores"], "error": state["error"],
                 "llm_errors": state.get("llm_errors", 0),
             })
     return runs
+
+
+@app.get("/api/bench/suites")
+async def bench_suites() -> dict[str, Any]:
+    """返回套件分层、可用模式与外部资产状态。"""
+    from cyberorion.bench.assets import (
+        ASSETS, asset_status, cybersoceval_asset_status,
+    )
+    from cyberorion.bench.registry import describe_suites
+    suites = describe_suites()
+    for row in suites:
+        if row["suite"] in ASSETS:
+            row["asset"] = asset_status(row["suite"])
+        elif row["suite"] == "malware_analysis":
+            row["asset"] = cybersoceval_asset_status()
+    return {"profiles": ["daily", "publication"], "suites": suites,
+            "size_policy": {"single_asset_gib": 1, "total_cache_gib": 5,
+                            "oversize_behavior": "explicit_representative_directory_or_skip"}}
 
 
 @app.get("/api/bench/run/{run_id}")
@@ -2084,9 +2116,38 @@ async def bench_questions(suite: str = "malware_analysis",
     from cyberorion.bench import cybersoceval as bench_mod
     n = max(1, min(int(n), 200))
     seed = int(seed)
-    if suite == "soc_evidence":
+    if suite == "soc_contract":
+        from cyberorion.bench import soc_contract as _sc
+        qs = _sc.sample_cases(n, seed)
+    elif suite == "soc_evidence":
         from cyberorion.bench import soc_evidence as _se
         qs = _se.sample_cases(n, seed)
+    elif suite in ("secalertbench", "excytin"):
+        from cyberorion.bench.assets import BenchmarkAssetMissing, require_asset
+        from cyberorion.bench.external_common import stratified_sample
+        try:
+            _root, files = require_asset(suite)
+            if suite == "secalertbench":
+                from cyberorion.bench.secalertbench import load_alerts
+                pool = load_alerts(files)
+                qs = stratified_sample(pool, min(n, len(pool)), seed,
+                                       ("label", "alert_type", "enterprise"))
+            else:
+                from cyberorion.bench.excytin import load_questions
+                pool = load_questions(files)
+                qs = stratified_sample(pool, min(n, len(pool)), seed,
+                                       ("incident", "hop_length"))
+        except BenchmarkAssetMissing as exc:
+            return JSONResponse({"ok": False, "code": exc.code,
+                                 "error": str(exc), "asset": exc.asset}, status_code=503)
+    elif suite == "cage2":
+        from cyberorion.bench.assets import asset_status
+        status = asset_status(suite)
+        if not status["available"]:
+            return JSONResponse({"ok": False, "code": "benchmark_asset_missing",
+                                 "error": "CAGE-2 环境未配置", "asset": status}, status_code=503)
+        return {"suite": suite, "n": 0, "seed": seed, "questions": [],
+                "note": "CAGE-2 是交互式 episode，无静态题目预览"}
     elif suite == "attack_kb":
         try:
             from cyberorion.bench import attack_kb as _m
@@ -2132,7 +2193,7 @@ async def bench_questions(suite: str = "malware_analysis",
             {"ok": False,
              "error": f"suite 必须是 {'/'.join(bench_mod.SUITES)}"},
             status_code=400)
-    if suite == "soc_evidence":
+    if suite in ("soc_evidence", "soc_contract"):
         keys = ("case_id", "task_type", "title", "prompt", "telemetry",
                 "gold", "evidence_map", "difficulty")
     elif suite == "cybergym_lite":
@@ -2141,6 +2202,10 @@ async def bench_questions(suite: str = "malware_analysis",
                 "vulnerability_description", "difficulty_level",
                 "task_difficulty", "visible_level1_artifacts",
                 "artifact_sizes", "key_fix_actions", "expected_files")
+    elif suite == "secalertbench":
+        keys = ("id", "alert", "label", "alert_type", "enterprise")
+    elif suite == "excytin":
+        keys = ("id", "question", "answer", "incident", "hop_length")
     else:
         keys = ("idx", "question", "options", "correct_options", "topic",
                 "difficulty", "attack")

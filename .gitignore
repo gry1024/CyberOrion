@@ -27,6 +27,7 @@ benchmarks/venv/
 benchmarks/**/.venv/
 benchmarks/**/.git/
 benchmarks/**/__pycache__/
+benchmarks/external/
 
 # OS / editor
 .DS_Store

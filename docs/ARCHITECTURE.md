@@ -83,7 +83,7 @@ cyberorion/                          # 仓库根
 │   │   ├── metrics.py               指标引擎（TP/FP/FN/检测率/MTTD/评分公式）
 │   │   ├── judge.py                 LLM 裁判报告 + 模板兜底（六章节）
 │   │   ├── report.py                finalize_session → report.md + metrics.json
-│   │   └── benchmarks/cyborg_adapter.py   CybORG CAGE-2（可选、懒加载；llm_driven 未实现）
+│   │   └── benchmarks/cyborg_adapter.py   CybORG CAGE-2（可选、懒加载；支持审计策略回调）
 │   ├── bench/
 │   │   ├── cybersoceval.py          CyberSOCEval harness（base/rag + legacy 模式；SUITES 注册表）
 │   │   └── attack_kb.py             attack_kb 套件（KB 检测摘录 → 技术编号 MCQ）
@@ -266,13 +266,13 @@ severity ≥ medium 的事件发布到事件总线（`type="telemetry"`）供前
 
 `compute_metrics(store, window_sec=600)`：对每条 **VERIFIED** 攻击按时间升序找蓝方【第一条】命中告警。
 
-**匹配规则**：
+**匹配规则**（metrics_version=3）：
 
 - 主机等价（容差）：目标名/容器名/IP 三者互换等价；`attack.target == "web"` 泛化到任何带 http 服务的目标；
-- 技术匹配：ATT&CK 编号精确相等，或前 2 字符（战术前缀）相同（T1110.001 对 T1110）；任一侧为空 → 通配但记半信用（`weak=True`）；
+- 技术匹配：ATT&CK 编号精确相等，或真实父/子技术关系（T1110.001 对 T1110）；任一侧为空 → 通配但记半信用（`weak=True`）；
 - 时间窗：`attack.ts − 30 ≤ alert.ts ≤ attack.ts + window_sec`（30s 采集时钟差容差）。
 
-**指标**：TP/FN（检测到/漏报的已验证攻击）；FP（verdict ∈ {malicious, suspicious} 但不匹配任何已验证攻击的告警）；`detection_rate = TP/attacks_verified`；`fp_rate = FP/alerts_malicious`；MTTD = TP 的 (alert.ts − attack.ts) 均值；`response_rate` = 被检测攻击中窗口内存在 `source='response'` 防御事件的比例。
+**指标**：TP/FN（检测到/漏报的已验证攻击）；FP（verdict ∈ {malicious, suspicious} 但不匹配任何已验证攻击的告警）；`detection_rate = TP/attacks_verified`；`fp_rate = FP/alerts_malicious`；MTTD = TP 的 (alert.ts − attack.ts) 均值；`response_rate` 只统计形成 attack→alert→action→verified effect 完整链的结构化响应事件，旧无关联事件不计分。
 
 **评分公式（0-100，文档即实现）**：
 
@@ -389,7 +389,13 @@ FastAPI 单实例：`EventBus` + `SessionState` + `ControllerV2`；`/api/*` 与 
 
 ### 13.4 新增一个基准套件
 
-在 `cyberorion/bench/` 新建模块（参照 `cybersoceval.py`）：实现 `run_bench(...) -> dict`（含 `run_id/scores/results` 并落盘 `logs/bench/`）与 `list_runs(...)`；在 server.py 的 bench 端点里按套件名分发（当前端点硬编码 cybersoceval，需要加一个路由层）。套件内新模式：往 `MODES` 加元组项并在 `run_bench` 里实现分支即可（UI 运行卡片目前只暴露 base/rag，legacy 模式走 CLI/API）。
+在 `cyberorion/bench/` 新建模块并实现 `run_bench(...) -> dict`，然后登记到
+`bench/registry.py`。外部套件还需在 `bench/assets.py` 声明来源、版本、许可证、
+环境变量和预期资产。结果必须包含 `methodology_status`、
+`benchmark_provenance`、真实 runtime 轨迹及原生指标；资产缺失必须返回
+`benchmark_asset_missing`，不得模拟分数。单资产超过 1GiB 或总量超过 5GiB
+时必须在解析前切换到管理员放置于 `representative/` 的固定种子分层代表集；
+缺代表集就结构化失败，禁止先整体读取超大文件。
 
 ---
 
@@ -407,4 +413,6 @@ FastAPI 单实例：`EventBus` + `SessionState` + `ControllerV2`；`/api/*` 与 
 | `CYBERORION_KB_EMBEDDINGS` | kb/rag.py | `0` 强制关闭 embedding（离线/测试） |
 | `CYBERORION_KB_EMBEDDING_MODEL` | kb/rag.py | embedding 模型（默认 text-embedding-v3） |
 | `CVEBENCH_REPO` | scripts/cve_target.sh、gen_cve_scenario.py | CVE-Bench 仓库路径 |
+| `CYBERORION_BENCHMARK_ROOT` | bench/assets.py | 外部 benchmark 离线资产根目录 |
+| `CYBERORION_SECALERTBENCH_DIR` / `CYBERORION_EXCYTIN_DIR` / `CYBERORION_CAGE2_DIR` | bench/assets.py | 覆盖对应套件资产目录 |
 | `CAI_GUARDRAILS` / `CAI_TELEMETRY` | CAI 框架 | 建议 `false`（避免误拦对抗工具/关闭 CAI 遥测） |

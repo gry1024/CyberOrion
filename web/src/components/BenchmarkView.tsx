@@ -49,6 +49,11 @@ export function fmtPct(v: number | undefined): string {
   return v == null ? '--' : `${(v * 100).toFixed(1)}%`
 }
 
+function fmtPrimary(suite: BenchSuite, value: number | undefined): string {
+  if (value == null) return '--'
+  return suite === 'cage2' ? value.toFixed(2) : fmtPct(value)
+}
+
 function suiteOf(r: { suite?: BenchSuite }): BenchSuite {
   return r.suite ?? 'malware_analysis'
 }
@@ -67,15 +72,17 @@ function pairedRuns(
       (r) =>
         suiteOf(r) === suite &&
         r.scores &&
+        r.methodology_status !== 'legacy_invalid_gold_v1' &&
         !LEGACY_BENCH_MODES.has(r.mode),
     )
     .slice()
     .sort((a, b) => a.run_id.localeCompare(b.run_id))
   const frameworkLatest = [...scored].reverse().find((r) => armOf(r) === 'framework')
   const n = frameworkLatest?.n
-  const bare = [...scored]
-    .reverse()
-    .find((r) => armOf(r) === 'bare' && (n == null || r.n === n))
+  const preferSingle = ['secalertbench', 'excytin', 'cage2'].includes(suite)
+  const bare = [...scored].reverse().find((r) =>
+    armOf(r) === (preferSingle ? 'single' : 'bare') && (n == null || r.n === n))
+    ?? [...scored].reverse().find((r) => armOf(r) === 'bare' && (n == null || r.n === n))
   return { bare, framework: frameworkLatest }
 }
 
@@ -84,6 +91,10 @@ function primaryScoreOf(r: BenchRunSummary): number | undefined {
   const suite = suiteOf(r)
   if (suite === 'cybergym_lite') return r.scores.patch_equivalence ?? r.scores.avg_score
   if (suite === 'soc_evidence') return r.scores.task_success ?? r.scores.avg_score
+  if (suite === 'soc_contract') return r.scores.task_success ?? r.scores.avg_score
+  if (suite === 'secalertbench') return r.scores.macro_f1 ?? r.scores.avg_score
+  if (suite === 'excytin') return r.scores.official_reward ?? r.scores.native_reward ?? r.scores.answer_accuracy ?? r.scores.avg_score
+  if (suite === 'cage2') return r.scores.mean_reward ?? r.scores.avg_score
   return r.scores.avg_score
 }
 
@@ -99,26 +110,46 @@ const OVERVIEW_VERDICT: Record<
     gain: '开放式证据评测',
     note: '任务成功、证据引用、ATT&CK F1 与工具效率分别计分',
   },
+  soc_contract: {
+    gain: '内部机制回归',
+    note: '不进入公开主榜，只验证失败恢复、证据约束与安全边界',
+  },
   malware_analysis: {
-    gain: '框架增益 +9.6pt',
-    note: '报告证据注入：平均得分 39.0% → 48.6%',
+    gain: '公开数据 · 609题',
+    note: '完整答案集合 Exact Match + Jaccard；旧版截断结果已隔离',
   },
   attack_kb: {
-    gain: '框架增益 +36pt',
-    note: '知识库访问：51% → 87%，所有战术主题全线上涨',
+    gain: '内部工程轨',
+    note: '只验证检索链路，不作为开放世界安全能力证据',
   },
   threat_intel: {
-    gain: '与基座持平',
-    note: '威胁情报推理：56.5% vs 57.0%（诚实基线）',
+    gain: '公开数据 · 588题',
+    note: 'CrowdStrike 威胁情报推理；完整答案集合评分',
   },
   cybergym_lite: {
-    gain: '最高单题 54.7%',
-    note: '官方 CyberGym Level-1 小体积任务，Agent 补丁等价评分',
+    gain: '工程附录 · 3题',
+    note: '代码修复微型集，不作为蓝队 SUPER-AGENT 主证据',
+  },
+  secalertbench: {
+    gain: '外部大规模告警轨',
+    note: 'Macro-F1、攻击召回率和误报率，分层代表集可追溯',
+  },
+  excytin: {
+    gain: '公开多源调查主榜',
+    note: '同预算比较普通 LLM、单体 ReAct 与 SUPER-AGENT',
+  },
+  cage2: {
+    gain: '官方自主防御挑战',
+    note: '使用 CAGE-2 原生环境 reward，不生成模拟轨迹',
+  },
+  live_paired: {
+    gain: '内部真实环境配对轨',
+    note: '仅由显式安全 harness 运行；不通过网页自动操作 Docker',
   },
 }
 
 function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
-  const suites: BenchSuite[] = ['cybergym_lite', 'attack_kb', 'malware_analysis', 'threat_intel']
+  const suites: BenchSuite[] = ['malware_analysis', 'threat_intel', 'excytin', 'cage2']
   return (
     <div className="grid grid-cols-4 gap-px border-y" style={{ borderColor: 'var(--color-hairline)' }}>
       {suites.map((s) => {
@@ -133,7 +164,7 @@ function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
             </div>
             <div className="mt-1 flex items-baseline gap-2">
               <span className="font-mono text-[26px] font-semibold leading-none tabular-nums" style={{ color: 'var(--color-fg)' }}>
-                {fv != null ? fmtPct(fv) : '--'}
+                {fmtPrimary(s, fv)}
               </span>
               {fv != null && bv != null && (
                 <span
@@ -152,7 +183,7 @@ function OverviewStrip({ runs }: { runs: BenchRunSummary[] }) {
             </div>
             {bv != null && (
               <div className="mt-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-4)' }}>
-                纯 LLM {fmtPct(bv)} → 框架 {fv != null ? fmtPct(fv) : '--'}（平均得分）
+                参考臂 {fmtPrimary(s, bv)} → SUPER-AGENT {fmtPrimary(s, fv)}
               </div>
             )}
           </div>
@@ -380,21 +411,21 @@ function SuiteReportCard({
       <div className="mt-2 flex flex-wrap items-end gap-x-8 gap-y-1">
         <div>
           <div className="font-mono text-[22px] font-semibold leading-none tabular-nums" style={{ color: 'var(--color-fg)' }}>
-            {fv != null ? fmtPct(fv) : '--'}
+            {fmtPrimary(suite, fv)}
           </div>
           <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
-            框架 · 平均得分
+            SUPER-AGENT · 主指标
           </div>
         </div>
         <div>
           <div className="font-mono text-[15px] font-medium leading-none tabular-nums" style={{ color: 'var(--color-fg-2)' }}>
-            {bv != null ? fmtPct(bv) : '--'}
+            {fmtPrimary(suite, bv)}
           </div>
           <div className="mt-0.5 text-[9.5px] uppercase tracking-widest" style={{ color: 'var(--color-fg-4)' }}>
-            纯 LLM · 平均得分
+            {['secalertbench', 'excytin', 'cage2'].includes(suite) ? '单体 ReAct · 主指标' : '纯 LLM · 主指标'}
           </div>
         </div>
-        {fv != null && bv != null && (
+        {suite !== 'cage2' && fv != null && bv != null && (
           <div
             className="mb-0.5 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums"
             style={{
@@ -410,7 +441,7 @@ function SuiteReportCard({
             Jaccard {bj.toFixed(2)} → {fj.toFixed(2)}
           </div>
         )}
-        {fv != null && bv != null && bv > 0 && fv > bv && (
+        {suite !== 'cage2' && fv != null && bv != null && bv > 0 && fv > bv && (
           <div className="mb-0.5 font-mono text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
             相对提升 ×{(fv / bv).toFixed(2)}
           </div>
@@ -419,7 +450,11 @@ function SuiteReportCard({
 
       {/* 图表 */}
       <div className="mt-2">
-        <BenchBarChart suite={suite} runs={runs} />
+        {suite === 'cage2'
+          ? <div className="px-3 py-4 text-[10.5px]" style={{ color: 'var(--color-fg-3)' }}>
+              CAGE-2 使用可正可负的环境原生 reward；逐局均值与标准差见运行详情。
+            </div>
+          : <BenchBarChart suite={suite} runs={runs} />}
       </div>
 
       {/* 题目与模型作答（直接内嵌） */}
@@ -560,9 +595,17 @@ const N_OPTIONS: Record<BenchSuite, number[]> = {
   malware_analysis: [20, 50, 100],
   attack_kb: [20, 50, 100],
   threat_intel: [20, 50, 100],
+  soc_contract: [4, 8],
+  secalertbench: [100, 300, 600],
+  excytin: [16, 32, 64],
+  cage2: [3, 6, 9],
+  live_paired: [3, 5, 10],
 }
 
-const RUNNABLE_SUITES: BenchSuite[] = ['cybergym_lite', 'soc_evidence', 'malware_analysis', 'attack_kb', 'threat_intel']
+const RUNNABLE_SUITES: BenchSuite[] = [
+  'malware_analysis', 'threat_intel', 'secalertbench', 'excytin', 'cage2',
+  'soc_contract', 'attack_kb', 'cybergym_lite',
+]
 
 function PillGroup<T extends string | number>({
   label,
@@ -605,9 +648,10 @@ function PillGroup<T extends string | number>({
 
 function RunCard({ onStarted }: { onStarted: () => void }) {
   const { benchLive } = useArena()
-  const [suite, setSuite] = useState<BenchSuite>('soc_evidence')
+  const [suite, setSuite] = useState<BenchSuite>('excytin')
   const [n, setN] = useState(8)
   const [mode, setMode] = useState<BenchMode>('agent')
+  const [profile, setProfile] = useState<'daily' | 'publication'>('daily')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -623,7 +667,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
     setBusy(true)
     setError('')
     api
-      .startBenchRun(n, mode, suite)
+      .startBenchRun(n, mode, suite, profile)
       .then((r) => {
         if (!r.ok) {
           const msg = r.error ?? '启动失败'
@@ -653,8 +697,12 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
                 { mode: 'rag' as BenchMode, label: 'LLM + RAG' },
                 { mode: 'agent' as BenchMode, label: 'CyberOrion Agent' },
               ]
-            : [BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework]
+            : ['secalertbench', 'excytin', 'cage2', 'soc_contract'].includes(suite)
+              ? [BENCH_ARMS[suite].bare, { mode: 'single' as BenchMode, label: '单体 ReAct' }, BENCH_ARMS[suite].framework]
+              : [BENCH_ARMS[suite].bare, BENCH_ARMS[suite].framework]
           ).map((a) => ({ value: a.mode, label: a.label }))} />
+        <PillGroup label="档位" value={profile} onChange={setProfile}
+          options={[{ value: 'daily', label: '代表集' }, { value: 'publication', label: '发布档' }]} />
         <button onClick={start} disabled={busy} className="btn btn-primary">
           {busy ? '启动中…' : '开始测试'}
         </button>
@@ -689,7 +737,7 @@ function RunCard({ onStarted }: { onStarted: () => void }) {
 // ---------------------------------------------------------------------------
 
 function SuiteBadge({ suite }: { suite: BenchSuite }) {
-  const short = suite === 'cybergym_lite' ? 'Gym' : suite === 'soc_evidence' ? '证据' : suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : '恶意软件'
+  const short = suite === 'cybergym_lite' ? 'Gym' : suite === 'soc_evidence' || suite === 'soc_contract' ? '契约' : suite === 'attack_kb' ? '知识' : suite === 'threat_intel' ? '情报' : suite === 'secalertbench' ? '告警' : suite === 'excytin' ? '调查' : suite === 'cage2' ? '防御' : '恶意软件'
   return (
     <span className="rounded px-1.5 py-px text-[9.5px]" style={{ background: 'var(--color-overlay)', color: 'var(--color-fg-3)' }}>
       {short}
@@ -748,7 +796,7 @@ function RunRow({
       ) : (
         <>
           <td className={`text-right font-mono text-[12px] font-semibold tabular-nums ${dim ? '' : ''}`} style={{ color: dim ? 'var(--color-fg-3)' : 'var(--color-fg)' }}>
-            {fmtPct(primaryScoreOf(r))}
+            {fmtPrimary(suiteOf(r), primaryScoreOf(r))}
           </td>
           {showLlmErr && (
             <td className={`text-right font-mono tabular-nums text-[10.5px] ${llmErr > 0 ? 'text-attacker' : ''}`} style={{ color: 'var(--color-fg-4)' }}>
@@ -766,8 +814,10 @@ function RunRow({
 
 function ResultsTable({ runs, onSelect }: { runs: BenchRunSummary[]; onSelect: (r: BenchRunSummary) => void }) {
   const [showLegacy, setShowLegacy] = useState(false)
-  const mainRuns = runs.filter((r) => !LEGACY_BENCH_MODES.has(r.mode))
-  const legacyRuns = runs.filter((r) => LEGACY_BENCH_MODES.has(r.mode))
+  const mainRuns = runs.filter((r) => !LEGACY_BENCH_MODES.has(r.mode)
+    && r.methodology_status !== 'legacy_invalid_gold_v1')
+  const legacyRuns = runs.filter((r) => LEGACY_BENCH_MODES.has(r.mode)
+    || r.methodology_status === 'legacy_invalid_gold_v1')
   const showLlmErr = runs.some((r) => (r.llm_errors ?? (r.scores ? r.scores.llm_errors : 0) ?? 0) > 0)
   const colSpan = showLlmErr ? 7 : 6
   return (
@@ -803,7 +853,7 @@ function ResultsTable({ runs, onSelect }: { runs: BenchRunSummary[]; onSelect: (
               {legacyRuns.length > 0 && (
                 <tr onClick={() => setShowLegacy((v) => !v)} className="cursor-pointer border-t" style={{ borderColor: 'var(--color-hairline)' }}>
                   <td colSpan={colSpan} className="py-1 pl-2 text-[10px]" style={{ color: 'var(--color-fg-3)' }}>
-                    {showLegacy ? '▾' : '▸'} 历史实验（{legacyRuns.length}）· rag_fs / sc / sc_base / rag_g 旧模式
+                    {showLegacy ? '▾' : '▸'} 不可比历史（{legacyRuns.length}）· 旧模式或 legacy_invalid_gold_v1
                   </td>
                 </tr>
               )}
@@ -851,7 +901,10 @@ export function BenchmarkView() {
     return list
   }, [runs, benchLive])
 
-  const suiteOrder: BenchSuite[] = ['cybergym_lite', 'attack_kb', 'malware_analysis', 'threat_intel']
+  const suiteOrder: BenchSuite[] = [
+    'malware_analysis', 'threat_intel', 'excytin', 'cage2', 'secalertbench',
+    'soc_contract', 'attack_kb', 'cybergym_lite',
+  ]
 
   return (
     <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -859,10 +912,10 @@ export function BenchmarkView() {
         {/* 标题 */}
         <div className="flex flex-col gap-1 pt-2">
           <h1 className="text-[15px] font-semibold" style={{ color: 'var(--color-fg)' }}>
-            基准测试 · 框架有效性报告
+            基准测试 · SUPER-AGENT 能力证据
           </h1>
           <span className="text-[11px]" style={{ color: 'var(--color-fg-3)' }}>
-            纯 LLM vs CyberOrion 框架 · 同批题 · 同模型 · 同 seed —— 分差即框架知识层增益
+            公开认可主榜 + 大规模外部告警 + 内部机制契约 · 同数据、同模型、同总预算
           </span>
         </div>
 

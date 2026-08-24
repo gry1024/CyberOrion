@@ -460,7 +460,7 @@ export interface ScoreMetrics {
   per_technique?: Record<string, { attacks: number; detected: number; detection_rate: number }>
   per_target?: Record<string, { attacks: number; detected: number; detection_rate: number }>
   response?: { total: number; responded: number; response_rate: number }
-  blue_score?: number
+  blue_score?: number | null
   red_score?: number
   // Traffic-analysis optional fields
   event_count?: number
@@ -668,7 +668,10 @@ export interface HostStatus {
 export type BenchMode =
   | 'base'
   | 'rag'
+  | 'single'
   | 'agent'
+  | 'paired'
+  | 'compare'
   | 'rag_fs'
   | 'sc'
   | 'sc_base'
@@ -676,7 +679,9 @@ export type BenchMode =
 
 /** Bench suites — run_id format `<ts>_<suite>_<mode>_n<n>`; old runs default
  * to malware_analysis server-side. */
-export type BenchSuite = 'soc_evidence' | 'malware_analysis' | 'attack_kb' | 'threat_intel' | 'cybergym_lite'
+export type BenchSuite =
+  | 'malware_analysis' | 'threat_intel' | 'secalertbench' | 'excytin' | 'cage2'
+  | 'soc_contract' | 'soc_evidence' | 'attack_kb' | 'cybergym_lite' | 'live_paired'
 
 export const BENCH_SUITES: Record<
   BenchSuite,
@@ -686,13 +691,17 @@ export const BENCH_SUITES: Record<
     label: 'SOC 证据评测',
     hint: '开放式告警研判、攻击链重建与响应规划；衡量证据引用、ATT&CK F1、工具效率和安全性',
   },
+  soc_contract: {
+    label: 'SUPER-AGENT 机制契约',
+    hint: '12 个独立内部 runtime-loop 案例，只验证工具失败恢复、证据约束与安全边界，不进入公开主榜',
+  },
   malware_analysis: {
     label: 'CyberSOCEval · 恶意软件分析',
     hint: '多选知识问答，衡量通用安全知识',
   },
   attack_kb: {
     label: 'ATT&CK 知识检索',
-    hint: '知识库访问能力测试：题干摘录来自 KB，答案就在知识库中——纯 LLM 靠记忆、框架臂靠检索注入，分差即框架知识层的价值（实测 +36pt）',
+    hint: '知识库访问能力测试：题干摘录来自 KB；仅作为内部检索链路工程验证',
   },
   threat_intel: {
     label: '威胁情报推理 · CrowdStrike',
@@ -702,15 +711,32 @@ export const BENCH_SUITES: Record<
     label: 'CyberGym Lite',
     hint: '官方 CyberGym Level-1 小体积漏洞修复任务；用隐藏补丁做等价评分，适合快速展示 CyberOrion Agent 分数',
   },
+  secalertbench: {
+    label: 'SecAlertBench · 企业告警',
+    hint: '8,322 条外部企业 SOC 告警；展示 Macro-F1、攻击召回率和误报率',
+  },
+  excytin: {
+    label: 'ExCyTIn · 多源调查',
+    hint: 'ACESEvals 多表遥测调查；比较普通 LLM、单代理与 SUPER-AGENT',
+  },
+  cage2: {
+    label: 'CAGE-2 · 自主防御',
+    hint: '官方 CybORG 防御环境原生 reward；评测 Analyze/Remove/Restore 闭环',
+  },
+  live_paired: {
+    label: 'Paired Live Docker',
+    hint: 'CLI/代码显式 harness 专用；相同攻击计划、快照和多 seed 的三臂安全配对，不允许网页自动重置 Docker',
+  },
 }
 
 /** Comparison arm: 纯 LLM (vanilla/base) vs CyberOrion 框架 (framework/rag).
  * 框架有效性对比的两臂：同 seed 同批题同模型，分差即框架增益。 */
-export type BenchArm = 'bare' | 'rag' | 'framework'
+export type BenchArm = 'bare' | 'rag' | 'single' | 'framework'
 
 export function armOfMode(mode: BenchMode): BenchArm | null {
   if (mode === 'base') return 'bare'
   if (mode === 'rag') return 'rag'
+  if (mode === 'single') return 'single'
   if (mode === 'agent') return 'framework'
   return null // legacy experiment modes — excluded from comparisons
 }
@@ -724,6 +750,10 @@ export const BENCH_ARMS: Record<
     bare: { mode: 'base', label: 'Plain LLM' },
     framework: { mode: 'agent', label: 'CyberOrion Agent' },
   },
+  soc_contract: {
+    bare: { mode: 'base', label: 'Plain LLM' },
+    framework: { mode: 'agent', label: '契约验证' },
+  },
   malware_analysis: {
     bare: { mode: 'base', label: '纯 LLM · base' },
     framework: { mode: 'rag', label: 'CyberOrion 框架 · rag' },
@@ -740,6 +770,22 @@ export const BENCH_ARMS: Record<
     bare: { mode: 'base', label: 'Plain LLM' },
     framework: { mode: 'agent', label: 'CyberOrion Agent' },
   },
+  secalertbench: {
+    bare: { mode: 'base', label: 'Plain LLM' },
+    framework: { mode: 'agent', label: 'SUPER-AGENT' },
+  },
+  excytin: {
+    bare: { mode: 'base', label: 'Plain LLM' },
+    framework: { mode: 'agent', label: 'SUPER-AGENT' },
+  },
+  cage2: {
+    bare: { mode: 'base', label: '直接策略' },
+    framework: { mode: 'agent', label: 'SUPER-AGENT' },
+  },
+  live_paired: {
+    bare: { mode: 'paired', label: 'Paired protocol' },
+    framework: { mode: 'paired', label: 'Paired protocol' },
+  },
 }
 
 /** 臂的展示名；legacy 实验模式（不在对比中）原样返回 mode。 */
@@ -748,6 +794,7 @@ export function armLabelOf(mode: BenchMode): string {
   if (arm === 'framework') return 'CyberOrion 框架'
   if (arm === 'bare') return '纯 LLM'
   if (arm === 'rag') return 'LLM + RAG'
+  if (arm === 'single') return '单体 ReAct'
   return mode
 }
 
@@ -770,6 +817,21 @@ export interface BenchScores {
   correct_mc_pct: number
   avg_score: number
   patch_equivalence?: number
+  macro_f1?: number
+  attack_recall?: number
+  false_positive_rate?: number
+  answer_accuracy?: number
+  official_reward?: number | null
+  native_reward?: number
+  mean_reward?: number
+  reward_std?: number
+  pr_auc?: number
+  brier_score?: number
+  expected_calibration_error_10bin?: number
+  triage_cost?: number
+  availability_penalty?: number
+  restore_actions?: number
+  illegal_actions?: number
   parse_fail: number
   /** LLM 调用失败的题目数（endpoint 故障不再静默成全 0 分）。 */
   llm_errors?: number
@@ -784,7 +846,7 @@ export interface BenchScores {
   unsafe_action_rate?: number
   tool_call_validity?: number
   useful_action_ratio?: number
-  confidence_intervals?: Record<string, [number, number]>
+  confidence_intervals?: Record<string, [number, number] | null>
   failure_taxonomy?: Record<string, number>
   avg_latency_ms?: number
   estimated_tokens?: number
@@ -799,12 +861,22 @@ export function primaryScoreOf(r: {
   if (!r.scores) return undefined
   if (r.suite === 'cybergym_lite') return r.scores.patch_equivalence ?? r.scores.avg_score
   if (r.suite === 'soc_evidence') return r.scores.task_success ?? r.scores.avg_score
+  if (r.suite === 'soc_contract') return r.scores.task_success ?? r.scores.avg_score
+  if (r.suite === 'secalertbench') return r.scores.macro_f1 ?? r.scores.avg_score
+  if (r.suite === 'excytin') return r.scores.official_reward ?? r.scores.native_reward ?? r.scores.answer_accuracy ?? r.scores.avg_score
+  if (r.suite === 'cage2') return r.scores.mean_reward ?? r.scores.avg_score
+  if (r.suite === 'live_paired') return r.scores.avg_score
   return r.scores.correct_mc_pct
 }
 
 export function primaryScoreLabel(suite: BenchSuite | undefined): string {
   if (suite === 'cybergym_lite') return '补丁等价分'
   if (suite === 'soc_evidence') return '任务成功率'
+  if (suite === 'soc_contract') return '契约通过率'
+  if (suite === 'secalertbench') return 'Macro-F1'
+  if (suite === 'excytin') return '调查得分'
+  if (suite === 'cage2') return '环境奖励'
+  if (suite === 'live_paired') return '配对 Arena 分'
   return '选择题正确率'
 }
 
@@ -850,6 +922,9 @@ export interface BenchRunSummary {
   /** LLM 失败题数（运行中实时 + 完成后最终值）。 */
   llm_errors?: number
   path?: string | null
+  profile?: 'daily' | 'publication'
+  methodology_status?: 'official_compatible' | 'external_track' | 'engineering_only' | 'legacy_invalid_gold_v1'
+  benchmark_provenance?: Record<string, unknown> | null
 }
 
 export interface BenchResultItem {

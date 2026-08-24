@@ -2,7 +2,7 @@
 
   - 题目加载与确定性采样；
   - 容错答案解析（markdown 围栏 / 中文“答案是” / 裸字母 / 垃圾输出）；
-  - 单选化加载与评分；
+  - 官方完整答案集合加载与评分；
   - run_bench 端到端（mock LLM + 注入 KB）与结果持久化。
 """
 
@@ -38,8 +38,7 @@ class TestLoader:
         qs = bench.load_questions(questions_path)
         assert len(qs) == 20
         q = qs[0]
-        # harness 将上游多选题统一转换为单选，只取首个标准答案。
-        assert q["correct_options"] == ["A"]
+        assert q["correct_options"] == ["A", "B"]
         assert q["difficulty"] == "easy"
         assert q["topic"] == "Risk Assessment"
 
@@ -328,7 +327,7 @@ class TestGuessForced:
         system, user = bench.build_prompt(q, "rag_g", [])
         assert system == bench._SYSTEM_RAG
         assert "禁止弃答" in user
-        assert 'ANSWER: ["A"]' in user       # 明确要求单选输出
+        assert 'ANSWER: ["A","C"]' in user  # 明确要求完整答案集合
         assert "最佳猜测" in user
         assert "最有把握的一个" in user
         assert "【待答题目】" in user

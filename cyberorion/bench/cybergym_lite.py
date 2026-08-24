@@ -28,6 +28,7 @@ SUITE = "cybergym_lite"
 SUITE_DESC = "Official CyberGym Level-1 vulnerability-repair micro benchmark"
 MODES = ("base", "agent")
 ARM_OF_MODE = {"base": "bare", "agent": "framework"}
+METHODOLOGY_STATUS = "engineering_only"
 HF_BASE = "https://huggingface.co/datasets/sunblaze-ucb/cybergym/resolve/main"
 CACHE_DIR = Path(os.getenv("CYBERORION_CYBERGYM_CACHE", "/tmp/cyberorion_cybergym_cache"))
 
@@ -139,6 +140,32 @@ def _download(url: str, path: Path) -> None:
         path.write_bytes(resp.read())
 
 
+def _safe_extract(archive: tarfile.TarFile, destination: Path) -> None:
+    """无删除操作的 tar 安全解包。
+
+    拒绝路径穿越、绝对路径、链接和设备文件。destination 必须是明确的
+    cache 子目录，禁止 ``Path()``/当前目录和仓库目录。
+    """
+    dest = destination.resolve()
+    cache = CACHE_DIR.resolve()
+    repo = Path(__file__).resolve().parents[2]
+    if dest in {Path.cwd().resolve(), repo, repo.parent, Path("/")}:
+        raise ValueError(f"拒绝向危险目录解包: {dest}")
+    try:
+        dest.relative_to(cache)
+    except ValueError as exc:
+        raise ValueError(f"解包目录必须位于 CyberGym cache 内: {dest}") from exc
+    for member in archive.getmembers():
+        target = (dest / member.name).resolve()
+        try:
+            target.relative_to(dest)
+        except ValueError as exc:
+            raise ValueError(f"tar 路径穿越: {member.name}") from exc
+        if member.issym() or member.islnk() or member.isdev():
+            raise ValueError(f"tar 含不允许的链接/设备节点: {member.name}")
+    archive.extractall(dest, filter="data")
+
+
 def ensure_artifacts(task: dict[str, Any]) -> dict[str, Any]:
     """Download official artifacts needed for Level-1 input and scoring."""
     task_num = task["task_id"].split(":", 1)[1]
@@ -151,10 +178,12 @@ def ensure_artifacts(task: dict[str, Any]) -> dict[str, Any]:
         paths[name] = str(path)
         sizes[name] = path.stat().st_size
     extract_dir = directory / "repo-vul"
-    if not extract_dir.is_dir():
+    marker = extract_dir / ".cyberorion_extract_complete"
+    if not marker.is_file():
         extract_dir.mkdir(parents=True, exist_ok=True)
         with tarfile.open(paths["repo-vul.tar.gz"], "r:gz") as archive:
-            archive.extractall(extract_dir)
+            _safe_extract(archive, extract_dir)
+        marker.write_text("ok\n", encoding="utf-8")
     return {"cache_dir": str(directory), "paths": paths, "sizes": sizes, "extract_dir": str(extract_dir)}
 
 
@@ -396,7 +425,9 @@ async def run_bench(
             "parse_ok": metrics["parse_ok"],
             "llm_error": bool(error),
             "error": error,
-            "agent_trace": _agent_trace(mode),
+            # 单次补丁生成没有真实工具回路；不得展示预制的 Agent 轨迹。
+            "agent_trace": [],
+            "trace_source": "runtime",
             "failure_tags": failure_tags,
             "latency_ms": latency_ms,
             "estimated_tokens": max(1, (len(system) + len(user) + len(raw)) // 4),
@@ -414,7 +445,7 @@ async def run_bench(
     rows = [row for row in results if row is not None]
     rid = run_id or time.strftime(f"%Y%m%d_%H%M%S_{SUITE}_{mode}_n{len(rows)}")
     run = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": rid,
         "suite": SUITE,
         "suite_desc": SUITE_DESC,
@@ -438,6 +469,7 @@ async def run_bench(
             "score_metric": "patch_equivalence = 0.45*invariant + 0.35*changed_files + 0.20*diff_similarity",
             "selected_small_tasks": list(TASK_IDS),
         },
+        "methodology_status": "engineering_only",
     }
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)

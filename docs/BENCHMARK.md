@@ -1,132 +1,112 @@
-# CyberSOCEval 基准（bench/）
+# CyberOrion 蓝队 Benchmark
 
-对**自有 pipeline** 打分的 CyberSOCEval `malware_analysis` 基准 harness。代码：`cyberorion/bench/cybersoceval.py`；结果落盘 `logs/bench/<run_id>.json`，并随仓库上传。
+Benchmark 为第三阶段 SUPER-AGENT 提供可复现证据：跨流量、主机、身份和日志
+调查，自主工具调用，观察失败后重规划，以及无需人工介入的防御闭环。结果落盘
+到 `logs/bench/<run_id>.json`；正式分数只能来自真实运行。
 
-> 为什么不直接用官方 runner：官方 runner 用 `response_format=json_object`，我们接入的 endpoint 会把 JSON schema 提示原样复读而不是作答（历史上 100 题里 23 题因此被判 INVALID）。本 harness 改为纯文本提示 + 容错解析，解析失败记 wrong 并单独统计 `parse_fail`。
+## 1. 证据分层
 
----
+| 层级 | 套件 | 规模/协议 | 证明什么 |
+| --- | --- | --- | --- |
+| 外部公开轨 | `malware_analysis` | CyberSOCEval 609 原始题/608 可评分题 | 恶意软件分析；完整答案集 Exact Match + Jaccard；自有 runner 不可与官方榜单直比 |
+| 公开认可主榜 | `threat_intel` | CyberSOCEval 588题 | 威胁情报推理；完整答案集 Exact Match + Jaccard |
+| 外部公开轨 | `excytin` | ACESEvals YAML task + Docker/Inspect 协议 | 多表遥测调查、证据链、SQL 成本和 adapter native reward；非官方 scorer |
+| 外部公开轨 | `cage2` | CAGE Challenge 2 Scenario2 | 3 步长 × 3 红队矩阵和原生 reward；adapter 非榜单提交 |
+| 大规模外部轨 | `secalertbench` | 8,322条企业告警 | Macro-F1、Attack Recall、FPR 和规模稳定性 |
+| 内部契约轨 | `soc_contract` | 12 个独立 runtime-loop 案例 | 工具失败恢复、证据约束、安全边界；不进入公开主榜 |
+| 内部实战轨 | `live_paired` | 多 seed × 3 臂 | 同攻击计划、同初始 snapshot hash、安全重置后的 paired live Docker；显式 harness 才可运行 |
+| 工程轨 | `attack_kb` | 内部 KB 派生 | 只验证检索链路，不证明开放世界安全能力 |
+| 工程轨 | `cybergym_lite` | 3个修复任务 | 代码修复附录，不作为蓝队主证据 |
 
-## 1. 套件与题目
+不把异构任务合成为一个可调权重的总分。UI 按能力维度展示原生指标，
+SUPER-AGENT 的核心结论来自同模型、同样本、同总预算的 `agent - single` 配对差值。
 
-- 数据集：`malware_analysis` 多选题（609 题），默认路径 `<repo>/benchmarks/cybersoceval/PurpleLlama/CybersecurityBenchmarks/datasets/crwd_meta/malware_analysis/questions.json`；
-- 题目元数据：`topic` / `difficulty` / `attack`（所引用沙箱报告所属的恶意软件家族/类别，如 infostealers、ransomware、remcos）；
-- 采样：`sample_questions(questions, n, seed)` 固定 seed 确定性采样——**base 与 rag 回答同一批题目**，保证对比公平；
-- 单次 LLM 调用失败不中断整轮：记 `__LLM_ERROR__` 原文入库、该题记 wrong。
+## 2. 运行臂和公平性
 
-## 2. 对比臂与模式
+- `base`：普通 LLM 或直接策略；
+- `single`：拥有全部同源工具的单体有状态 ReAct；
+- `agent`：指挥官按需派遣 watcher / analyst / responder / hunter；
+- CyberSOCEval 不是交互任务，只比较 `base` 与 `rag`，不伪造团队臂；
+- 三臂记录同一预算上限（token 32768、墙钟 300s、LLM 18 次、工具 12 次）；
+  base 不使用工具但不会获得更宽的其它预算。provider 未返回 usage 时 token 仅标记为
+  estimated，不冒充精确计量；
+- 正式 Agent 轨迹必须来自 `superagent_runtime.py` 的真实 decision/tool/role
+  事件，固定模板轨迹无效。
+- `mode=compare` 在一个父 run 下生成全部臂的子 run，并记录共享模型、n、seed
+  与 `agent_minus_reference`、paired bootstrap 95% CI；禁止手工拼接不同样本的成绩。
 
-**框架有效性对比的两臂**（`arm` 字段：`bare` / `framework`）：
+## 3. 数据体积与代表集
 
-| 臂 | 模式 | 是什么 |
-| --- | --- | --- |
-| **纯 LLM**（`bare`） | `base` | 单次 LLM 调用，裸提示——**无框架增强** |
-| **CyberOrion 框架**（`framework`） | `rag` | 纯 LLM + 框架的知识库层：两段式检索（先「家族类别+题干」，top-1 余弦相似度 < 0.45 时并入全部选项文本重检取优）+ 家族类别 playbook（SBX008-011）确定性置顶注入 + 逐项裁决与"禁止弃答、最佳猜测"作答规则 |
+外部数据由 `cyberorion/bench/assets.py` 管理。服务端不会自动联网、下载、解包
+或删除文件；资产缺失返回 `503 benchmark_asset_missing`。
 
-两臂**同 seed、同一批题目、同一模型**（`CAI_MODEL`，如 `deepseek-v4-flash`），唯一差异是框架注入的知识库层——**分差即框架增益（Δ）**，这正是"纯 DeepSeek LLM vs DeepSeek + CyberOrion 框架"的量化对比。legacy 实验模式（`rag_fs`/`rag_g`/`sc`/`sc_base`）不构成对比臂（`arm=None`），仅保留用于提示配方的新旧对照。
+- 默认根目录：`benchmarks/external/<suite>`；也可设置
+  `CYBERORION_SECALERTBENCH_DIR`、`CYBERORION_EXCYTIN_DIR`、
+  `CYBERORION_CAGE2_DIR`；
+- `python scripts/setup_benchmarks.py` 只读显示资产状态；
+- 单个官方资产超过 1GiB，或已选资产总和超过 5GiB 时，解析前即 fail-closed：
+  只读取管理员放在资产根 `representative/` 下的固定种子无损任务子集；没有代表集
+  就返回 `benchmark_asset_missing`，不会先把超大 JSON 读进内存，也不会自动下载、裁剪或删除；
+- 每次运行保存上游 URL、版本、文件 SHA256、完整/子集状态、抽样算法和全部
+  样本 ID。代表集成绩不得标记为官方全量成绩；
+- `daily` 使用代表集：SecAlertBench 600、ExCyTIn 64、CAGE-2 9 episodes；
+  `publication` 在体积允许时运行目标协议，超限时只使用显式代表集并标记不可比。
 
-| 模式 | 状态 | 说明 |
-| --- | --- | --- |
-| `base` | 主模式（纯 LLM 臂） | 单次 LLM 调用，裸提示（无知识库） |
-| `rag` | **默认主模式（prompt v6，框架臂）** | 知识库检索 top-3 注入提示：两段式检索 + 家族类别 playbook 确定性置顶注入 + 逐项裁决与"禁止弃答、最佳猜测"规则 |
-| `rag_fs` | legacy | 旧 v2 rag 提示前置 2 条 few-shot 示例（v3） |
-| `rag_g` | legacy | 旧 v4 = v2 规则 + 禁止弃答（无两段式检索与知识使用指引），用于新旧对比 |
-| `sc` | legacy | self-consistency：rag 提示采样 k=3 次（温度 0.7）后逐选项多数投票（得票 ≥ 2 才入选） |
-| `sc_base` | legacy | 同 sc，但用裸提示（分离投票与知识库的贡献） |
+CyberGym 安全解包仅允许写入明确 cache 子目录，拒绝当前目录/仓库目录、路径
+穿越、软硬链接和设备节点；没有递归删除或 staging 清理逻辑。
 
-知识库即蓝队同源的 `cyberorion/kb`（ATT&CK + Malpedia + 沙箱报告解读知识，embedding 检索 + BM25 回退，见 [ARCHITECTURE.md](ARCHITECTURE.md)）。
+## 4. 评分可信度
 
-## 3. 评分
+CyberSOCEval 从 schema v3 起保留上游全部正确选项，完整集合相等才算 Exact
+Match，并计算 Jaccard。旧 harness 截断多答案且采用包含式评分，旧结果统一显示
+为 `legacy_invalid_gold_v1`，不能与新结果或官方论文比较。
 
-- **答案解析**：题目加载时只取上游 `correct_options` 的首项作为标准答案，要求最后一行输出单选 `ANSWER: ["A"]`；容错解析器依次尝试 ANSWER 行 → 中文"答案是 A" → 方括号字母列表 → 裸字母行。解析失败返回空列表 → 记 wrong + `parse_fail`；
-- **逐题评分**（`grade`）：预测选项包含该唯一标准答案即命中，否则为 0 分；解析器仍兼容模型误输出多个字母；
-- **汇总指标**（`compute_scores`）：`correct_mc_pct`（命中率）、`avg_score`（单选模式下与命中率一致）、`parse_fail`，并按 `difficulty` / `topic` 分组统计；
-- run dict 还记录 `arm`（对比臂）/`mode/n/seed/model/rag_top_k/prompt_version/elapsed_sec` 与逐题 `results`（含 raw 输出前 800 字符），完整可审计；
-- 每次运行自动在 JSON 旁生成**逐题 markdown 报告** `logs/bench/<run_id>.md`（`run["report"]`）：完整题干、全部选项（标注正确项与模型所选）、gold vs pred 判定、每题的模型原始回答——"看分数"之外先看题目本身。
+Arena 从 `metrics_version=3` 起：
 
-## 4. 怎么跑
+- ATT&CK 只允许精确编号或真实父子技术关系匹配；
+- 响应必须形成 attack→alert→action→effect 关联链：目标与时间匹配、
+  `related_alert_id` 指向实际命中告警、动作类型有效、效果为 verified；旧无结构事件只展示不计分；
+- 无已验证攻击时 `blue_score=null`，不赠送基础分；
+- 蓝队仍严禁读取 attacks 表、场景 ground truth 或 `cyberorion.eval`。
 
-**CLI**（推荐对比入口）：
+SecAlertBench 额外计算 PR-AUC、Brier、10-bin ECE 和 FN=5/FP=1 的显式成本；
+ExCyTIn 记录证据数、SQL 查询数/成本和 adapter `native_reward`；CAGE-2 记录
+Restore/可用性惩罚与非法动作。ChallengeWrapper 不公开主机失陷事件数时该字段为
+`null` 并附状态，不从标量 reward 反推伪造。
+
+`methodology_status`：`official_compatible` 仅表示 runner/scorer/协议均按上游执行；
+`external_track` 表示真实外部数据的适配/代表集；`engineering_only` 表示内部工程
+验证；`legacy_invalid_gold_v1` 表示历史方法学不可比。
+
+## 5. 使用方法
 
 ```bash
-cd <cai-repo>/cyberorion
-set -a; source ../.env; set +a
-python scripts/run_bench.py --n 100 --mode both        # 纯 LLM vs 框架 同批题对比
-python scripts/run_bench.py --n 100 --mode both --show-questions   # 顺带打印逐题题干/判定
-python scripts/run_bench.py --n 100 --mode rag --seed 42
-python scripts/run_bench.py --n 60  --mode rag_fs      # legacy 模式
+# 只读查看外部资产
+~/cai_env/bin/python scripts/setup_benchmarks.py
+
+# CyberSOCEval 同题双臂
+~/cai_env/bin/python scripts/run_bench.py \
+  --suite malware_analysis --mode both --n 100 --seed 42
+
+# 外部交互套件三臂；缺资产时明确失败，不产生模拟分
+~/cai_env/bin/python scripts/run_bench.py \
+  --suite excytin --mode compare --profile daily --n 64 --seed 42
 ```
 
-`--mode both` 的对比表以**框架有效性**为标题：同一批题目、同一模型，Δ（框架 − 纯 LLM）即框架增益。每次运行自动落盘 `logs/bench/<run_id>.json` 与 `logs/bench/<run_id>.md` 逐题报告（完整题干/选项/模型作答），CLI 末尾会打印路径；两类结果都纳入 GitHub。
+`live_paired` 默认不可从 Web API 启动。必须在隔离环境由代码显式注入实现
+`validate_environment / capture_initial_snapshot / reset_to_snapshot / run_trial`
+的审计 harness；每臂 reset 返回的 SHA256 与初始 snapshot 不一致会立即失败。
 
-**UI**：`server.py` 起服后，Benchmark 标签页 → 运行卡片「题目预览」先看具体题目（按 seed 采样、标注正确答案）→ 选纯 LLM/框架两臂与题量 n → 实时进度（WS `bench` 事件）→ 历史结果表格 + 两臂对比柱状图（Δ 徽章）→ 点击行打开逐题详情抽屉（完整题干/选项/gold vs pred/模型原始回答）。
+API：
 
-**API**：
-
-```bash
-curl -X POST localhost:8000/api/bench/run -H 'Content-Type: application/json' \
-     -d '{"n": 100, "mode": "rag", "seed": 42}'        # -> {"ok":true,"run_id":...}
-curl localhost:8000/api/bench/runs                     # 历史 + 进行中（含 arm）
-curl localhost:8000/api/bench/run/<run_id>             # 详情（含逐题结果 + report 路径）
-curl 'localhost:8000/api/bench/questions?n=20&seed=42' # 题目预览（含正确答案）
+```text
+GET  /api/bench/suites       套件、层级、模式、体积策略与资产状态
+POST /api/bench/run          suite/mode/profile/n/seed/dataset_version
+GET  /api/bench/runs         历史与运行中结果
+GET  /api/bench/run/{id}     完整运行及 provenance
+GET  /api/bench/questions    固定 seed 的题目/任务预览
 ```
 
-## 5. 结果史（真实模型运行，全部来自 logs/bench/）
-
-下表只列**真实模型**的运行；`logs/bench/` 里大量 `model=fake-model` 的小 n 文件是**测试夹具产物**（mock LLM），不构成结果。
-
-| 日期 | run_id | 模式 | n / seed | 模型 | 全对率 | Jaccard | parse_fail | 备注 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 08-03 | 20260803_005205_malware_analysis_rag_n100 | **rag v8.3** | 100/42 | deepseek-v4-flash | **0.250** | **0.486** | 0 | **报告摘要 + API/哈希证据**：全对率 0.14→0.25、Jaccard 0.38→0.49、Δ base +13pt |
-| 08-03 | 20260803_003503_malware_analysis_rag_n100 | rag v8.1 | 100/42 | deepseek-v4-flash | 0.140 | 0.381 | 0 | 签名类别保留（medium +11pt） |
-| 08-03 | 20260803_002914_malware_analysis_rag_n100 | rag v8 | 100/42 | deepseek-v4-flash | 0.140 | 0.364 | 0 | 报告摘要注入（MITRE+签名名） |
-| 08-02 | 20260802_184642_malware_analysis_base_n100 | base | 100/42 | deepseek-v4-flash | 0.140 | 0.377 | 4 | 纯 LLM 臂（thinking 关闭） |
-| 08-02 | 20260802_184727_malware_analysis_rag_n100 | rag v6 | 100/42 | deepseek-v4-flash | 0.100 | 0.312 | 0 | v6 过度采信 playbook → 负增益 |
-| 08-02 | 20260802_203313_malware_analysis_rag_n100 | **rag v7** | 100/42 | deepseek-v4-flash | 0.120 | 0.344 | 0 | 知识证据地位降级后回升 |
-| 08-02 | 20260802_184842_attack_kb_base_n100 | base | 100/42 | deepseek-v4-flash | 0.510 | 0.510 | 0 | 纯 LLM 靠记忆 |
-| 08-02 | 20260802_184927_attack_kb_rag_n100 | **rag** | 100/42 | deepseek-v4-flash | **0.870** | 0.870 | 0 | **框架臂 +36pt**：框架有效性直接证据 |
-| 07-27 | 20260727_172628_base_n100 | base | 100/42 | qwen3.7-max | **0.180** | **0.454** | 3 | base 基准线 |
-| 07-27 | 20260727_173322_rag_n100 | rag | 100/42 | qwen3.7-max | 0.140 | 0.389 | 1 | 早期 rag 提示 |
-| 07-27 | 20260727_174305_rag_n100 | rag | 100/42 | qwen3.7-max | 0.200 | 0.406 | 11 | 迭代中间版（解析失败高） |
-| 07-27 | 20260727_181531_rag_n100 | rag | 100/42 | qwen3.7-max | 0.120 | 0.385 | 1 | 迭代中间版 |
-| 07-27 | 20260727_185015_rag_g_n100 | rag_g (legacy) | 100/42 | qwen3.7-max | 0.200 | 0.452 | 1 | v4：v2+禁止弃答 |
-| 07-27 | 20260727_183223_base_n60 | base | 60/42 | qwen3.7-max | 0.150 | 0.471 | 1 | 小样本 |
-| 07-27 | 20260727_183601_rag_fs_n60 | rag_fs (legacy) | 60/42 | qwen3.7-max | 0.167 | 0.291 | 25 | few-shot 反而拉高解析失败 |
-| 07-27 | 20260727_183829_sc_n60 | sc (legacy) | 60/42 | qwen3.7-max | 0.167 | 0.413 | 8 | 投票未带来增益 |
-| 07-28 | 20260728_003951_base_n100 | base | 100/42 | MiniMax-M2.7 | 0.060 | 0.311 | 8 | 弱模型参考线 |
-| 07-28 | 20260728_004259_rag_n100 | **rag v6** | 100/42 | qwen3.7-max | **0.190** | **0.453** | 0 | 当前默认（playbook 注入） |
-| 07-28 | 20260728_005828_rag_n100 | **rag v6** | 100/42 | qwen3.7-max | **0.190** | **0.451** | 0 | 复跑确认 |
-
-历史参考（非本 harness）：早期用 CyberSOCEval **官方 runner** 跑过一次得 **0.338**，但样本不同且有 23/100 条响应被丢弃（INVALID，即上述 json_object 问题），与本表**不可直接比较**。
-
-**怎么读这张表**：
-
-- **v8.3 起框架臂显著超越 base**（DeepSeek n=100：全对率 0.25 vs 0.12，Δ +13pt；Jaccard 0.49 vs 0.39）——关键修复是 v8 起把题目引用的**真实沙箱报告摘要**（MITRE 映射 + 行为签名 + **被调用的 API 名 + 关联文件哈希**）确定性注入提示；此前报告原文从不进提示，模型只能凭家族典型行为猜测；
-- 同一配置两次复跑 Jaccard 差 0.002，全对率一致——seed 固定下采样确定，剩余波动来自模型采样温度。
-
-**用 DeepSeek 跑双臂**：`.env` 里 `CAI_MODEL=openai/deepseek-v4-flash`（base URL 指向 `api.deepseek.com`）时，`--mode both` 的两臂就是字面意义的「**纯 DeepSeek LLM**」与「**DeepSeek + CyberOrion 框架**」——展示框架有效性的标准跑法；结果史里模型列即本次运行的 `CAI_MODEL`。
-
-## 6. 已知局限
-
-- **报告摘要的粒度**：v8.3 提取签名描述里的 API 调用与文件哈希后大幅改善（+11pt 全对率），但报告中的部分细节（如注册表键、URL、字符串表）仍未进摘要，相关题目仍是弱项；摘要长度受 `_REPORT_*_CAP` 常量限制；
-- **n=100 的统计噪声约 ±8pt**：0.250 与 0.200 的差距在噪声范围内，单次小 n 运行不要当结论；对比必须同 seed 同批题（harness 已保证）；
-- **endpoint 相关**：不同 OpenAI 兼容端点对提示格式敏感度差异大（见 MiniMax-M2.7 参考线），换模型/端点后历史分数不可直接对比；
-- **推理型模型思维链**：deepseek-v4-flash 等在 rag 长提示下会把全部 max_tokens 烧在 reasoning 上、content 为空 → `parse_fail` 全量飙升。跑 DeepSeek 双臂前设 `CO_BENCH_THINKING=disabled`（关闭思维链，见 AGENTS.md 坑 7）；
-- **embedding 检索需要网络**（首次建索引与查询向量化）；`CYBERORION_KB_EMBEDDINGS=0` 可强制 BM25 离线模式，检索质量与分数会变化。
-
-## 7. 新增一个基准套件
-
-1. 在 `cyberorion/bench/` 新建模块，参照 `cybersoceval.py` 实现 `run_bench(...) -> dict`（run dict 含 `run_id/scores/results`，落盘 `logs/bench/`）与 `list_runs(...)`；
-2. 在 `server.py` 的 `/api/bench/*` 端点中按套件名分发（当前硬编码 cybersoceval，需要加一层路由）；
-3. 前端 `BenchMode` 类型与运行卡片选项同步扩展（`web/src/types.ts`、`components/BenchmarkView.tsx`）；
-4. 加测试（参照 `tests/test_bench.py`：mock LLM + 临时 log_dir + 固定 seed 断言确定性）。
-
-已接入的第二个外部套件：**attack_kb**（`bench/attack_kb.py`，suite=`attack_kb`，
-ATT&CK 知识库访问能力测试，仅支持 base/rag）。
-
-> **CyberGym（已废弃）**：曾接入第三套件 CyberGym 真实漏洞 PoC 复现
-> （vanilla/framework 双臂，官方提交服务器 + `-vul`/`-fix` 双镜像判定）。
-> 实测（2026-08-01，MiniMax-M3，n=5，seed=42）：vanilla 成功率 20%（1/5），
-> framework 成功率 40%（2/5），框架 +20pt。后因数据/镜像体量过大、
-> 环境维护成本高，该套件已整体废弃并移除（模块、脚本、历史运行记录均已删除）。
-
-另：`eval/benchmarks/cyborg_adapter.py` 是 CybORG CAGE-2 的可选适配器（懒加载，未安装 CybORG 时返回安装提示；`llm_driven=True` 明确未实现），入口 `scripts/run_cyborg.py`。
+正式发布前执行 `~/cai_env/bin/python -m pytest tests/ -q` 和
+`cd web && npm run build`。外部套件的引用及许可证以运行产物中的
+`benchmark_provenance` 和上游仓库为准。

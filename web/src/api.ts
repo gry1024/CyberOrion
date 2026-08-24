@@ -180,12 +180,18 @@ export const api = {
       result: Record<string, unknown>
     }>,
 
-  startBenchRun: (n: number, mode: BenchMode, suite: BenchSuite) =>
-    post('/api/bench/run', { n, mode, suite }) as Promise<{
+  startBenchRun: (n: number, mode: BenchMode, suite: BenchSuite,
+                  profile: 'daily' | 'publication' = 'daily') =>
+    post('/api/bench/run', { n, mode, suite, profile }) as Promise<{
       ok: boolean
       run_id?: string
       error?: string
     }>,
+  getBenchSuites: () => get('/api/bench/suites') as Promise<{
+    profiles: Array<'daily' | 'publication'>
+    suites: Array<Record<string, unknown>>
+    size_policy: Record<string, unknown>
+  }>,
   getBenchRuns: () => get('/api/bench/runs') as Promise<BenchRunSummary[]>,
   getBenchRun: (runId: string) =>
     get(`/api/bench/run/${runId}`) as Promise<BenchRunDetail>,

@@ -15,7 +15,10 @@ baseline，不追求高分。llm_driven=True（接入我们的蓝队 agent 决�
 
 from __future__ import annotations
 
-from typing import Any
+import os
+import random
+from pathlib import Path
+from typing import Any, Callable
 
 # 未安装 CybORG 时返回的安装提示（已核实 PyPI 有 CybORG 0.2）。
 _INSTALL_HINT = (
@@ -51,8 +54,51 @@ def _heuristic_policy(observation: Any) -> Any:
     return Sleep()
 
 
+def _mapped_action(spec: Any) -> tuple[Any, bool, str | None]:
+    """把审计过的高层动作规格映射为 CAGE-2 原生动作。"""
+    from CybORG.Simulator.Actions import Sleep
+    if not isinstance(spec, dict):
+        return Sleep(), False, "action spec is not an object"
+    action = str(spec.get("action") or spec.get("type") or "sleep").lower()
+    host = str(spec.get("hostname") or spec.get("host") or "")
+    if action == "sleep" or not host:
+        return (Sleep(), action == "sleep",
+                None if action == "sleep" else "hostname is required")
+    try:
+        from CybORG.Simulator import Actions
+        cls = {"analyse": getattr(Actions, "Analyse", None),
+               "remove": getattr(Actions, "Remove", None),
+               "restore": getattr(Actions, "Restore", None)}.get(action)
+        if cls is None:
+            module_name = {"analyse": "Analyse", "remove": "Remove",
+                           "restore": "Restore"}.get(action)
+            if module_name:
+                module = __import__(
+                    f"CybORG.Simulator.Actions.ConcreteActions.{module_name}",
+                    fromlist=[module_name])
+                cls = getattr(module, module_name, None)
+        if cls is not None:
+            try:
+                return cls(hostname=host, agent="Blue"), True, None
+            except TypeError:
+                return cls(session=0, agent="Blue", hostname=host), True, None
+    except Exception as exc:
+        return Sleep(), False, f"{type(exc).__name__}: {exc}"[:200]
+    return Sleep(), False, f"unsupported action: {action}"
+
+
+def _action_from_spec(spec: Any) -> Any:
+    """兼容旧调用方：非法规格安全降级为 Sleep。"""
+    return _mapped_action(spec)[0]
+
+
 def run_cage2(episodes: int = 3, steps: int = 100,
-              llm_driven: bool = False) -> dict:
+              llm_driven: bool = False,
+              policy: "Callable[[Any], dict] | None" = None,
+              scenario_path: "str | None" = None,
+              red_agent: str = "B_lineAgent",
+              seed: int = 153,
+              official_wrapper: bool = True) -> dict:
     """运行 CAGE-2 基准，返回逐局与平均奖励。
 
     Args:
@@ -71,7 +117,7 @@ def run_cage2(episodes: int = 3, steps: int = 100,
     except ImportError:
         return {"error": "CybORG not installed", "install": _INSTALL_HINT}
 
-    if llm_driven:
+    if llm_driven and policy is None:
         return {
             "error": "not implemented",
             "message": (
@@ -82,35 +128,85 @@ def run_cage2(episodes: int = 3, steps: int = 100,
 
     try:
         from CybORG import CybORG as CybORGEnv
-        from CybORG.Agents import B_lineAgent, GreenAgent
-        from CybORG.Simulator.Scenarios import FileReaderScenarioGenerator
+        from CybORG.Agents import B_lineAgent, SleepAgent
+        from CybORG.Agents.SimpleAgents.Meander import RedMeanderAgent
+        from CybORG.Agents.Wrappers import ChallengeWrapper
     except ImportError as exc:  # 装的是其它版本/不完整安装
         return {"error": f"CybORG import incomplete: {exc}",
                 "install": _INSTALL_HINT}
 
-    sg = FileReaderScenarioGenerator(
-        "/opt/cyborg/CybORG/Simulator/Scenarios/scenario_files/Scenario2.yaml")
+    configured = scenario_path or os.getenv("CYBERORION_CAGE2_SCENARIO")
+    if configured:
+        scenario = Path(configured)
+    else:
+        root = Path(os.getenv("CYBERORION_CAGE2_DIR", "/opt/cyborg"))
+        candidates = list(root.rglob("Scenario2.yaml")) if root.exists() else []
+        scenario = candidates[0] if candidates else Path(
+            "/opt/cyborg/CybORG/CybORG/Shared/Scenarios/Scenario2.yaml")
+    if not scenario.is_file():
+        return {"error": f"CAGE-2 scenario not found: {scenario}",
+                "install": _INSTALL_HINT}
+    red_agents = {
+        "B_lineAgent": B_lineAgent,
+        "RedMeanderAgent": RedMeanderAgent,
+        "SleepAgent": SleepAgent,
+    }
+    if red_agent not in red_agents:
+        return {"error": f"unsupported red agent: {red_agent}"}
+    random.seed(int(seed))
+    try:
+        import numpy as np
+        np.random.seed(int(seed))
+    except ImportError:
+        pass
     rewards: list[dict] = []
     for ep in range(int(episodes)):
-        env = CybORGEnv(sg, "sim", agents={
-            "Red": B_lineAgent(), "Green": GreenAgent()})
-        env.reset()
+        env = CybORGEnv(str(scenario), "sim", agents={"Red": red_agents[red_agent]})
+        wrapped = ChallengeWrapper(env=env, agent_name="Blue") if official_wrapper else env
+        obs = wrapped.reset() if official_wrapper else env.reset().observation
         total = 0.0
-        obs = env.get_observation("Blue")
+        restore_actions = illegal_actions = 0
+        actions: list[dict] = []
         for _ in range(int(steps)):
-            action = _heuristic_policy(obs)
-            result = env.step(agent="Blue", action=action)
-            obs = result.observation
-            total += float(getattr(result, "reward", 0.0) or 0.0)
-            if getattr(result, "done", False):
+            spec = policy(obs) if llm_driven and policy is not None else None
+            if llm_driven:
+                action, valid, invalid_reason = _mapped_action(spec)
+            else:
+                action, valid, invalid_reason = _heuristic_policy(obs), True, None
+            restore_actions += int(action.__class__.__name__.lower() == "restore")
+            illegal_actions += int(not valid)
+            if official_wrapper:
+                obs, reward, done, info = wrapped.step(action)
+            else:
+                result = env.step(agent="Blue", action=action)
+                obs, reward, done, info = (result.observation, result.reward,
+                                           result.done, getattr(result, "info", {}))
+            total += float(reward or 0.0)
+            actions.append({"blue": str(action),
+                            "red": str(env.get_last_action("Red")),
+                            "valid": valid, "invalid_reason": invalid_reason,
+                            "reward": float(reward or 0.0)})
+            if done:
                 break
-        rewards.append({"episode": ep + 1, "reward": round(total, 3)})
+        rewards.append({
+            "episode": ep + 1, "reward": round(total, 3),
+            "red_agent": red_agent, "steps": len(actions), "actions": actions,
+            "illegal_actions": illegal_actions,
+            "restore_actions": restore_actions,
+            "availability_penalty": -float(restore_actions),
+            # ChallengeWrapper exposes scalar reward only; do not fabricate a
+            # compromise count from that aggregate.
+            "host_compromise_events": None,
+            "host_compromise_metric_status": "not_exposed_by_official_wrapper",
+        })
 
     mean_reward = (sum(r["reward"] for r in rewards) / len(rewards)
                    if rewards else 0.0)
     return {
         "episodes": rewards,
         "mean_reward": round(mean_reward, 3),
-        "llm_driven": False,
+        "llm_driven": bool(llm_driven),
         "steps": int(steps),
+        "red_agent": red_agent, "seed": int(seed),
+        "wrapper": "ChallengeWrapper" if official_wrapper else "raw",
     }

@@ -35,6 +35,7 @@ from .cybersoceval import (
 )
 
 MODES = ("base", "rag")
+METHODOLOGY_STATUS = "external_track"
 
 _HERE = Path(__file__).resolve().parent
 from cyberorion.paths import PURPLE_LLAMA_DIR as _PURPLE_LLAMA
@@ -65,9 +66,8 @@ def load_questions(path: "str | Path" = DEFAULT_QUESTIONS) -> list[dict]:
             gold = q.get("correct_answer")
             if not text or not isinstance(options, list) or len(options) < 2:
                 continue
-            # 单选模式：只取第一个正确选项作为标准答案
             gold_list = [str(a).strip().upper() for a in (gold or [])]
-            gold_letters = sorted({gold_list[0]}) if gold_list else []
+            gold_letters = sorted(set(gold_list))
             valid = {chr(ord("A") + k) for k in range(len(options))}
             if not gold_letters or any(a not in valid for a in gold_letters):
                 continue
@@ -199,11 +199,14 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             except TypeError:
                 on_progress(done, len(questions))
 
+    started_at = time.time()
     await asyncio.gather(*(answer(i, q) for i, q in enumerate(questions)))
+    finished_at = time.time()
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     run_id = run_id or f"{ts}_threat_intel_{mode}_n{len(questions)}"
     run = {
+        "schema_version": 3,
         "run_id": run_id,
         "suite": "threat_intel",
         "mode": mode,
@@ -211,12 +214,23 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "model": _model_name(),
         "n": len(questions),
         "seed": seed,
-        "elapsed_sec": 0.0,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "elapsed_sec": round(finished_at - started_at, 2),
         "prompt_version": "ti-v1",
         "scores": compute_scores([r for r in rows if r]),
         "results": rows,
         "llm_errors": err_questions,
         "error": first_llm_error[0] if first_llm_error else None,
+        "status": "error" if questions and err_questions == len(questions) else "done",
+        "methodology_status": "external_track",
+        "benchmark_provenance": {
+            "name": "CyberSOCEval threat_intel_reasoning",
+            "upstream_url": "https://github.com/meta-llama/PurpleLlama",
+            "protocol": "complete_answer_set_exact_match_and_jaccard",
+            "comparable_to_upstream": False,
+            "sample_scope": "full" if len(questions) == len(load_questions()) else "subset",
+        },
         "log_dir": str(log_dir),
     }
     log_dir = Path(log_dir)
@@ -224,6 +238,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     json_path = log_dir / f"{run_id}.json"
     json_path.write_text(
         json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
+    run["path"] = str(json_path)
     run["report"] = write_report(run, questions, log_dir / f"{run_id}.md")
     return run
 

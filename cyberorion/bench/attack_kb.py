@@ -37,6 +37,7 @@ from .cybersoceval import (
 SUITE = "attack_kb"
 SUITE_DESC = "ATT&CK 知识库访问能力测试（knowledge-access MCQ，答案在 KB 中）"
 MODES = ("base", "rag")
+METHODOLOGY_STATUS = "engineering_only"
 
 MIN_DETECTION_CHARS = 80
 MIN_DISTRACTORS = 4
@@ -267,8 +268,9 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         kb_docs = None
         if mode == "rag":
             try:
-                kb_docs = await asyncio.to_thread(kb.search, q["question"],
-                                                  RAG_TOP_K)
+                # 本地 BM25/向量检索很短；直接调用可避免 asyncio.run() 在
+                # 某些 CAI 环境中等待默认线程池关闭而挂住测试/CLI。
+                kb_docs = kb.search(q["question"], RAG_TOP_K)
             except Exception:
                 kb_docs = []
         system, user = build_prompt(q, mode, kb_docs)
@@ -314,6 +316,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     run_id = run_id or f"{ts}_{SUITE}_{mode}_n{len(results)}"
     llm_errors = err_questions
     run = {
+        "schema_version": 2,
         "run_id": run_id,
         "suite": SUITE,
         "suite_desc": SUITE_DESC,
@@ -336,6 +339,11 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "error": first_llm_error[0] if llm_errors else None,
         "status": ("error" if results and llm_errors == len(results)
                    else "done"),
+        "methodology_status": "engineering_only",
+        "benchmark_provenance": {
+            "name": "CyberOrion ATT&CK KB retrieval smoke test",
+            "origin": "internal_kb_derived", "comparable_to_upstream": False,
+        },
     }
 
     log_dir = Path(log_dir)

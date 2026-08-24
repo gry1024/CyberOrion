@@ -13,7 +13,7 @@
          （目标名或容器名均可）。
   - 技术匹配：
       ① ATT&CK 编号精确相等；
-      ② 前 2 字符（战术前缀）相同（如 T1110.001 对 T1110）；
+      ② 精确的父技术 / 子技术关系（如 T1110.001 对 T1110）；
       ③ 任一侧 technique 为空串 -> 通配匹配，但记为半信用
          （match=True, weak=True）。
   - 时间窗口：attack.ts - 30 <= alert.ts <= attack.ts + window_sec。
@@ -38,6 +38,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..scenarios.loader import DEFAULT_SCENARIO
@@ -92,8 +93,10 @@ def _technique_match(a_tech: str, b_tech: str) -> "tuple[bool, bool]":
         return True, True  # 任一侧为空 -> 通配半信用
     if a_tech == b_tech:
         return True, False
-    if len(a_tech) >= 2 and len(b_tech) >= 2 and a_tech[:2] == b_tech[:2]:
-        return True, False  # 同战术前缀（如 T1110.001 对 T1110）
+    # 只接受 ATT&CK 父技术与其子技术；T1110 与 T1190 不能因为都以 T1
+    # 开头而匹配。
+    if a_tech.startswith(f"{b_tech}.") or b_tech.startswith(f"{a_tech}."):
+        return True, False
     return False, False
 
 
@@ -110,6 +113,47 @@ def _matches(attack: dict, alert: dict, equiv: set, window_sec: float) -> "tuple
     if not (a_ts - _PRE_TOLERANCE_SEC <= b_ts <= a_ts + window_sec):
         return False, False
     return True, weak
+
+
+def _response_matches(attack: dict, detection: dict, event: dict,
+                      equiv: set, window: float) -> tuple[bool, str]:
+    """校验 attack→alert→action→effect 完整关联链。"""
+    hosts = {part.strip() for part in str(event.get("host") or "").split(",")}
+    if not hosts & equiv:
+        return False, "host_mismatch"
+    a_ts = float(attack.get("ts") or 0)
+    if not (a_ts <= float(event.get("ts") or 0) <= a_ts + window):
+        return False, "outside_window"
+    try:
+        payload = json.loads(event.get("raw") or "")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False, "missing_structured_link"
+    if not isinstance(payload, dict) or payload.get("schema") != "cyberorion.response.v2":
+        return False, "invalid_response_schema"
+    if str(payload.get("effect") or "").lower() not in {"verified", "success", "applied"}:
+        return False, "effect_not_verified"
+    try:
+        related_alert_id = int(payload.get("related_alert_id"))
+    except (TypeError, ValueError):
+        return False, "missing_related_alert"
+    if related_alert_id != int(detection["alert_id"]):
+        return False, "related_alert_mismatch"
+    related_attack_id = payload.get("related_attack_id")
+    if related_attack_id is not None:
+        try:
+            if int(related_attack_id) != int(attack["id"]):
+                return False, "related_attack_mismatch"
+        except (TypeError, ValueError):
+            return False, "invalid_related_attack"
+    action = str(payload.get("action") or "")
+    if action not in {"block_ip", "harden_service", "remediate"}:
+        return False, "invalid_action"
+    if not str(payload.get("detail") or "").strip():
+        return False, "missing_effect_detail"
+    tech = str(event.get("technique") or "")
+    if tech and not _technique_match(str(attack.get("technique") or ""), tech)[0]:
+        return False, "technique_mismatch"
+    return True, "attributed"
 
 
 def compute_metrics(store: Any, window_sec: int = 600) -> dict:
@@ -221,15 +265,35 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
     fp_rate = fp / n_malicious if n_malicious else 0.0
     mttd = (sum(d["ttd_sec"] for d in detections) / tp) if tp else None
 
-    # 响应统计：source='response' 的防御事件（block_ip / harden_service 埋点）。
+    # 响应统计：处置必须发生在时间窗内，且 host 与攻击目标等价。旧实现
+    # 只看时间，其他主机上的任意响应也会错误获得处置分。
     responses = store.query_events(source="response", limit=100000)
     responded = 0
+    response_links: list[dict] = []
     for det in detections:
         atk = next(a for a in eligible if a["id"] == det["attack_id"])
         a_ts = float(atk.get("ts") or 0)
-        if any(a_ts <= float(ev.get("ts") or 0) <= a_ts + window
-               for ev in responses):
+        equiv = _host_equiv(atk.get("target") or "", scenario)
+        attributed = None
+        rejected: list[dict] = []
+        for ev in responses:
+            ok, reason = _response_matches(atk, det, ev, equiv, window)
+            if ok:
+                attributed = ev
+                break
+            rejected.append({"event_id": ev.get("id"), "reason": reason})
+        if attributed is not None:
             responded += 1
+            response_links.append({
+                "attack_id": atk["id"], "alert_id": det["alert_id"],
+                "response_event_id": attributed.get("id"), "status": "attributed",
+            })
+        else:
+            response_links.append({
+                "attack_id": atk["id"], "alert_id": det["alert_id"],
+                "response_event_id": None, "status": "unattributed",
+                "rejections": rejected,
+            })
     response_rate = responded / tp if tp else 0.0
 
     for bucket in (per_technique, per_target):
@@ -238,12 +302,15 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
                 b["detected"] / b["attacks"] if b["attacks"] else 0.0)
 
     # 评分：公式见模块 docstring。
-    blue_score = (50.0 * detection_rate
-                  + 25.0 * (1.0 - min(fp_rate, 1.0))
-                  + 25.0 * response_rate)
+    blue_score = None if not verified else (
+        50.0 * detection_rate
+        + 25.0 * (1.0 - min(fp_rate, 1.0))
+        + 25.0 * response_rate
+    )
     red_score = (100.0 * n_verified / max(len(attacks) - n_recon, 1)) if attacks else 0.0
 
     return {
+        "metrics_version": 3,
         "window_sec": int(window_sec),
         "scenario": (getattr(scenario, "name", "") or "") if scenario else "",
         "totals": {
@@ -269,6 +336,12 @@ def compute_metrics(store: Any, window_sec: int = 600) -> dict:
             "responded": responded,
             "response_rate": round(response_rate, 4),
         },
-        "blue_score": round(blue_score, 1),
+        "response_attribution": {
+            "schema": "attack-alert-action-effect-v1",
+            "links": response_links,
+            "requires": ["host", "time_window", "related_alert_id",
+                         "valid_action", "verified_effect", "technique_if_present"],
+        },
+        "blue_score": round(blue_score, 1) if blue_score is not None else None,
         "red_score": round(red_score, 1),
     }

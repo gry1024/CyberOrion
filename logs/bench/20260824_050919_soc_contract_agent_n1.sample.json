@@ -1,0 +1,10 @@
+{
+  "run_id": "20260824_050919_soc_contract_agent_n1",
+  "suite": "soc_contract",
+  "seed": 42,
+  "selection": null,
+  "sample_ids": [
+    "SOC-011"
+  ],
+  "sha256": null
+}

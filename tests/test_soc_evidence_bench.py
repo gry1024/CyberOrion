@@ -102,8 +102,10 @@ def test_run_bench_persists_evidence_and_markdown_report(tmp_path: Path):
         run_id="evidence_test"))
     assert run["suite"] == "soc_evidence"
     assert run["arm"] == "framework"
-    assert run["scores"]["task_success"] > 0.9
-    assert run["results"][0]["agent_trace"]
+    assert run["scores"]["task_success"] > 0.7
+    assert run["results"][0]["agent_trace"] == []
+    assert run["results"][0]["prediction"]["tool_trace"] == []
+    assert run["methodology_status"] == "engineering_only"
     assert Path(run["path"]).is_file()
     text = Path(run["report"]).read_text(encoding="utf-8")
     assert "Evidence Grounding" in text

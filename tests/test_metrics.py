@@ -45,8 +45,8 @@ def _fill_main(store: TelemetryStore) -> None:
                         action="ssh login", success=True,
                         evidence="flag{ssh}", ts=T0 + 200)
     # 告警 1：+45s 检测 attack1。
-    store.insert_alert(host="weak_ssh", technique="T1110", verdict="malicious",
-                       confidence=0.9, evidence="5 failed logins", ts=T0 + 45)
+    alert1 = store.insert_alert(host="weak_ssh", technique="T1110", verdict="malicious",
+                                confidence=0.9, evidence="5 failed logins", ts=T0 + 45)
     # 告警 2：+120s 检测 attack2（host 用容器名，测试容器名等价匹配）。
     store.insert_alert(host="cyberorion_dvwa", technique="T1190",
                        verdict="malicious", confidence=0.85,
@@ -59,7 +59,13 @@ def _fill_main(store: TelemetryStore) -> None:
                        confidence=0.2, evidence="normal traffic", ts=T0 + 60)
     # 防御响应：attack1 之后 50s（在窗口内）-> 覆盖第 1 次检测。
     store.insert_event(host="cyberorion_weak_ssh", source="response",
-                       severity="info", summary="block_ip: 封禁 1.2.3.4",
+                       technique="T1110", severity="info",
+                       summary="block_ip: 封禁 1.2.3.4",
+                       raw=json.dumps({
+                           "schema": "cyberorion.response.v2", "action": "block_ip",
+                           "effect": "verified", "target": "cyberorion_weak_ssh",
+                           "detail": "封禁 1.2.3.4", "related_alert_id": alert1,
+                       }),
                        ts=T0 + 50)
 
 
@@ -127,7 +133,8 @@ class TestComputeMetrics:
         assert m["totals"]["attacks_total"] == 0
         assert m["detection_rate"] == 0.0
         assert m["mttd_sec"] is None
-        assert m["blue_score"] == 25.0  # 0 检测 + 无误报 + 无响应
+        assert m["blue_score"] is None  # 无攻击时不生成误导性的对抗分
+        assert m["metrics_version"] == 3
         assert m["red_score"] == 0.0
 
 
@@ -137,7 +144,7 @@ class TestComputeMetrics:
 
 class TestMatchingRules:
     def test_technique_prefix_match(self, store):
-        """子技术 T1110.001 对告警 T1110：同战术前缀 -> 命中。"""
+        """子技术 T1110.001 对父技术 T1110 -> 命中。"""
         store.insert_attack(target="weak_ssh", technique="T1110.001",
                             action="bf", success=True, evidence="e", ts=T0)
         store.insert_alert(host="weak_ssh", technique="T1110",
@@ -145,6 +152,15 @@ class TestMatchingRules:
                            evidence="x", ts=T0 + 30)
         m = compute_metrics(store)
         assert m["tp"] == 1 and m["fp"] == 0
+
+    def test_unrelated_t1_techniques_do_not_match(self, store):
+        store.insert_attack(target="weak_ssh", technique="T1110",
+                            action="bf", success=True, evidence="e", ts=T0)
+        store.insert_alert(host="weak_ssh", technique="T1190",
+                           verdict="malicious", confidence=0.9,
+                           evidence="unrelated", ts=T0 + 30)
+        m = compute_metrics(store)
+        assert m["tp"] == 0 and m["fp"] == 1
 
     def test_empty_technique_wildcard_half_credit(self, store):
         """任一侧技术为空 -> 通配匹配但 weak=True（半信用）。"""
@@ -256,6 +272,28 @@ class TestResponseStats:
                            summary="ssh event", ts=T0 + 40)
         m = compute_metrics(store)
         assert m["response"]["total"] == 0
+
+    def test_response_on_other_host_not_counted(self, store):
+        store.insert_attack(target="weak_ssh", technique="T1110",
+                            action="bf", success=True, evidence="e", ts=T0)
+        store.insert_alert(host="weak_ssh", technique="T1110",
+                           verdict="malicious", confidence=0.9,
+                           evidence="x", ts=T0 + 30)
+        store.insert_event(host="cyberorion_dvwa", source="response",
+                           severity="info", summary="harden_service: ok", ts=T0 + 40)
+        assert compute_metrics(store)["response"]["responded"] == 0
+
+    def test_unlinked_response_on_correct_host_not_counted(self, store):
+        store.insert_attack(target="weak_ssh", technique="T1110",
+                            action="bf", success=True, evidence="e", ts=T0)
+        store.insert_alert(host="weak_ssh", technique="T1110",
+                           verdict="malicious", confidence=0.9,
+                           evidence="x", ts=T0 + 30)
+        store.insert_event(host="weak_ssh", source="response", severity="info",
+                           summary="block_ip: legacy unlinked", ts=T0 + 40)
+        metrics = compute_metrics(store)
+        assert metrics["response"]["responded"] == 0
+        assert metrics["response_attribution"]["links"][0]["status"] == "unattributed"
 
 
 # ---------------------------------------------------------------------------
