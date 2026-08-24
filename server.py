@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Allow `python server.py` to be run from the cyberorion/ directory.
@@ -849,10 +849,10 @@ async def cai_recording_report(recording_id: str) -> Any:
     report_path = _CAI_RECORDINGS_DIR / recording_id / "report.pdf"
     if not report_path.is_file():
         raise HTTPException(status_code=404, detail="CAI report not generated")
-    return FileResponse(
-        report_path,
+    return Response(
+        content=report_path.read_bytes(),
         media_type="application/pdf",
-        filename=f"{recording_id}.pdf",
+        headers={"Content-Disposition": f'inline; filename="{recording_id}.pdf"'},
     )
 
 
@@ -1618,7 +1618,11 @@ async def session_report_pdf(session_id: str) -> Any:
     path = _session_file(session_id, "report.pdf")
     if isinstance(path, JSONResponse):
         return path
-    return FileResponse(path, media_type="application/pdf", filename=f"{session_id}.pdf")
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{session_id}.pdf"'},
+    )
 
 
 @app.get("/api/sessions/{session_id}/metrics")
