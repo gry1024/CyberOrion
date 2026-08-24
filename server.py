@@ -887,6 +887,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env.setdefault("CAI_SKIP_UPDATE_CHECK", "1")
     env.setdefault("CAI_STREAM", "true")
     env.setdefault("CAI_TRACING", "false")
+    env.setdefault("CAI_DEBUG", "1")
     env.setdefault("TERM", "xterm-256color")
     env.setdefault("PYTHONUNBUFFERED", "1")
     if _CAI_SOURCE_DIR.is_dir():
@@ -993,10 +994,6 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
             record_frames.append({"t": round(time.monotonic() - started_mono, 3), "data": text})
             record_bytes += chunk_bytes
 
-    launch_text = "\r\n[CAI web] launching native CAI CLI...\r\n"
-    record_output(launch_text)
-    await _ws_send_text(ws, launch_text)
-
     master_fd: int | None = None
     proc: subprocess.Popen[bytes] | None = None
     try:
@@ -1039,11 +1036,6 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 record_output(text)
                 if not await _ws_send_text(ws, text):
                     break
-            if proc and proc.poll() is not None:
-                exit_text = f"\r\n[CAI exited with code {proc.returncode}]\r\n"
-                record_output(exit_text)
-                await _ws_send_text(ws, exit_text)
-
         async def pump_input() -> None:
             assert master_fd is not None
             while proc and proc.poll() is None:

@@ -55,10 +55,6 @@ function eventReplayId(event: Event): string {
   return ''
 }
 
-function stripAnsi(value: string): string {
-  return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-}
-
 function taskTypeFor(topTask: CaiTopTask): NonNullable<RunConfig['taskType']> {
   if (topTask === 'ctf') return 'ctf'
   if (topTask === 'attack_chain') return 'attack_chain'
@@ -71,19 +67,6 @@ function defaultDescription(topTask: CaiTopTask): string {
   if (topTask === 'attack_chain') return '读取离线日志与流量证据，调度多个 CAI Agent 复原攻击链条。'
   if (topTask === 'code_repair') return '在隔离代码工作区复现并修复漏洞，保留 diff 和测试输出。'
   return '开放式安全问答与任务规划；普通聊天不触发最终 PDF 报告。'
-}
-
-function outputSections(text: string): Array<{ title: string; body: string }> {
-  const markers = [
-    { title: 'Reasoning / 思考摘要', re: /(reasoning|thinking|思考|推理)/i },
-    { title: 'Tool Calls / 工具调用', re: /(tool|dispatch_subagent|delegate_knowledge_agent|工具|调用)/i },
-    { title: 'Agent Results / Agent 结果', re: /(agent|result|report|最终|结论|输出)/i },
-  ]
-  const lines = text.split(/\r?\n/).filter((line) => line.trim())
-  return markers.map((marker) => ({
-    title: marker.title,
-    body: lines.filter((line) => marker.re.test(line)).slice(-80).join('\n'),
-  })).filter((section) => section.body)
 }
 
 export function CaiTerminalView({ active = true }: { active?: boolean }) {
@@ -103,23 +86,16 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const [replaying, setReplaying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [replayTitle, setReplayTitle] = useState('')
-  const [wrapOutput, setWrapOutput] = useState(true)
-  const [outputText, setOutputText] = useState('')
 
   const taskType = taskTypeFor(topTask)
   const selected = useMemo(() => ctfs.find((item) => item.name === selectedName), [ctfs, selectedName])
   const selectedEnvironment = taskEnvironments.find((item) => item.id === topTask)
   const challenges = selected?.challenges ?? []
   const challengeDetail = selected?.challenge_details?.[challenge] ?? ''
-  const sections = useMemo(() => outputSections(outputText), [outputText])
 
   useEffect(() => {
     replayingRef.current = replaying
   }, [replaying])
-
-  const appendOutput = useCallback((text: string) => {
-    setOutputText((current) => `${current}${stripAnsi(text)}`.slice(-500000))
-  }, [])
 
   const stopReplay = useCallback(() => {
     replayTimersRef.current.forEach((timer) => window.clearTimeout(timer))
@@ -137,13 +113,8 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     wsRef.current = null
   }, [stopReplay])
 
-  const writeIntro = useCallback(() => {
-    const term = termRef.current
-    if (!term) return
-    term.clear()
-    term.write('\x1b[1;36mCAI Web Terminal\x1b[0m\r\n')
-    term.write('Top task tabs: Chat with CyberOrion / CTF / Attack Chain / Code Repair.\r\n')
-    term.write('Use wrap mode or the audit panel to read long lines, tool calls, reasoning summaries and deliverables.\r\n\r\n')
+  const resetTerminal = useCallback(() => {
+    termRef.current?.clear()
   }, [])
 
   const playRecording = useCallback((id: string) => {
@@ -153,7 +124,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     api.getCaiRecording(id)
       .then((recording: CaiRecording) => {
         term.clear()
-        setOutputText('')
         setReplayTitle(recording.title)
         setReplaying(true)
         const speed = 0.45
@@ -161,7 +131,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
           const delay = Math.min(Math.max(frame.t * 1000 * speed, index * 35), 12000)
           return window.setTimeout(() => {
             term.write(frame.data)
-            appendOutput(frame.data)
             if (index === recording.frames.length - 1) {
               setReplaying(false)
               replayTimersRef.current = []
@@ -173,7 +142,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         setReplaying(false)
         pushToast(`CAI 回放加载失败: ${e instanceof Error ? e.message : String(e)}`, { title: 'CAI' })
       })
-  }, [appendOutput, stop])
+  }, [stop])
 
   const start = useCallback((config: RunConfig) => {
     const term = termRef.current
@@ -182,7 +151,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close()
     fitRef.current?.fit()
     term.clear()
-    setOutputText('')
     const ws = new WebSocket(wsUrl())
     wsRef.current = ws
     setRunning(true)
@@ -205,7 +173,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
           `任务：${environment.title}`,
           `任务说明：${environment.description}`,
           environment.workspace ? `工作区：${environment.workspace}` : '',
-          '必须展示 reasoning 摘要、工具参数、工具返回、子 Agent 交付结果和最终交付物。',
         ].filter(Boolean).join('\n')
       }
       if (config.ctf) {
@@ -219,7 +186,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     ws.onmessage = (event) => {
       const text = String(event.data)
       term.write(text)
-      appendOutput(text)
     }
     ws.onerror = () => {
       pushToast('CAI WebSocket 连接失败', { title: 'CAI' })
@@ -229,12 +195,11 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       setRunning(false)
       wsRef.current = null
     }
-  }, [appendOutput, stopReplay, taskEnvironments, topTask])
+  }, [stopReplay, taskEnvironments, topTask])
 
   const startCurrentTask = useCallback(() => {
     if (topTask === 'ctf') {
       if (!selected) {
-        termRef.current?.write('\r\n[CAI web] No CTF selected. Load the CAI CTF catalog, select a challenge, then start again.\r\n')
         pushToast('没有可启动的 CAI CTF。请等待 catalog 加载完成或刷新页面。', { title: 'CAI' })
         return
       }
@@ -296,7 +261,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     fit.fit()
     termRef.current = term
     fitRef.current = fit
-    writeIntro()
+    resetTerminal()
     const onResize = () => {
       fit.fit()
       const ws = wsRef.current
@@ -318,7 +283,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       termRef.current = null
       fitRef.current = null
     }
-  }, [stopReplay, writeIntro])
+  }, [stopReplay, resetTerminal])
 
   useEffect(() => {
     if (!active) return
@@ -367,12 +332,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
             <h1>{selectedEnvironment?.title ?? TASK_TABS.find((item) => item.id === topTask)?.label}</h1>
             <p>{selectedEnvironment?.description ?? defaultDescription(topTask)}</p>
           </div>
-          <section className="cai-help">
-            <strong>过程可见性</strong>
-            <span>终端右侧增加完整审计面板，长行默认换行。</span>
-            <span>可展开查看 reasoning 摘要、工具调用、Agent 交付结果和最终报告线索。</span>
-            <span>不会伪造模型未返回的隐藏 CoT；只展示 CAI 实际输出的 reasoning / thinking / tool events。</span>
-          </section>
           {topTask === 'ctf' && (
             <>
               <section className="cai-control">
@@ -413,26 +372,13 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
             <button className="btn" disabled={running || replaying || (topTask === 'ctf' && !selected)} onClick={startCurrentTask}>开始</button>
             <button className="btn" disabled={!running && !replaying} onClick={stop}>Stop</button>
             <button className="btn" disabled={running || replaying} onClick={demoReplay}>Demo 回放</button>
-            <button className="btn" onClick={() => setWrapOutput((value) => !value)}>{wrapOutput ? '关闭换行' : '开启换行'}</button>
           </div>
           <div className="cai-status">
             <span className={running || replaying ? 'is-running' : ''}>{running ? 'RUNNING' : replaying ? 'REPLAY' : 'IDLE'}</span>
             <span>{replaying ? replayTitle : loading ? 'loading resources' : `${ctfs.length} CTFs · ${taskEnvironments.length} tasks`}</span>
           </div>
         </aside>
-        <div className="cai-main-grid">
-          <div className="cai-terminal-wrap"><div ref={hostRef} className="cai-terminal" /></div>
-          <aside className="cai-audit-panel">
-            <div className="cai-audit-panel__header"><b>过程 / 交付结果</b><span>{outputText.length.toLocaleString()} chars</span></div>
-            <div className={wrapOutput ? 'cai-plain-output is-wrapped' : 'cai-plain-output'}>{outputText || '启动任务后，这里会以可换行文本展示完整终端输出。'}</div>
-            {sections.map((section) => (
-              <details key={section.title} className="cai-audit-section" open>
-                <summary>{section.title}</summary>
-                <pre>{section.body}</pre>
-              </details>
-            ))}
-          </aside>
-        </div>
+        <div className="cai-terminal-wrap"><div ref={hostRef} className="cai-terminal" /></div>
       </div>
     </div>
   )
