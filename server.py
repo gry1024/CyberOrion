@@ -113,7 +113,7 @@ _CAI_RECORDINGS_DIR = Path(
 _CAI_RECORDING_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 _CAI_MAX_RECORDING_BYTES = 2_000_000
 _CAI_MAX_RECORDING_FRAMES = 5000
-_CAI_MIN_PTY_COLS = 220
+_CAI_MIN_PTY_COLS = 20
 _CAI_TASK_ROOT = _HERE / "task_environments"
 _DEEPSEEK_COMPATIBLE_MODELS = {
     "deepseek-v4-pro",
@@ -121,6 +121,13 @@ _DEEPSEEK_COMPATIBLE_MODELS = {
     "deepseek-v4-flash-vision-exp",
 }
 _DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+_CAI_TASK_SKILLS = {
+    "ctf": ("ctf", "授权靶场解题、验证和交付"),
+    "attack_chain": ("attack-chain-reconstruction", "证据优先的攻击链时间线与 ATT&CK 映射"),
+    "code_repair": ("code-vulnerability-repair", "漏洞复现、最小修复和回归验证"),
+    "traffic_analysis": ("traffic-analysis", "流量、会话和访问日志的分层分析"),
+    "purple_team": ("threat-analysis", "威胁背景、现场证据和处置建议分层"),
+}
 
 
 def _cai_task_catalog() -> list[dict[str, Any]]:
@@ -696,7 +703,7 @@ def _cai_chat_demo_recording() -> dict[str, Any]:
         [
             {"t": 0.0, "data": "$ cyberorion chat\r\n"},
             {"t": 0.5, "data": "Reasoning summary: clarify scope, identify needed evidence, avoid unsafe assumptions.\r\n"},
-            {"t": 1.0, "data": "Available tools: delegate_knowledge_agent, dispatch_subagent.\r\n"},
+            {"t": 1.0, "data": "Available tools: dispatch_agent.\r\n"},
             {"t": 1.7, "data": "Result: ready to plan a security task; no final Report Agent call for simple chat.\r\n"},
         ],
     )
@@ -711,11 +718,11 @@ def _cai_attack_chain_demo_recording() -> dict[str, Any]:
         [
             {"t": 0.0, "data": "$ cyberorion attack_chain --workspace task_environments/attack_chain\r\n"},
             {"t": 0.4, "data": "Reasoning summary: evidence-first reconstruction; do not fill gaps without logs.\r\n"},
-            {"t": 0.9, "data": "Tool: delegate_knowledge_agent {background: attack chain reconstruction, evidence: timeline.jsonl/web_access.log/auth.log}\r\n"},
+            {"t": 0.9, "data": "Tool: dispatch_agent {phase: initial, preferred_agent: Knowledge Agent, background: attack chain reconstruction, evidence: timeline.jsonl/web_access.log/auth.log}\r\n"},
             {"t": 1.5, "data": "Agent Result: Knowledge Agent returned ATT&CK mapping guidance for Valid Accounts, Web Shell, Command and Scripting Interpreter.\r\n"},
-            {"t": 2.1, "data": "Tool: dispatch_subagent {preferred_agent: Network Security Analyzer, task: correlate web_access.log and timeline events}\r\n"},
+            {"t": 2.1, "data": "Tool: dispatch_agent {preferred_agent: Network Security Analyzer, task: correlate web_access.log and timeline events}\r\n"},
             {"t": 2.9, "data": "Agent Result: Network Security Analyzer linked 198.51.100.24 login -> /uploads/.cache.php -> shell download.\r\n"},
-            {"t": 3.5, "data": "Tool: dispatch_subagent {preferred_agent: DFIR, task: validate host evidence and separate facts from hypotheses}\r\n"},
+            {"t": 3.5, "data": "Tool: dispatch_agent {preferred_agent: DFIR, task: validate host evidence and separate facts from hypotheses}\r\n"},
             {"t": 4.2, "data": "Final Deliverable: timeline, evidence table, ATT&CK mapping, unknowns, recommendations. Report Agent compiles PDF for systematic task.\r\n"},
         ],
     )
@@ -730,9 +737,9 @@ def _cai_code_repair_demo_recording() -> dict[str, Any]:
         [
             {"t": 0.0, "data": "$ cyberorion code_repair --workspace task_environments/code_repair\r\n"},
             {"t": 0.5, "data": "Reasoning summary: reproduce first, patch minimally, run regression tests.\r\n"},
-            {"t": 1.0, "data": "Tool: dispatch_subagent {preferred_agent: CodeAgent, task: inspect vulnerable_app.py and reproduce SQL injection}\r\n"},
+            {"t": 1.0, "data": "Tool: dispatch_agent {preferred_agent: CodeAgent, task: inspect vulnerable_app.py and reproduce SQL injection}\r\n"},
             {"t": 1.8, "data": "Agent Result: CodeAgent found string-concatenated SQL in find_user and produced parameterized query patch.\r\n"},
-            {"t": 2.5, "data": "Tool: dispatch_subagent {preferred_agent: Retester, task: run python -m pytest tests/vulnerability_regression.py}\r\n"},
+            {"t": 2.5, "data": "Tool: dispatch_agent {preferred_agent: Retester, task: run python -m pytest tests/vulnerability_regression.py}\r\n"},
             {"t": 3.2, "data": "Agent Result: Retester verified normal lookup passes and injection input returns None.\r\n"},
             {"t": 3.9, "data": "Final Deliverable: vulnerability summary, diff, tests, residual risk and remediation advice.\r\n"},
         ],
@@ -905,12 +912,15 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         or ""
     ).lower()
     if "deepseek" in model_base_url:
-        current_model = str(env.get("CAI_MODEL") or "").removeprefix("openai/").strip()
-        env["CAI_MODEL"] = (
+        current_model = str(env.get("CAI_MODEL") or "").split("/")[-1].strip()
+        normalized_model = (
             current_model
             if current_model in _DEEPSEEK_COMPATIBLE_MODELS
             else _DEEPSEEK_DEFAULT_MODEL
         )
+        env["CAI_MODEL"] = f"deepseek/{normalized_model}"
+        if env.get("OPENAI_API_KEY"):
+            env.setdefault("DEEPSEEK_API_KEY", env["OPENAI_API_KEY"])
     if _CAI_SOURCE_DIR.is_dir():
         python_paths = [str(_CAI_SOURCE_DIR / "src"), str(_HERE)]
         if env.get("PYTHONPATH"):
@@ -924,6 +934,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         "OPENAI_ORGANIZATION",
         "CAI_MODEL",
         "CAI_FORCE_HTTPX",
+        "DEEPSEEK_API_KEY",
         "CAI_AGENT_TYPE",
         "CAI_TASK_CONTEXT",
         "ALIAS_API_KEY",
@@ -1014,6 +1025,21 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
         ):
             record_frames.append({"t": round(time.monotonic() - started_mono, 3), "data": text})
             record_bytes += chunk_bytes
+
+    skill_notice = _CAI_TASK_SKILLS.get(task_type)
+    if skill_notice:
+        skill_name, skill_description = skill_notice
+        notice = (
+            "\r\n[CyberOrion] Skill 命中："
+            f"{skill_name}\r\n"
+            "[CyberOrion] Skill 已加载："
+            f"{skill_description}\r\n\r\n"
+        )
+        record_output(notice)
+        await _ws_send_text(ws, notice)
+    start_notice = "\r\n[CyberOrion] CAI 原生终端已连接，开始执行任务。\r\n"
+    record_output(start_notice)
+    await _ws_send_text(ws, start_notice)
 
     master_fd: int | None = None
     proc: subprocess.Popen[bytes] | None = None
@@ -1143,6 +1169,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 "exit_code": proc.returncode if proc else None,
                 "task_workdir": str(task_workdir) if task_workdir else "",
                 "task_context": env.get("CAI_TASK_CONTEXT", ""),
+                "skill": skill_notice[0] if skill_notice else "",
                 "frames": record_frames,
             }
             try:
@@ -1155,10 +1182,16 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     )
                     recording["report_status"] = report_result["status"]
                     recording["report_error"] = report_result.get("error", "")
-                    recording["report_url"] = f"/api/cai/recordings/{recording_id}/report"
+                    report_url = f"/api/cai/recordings/{recording_id}/report"
+                    recording["report_url"] = report_url if report_result["status"] == "ready" else ""
                     report_text = (
                         "\r\n[CyberOrion] 最终 PDF 报告已生成："
-                        f"/api/cai/recordings/{recording_id}/report\r\n"
+                        f"{report_url}\r\n"
+                        if report_result["status"] == "ready"
+                        else (
+                            "\r\n[CyberOrion] 报告 Agent 已调用，但 PDF 生成失败；"
+                            f"源文件：{report_result.get('tex', '')}\r\n"
+                        )
                     )
                     record_output(report_text)
                     await _ws_send_text(ws, report_text)

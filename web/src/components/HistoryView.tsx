@@ -84,7 +84,7 @@ function StaticTerminalLog({ data }: { data: string }) {
     if (!hostRef.current) return
 
     const term = new Terminal({
-      convertEol: true,
+      convertEol: false,
       cursorBlink: false,
       disableStdin: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -118,6 +118,7 @@ function StaticTerminalLog({ data }: { data: string }) {
     term.loadAddon(fit)
     term.open(hostRef.current)
     fit.fit()
+    term.write('\x1b[?7l')
     term.write(data || 'No terminal output recorded.')
 
     const ro = new ResizeObserver(() => fit.fit())

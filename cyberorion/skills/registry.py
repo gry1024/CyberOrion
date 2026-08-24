@@ -18,7 +18,7 @@ import yaml
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 MAX_SKILL_CHARS = 1200
 MAX_DESCRIPTION_CHARS = 240
-_SIDES = {"red", "blue"}
+_SIDES = {"red", "blue", "cyberorion"}
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

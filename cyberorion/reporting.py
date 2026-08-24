@@ -1,4 +1,4 @@
-"""Final Report Agent integration and Chinese LaTeX PDF generation."""
+"""Final Report Agent integration and readable Chinese PDF generation."""
 
 from __future__ import annotations
 
@@ -136,8 +136,7 @@ def _short_text(value: Any, limit: int = 2400) -> str:
 
 def _interesting_lines(transcript: str, limit: int = 90) -> list[str]:
     keywords = (
-        "delegate_knowledge_agent",
-        "dispatch_subagent",
+        "dispatch_agent",
         "knowledge",
         "tool",
         "agent",
@@ -155,6 +154,48 @@ def _interesting_lines(transcript: str, limit: int = 90) -> list[str]:
     lines = [line.strip() for line in transcript.splitlines() if line.strip()]
     picked = [line for line in lines if any(k.lower() in line.lower() for k in keywords)]
     return (picked or lines)[-limit:]
+
+
+def _knowledge_summary(knowledge: dict[str, Any]) -> str:
+    if not knowledge:
+        return "本次记录没有独立知识库报告。"
+    lines = [
+        f"检索状态：{'有命中' if knowledge.get('matches') else '无直接命中'}",
+        f"置信度：{knowledge.get('confidence', '未提供')}",
+    ]
+    matches = knowledge.get("matches") or []
+    if matches:
+        lines.append("关键命中：")
+        for item in matches[:8]:
+            lines.append(
+                f"- {item.get('id', '未标识')} · {item.get('name', '未命名')} · "
+                f"{item.get('source', '来源未提供')}：{item.get('evidence', '')}"
+            )
+    mappings = knowledge.get("attack_mapping") or []
+    if mappings:
+        lines.append("ATT&CK 映射：")
+        lines.extend(f"- {item.get('id', '')}：{item.get('reason', '')}" for item in mappings[:8])
+    risks = knowledge.get("risk_notes") or []
+    if risks:
+        lines.append("边界说明：")
+        lines.extend(f"- {item}" for item in risks[:5])
+    return "\n".join(lines)
+
+
+def _dispatch_summary(execution: dict[str, Any], transcript: str) -> list[str]:
+    rows: list[str] = []
+    for item in execution.get("agent_dispatches") or []:
+        if isinstance(item, dict):
+            rows.append(
+                f"{item.get('agent') or item.get('agent_name') or 'Agent'}："
+                f"{item.get('task') or item.get('result') or '已调度'}"
+            )
+    if not rows:
+        rows = [
+            line for line in _interesting_lines(transcript, 35)
+            if any(marker in line.lower() for marker in ("dispatch_agent", "agent result", "skill"))
+        ]
+    return rows[:35]
 
 
 def _latex_paragraphs(text: str) -> str:
@@ -196,9 +237,10 @@ def render_report_tex(context: dict[str, Any]) -> str:
             "本报告基于 CyberOrion 终端记录自动生成。报告优先保留可审计证据，"
             "对无法从记录中确认的内容不作事实断言。"
         )
-    knowledge_text = json.dumps(knowledge, ensure_ascii=False, indent=2, default=str)
+    knowledge_text = _knowledge_summary(knowledge)
     recommendation_text = "\n".join(f"{index}. {item}" for index, item in enumerate(recommendations, 1))
     evidence_lines = _interesting_lines(transcript)
+    dispatch_lines = _dispatch_summary(execution, transcript)
 
     rows = "\n".join(
         [
@@ -221,6 +263,7 @@ def render_report_tex(context: dict[str, Any]) -> str:
         r"\usepackage{longtable}" "\n"
         r"\usepackage{array}" "\n"
         r"\usepackage{hyperref}" "\n"
+        r"\usepackage{fancyhdr}" "\n"
         r"\IfFontExistsTF{Noto Serif CJK SC}{\setCJKmainfont{Noto Serif CJK SC}}{}" "\n"
         r"\IfFontExistsTF{Noto Sans CJK SC}{\setCJKsansfont{Noto Sans CJK SC}}{}" "\n"
         r"\IfFontExistsTF{Noto Serif CJK SC}{\setmainfont{Noto Serif CJK SC}}{}" "\n"
@@ -234,6 +277,13 @@ def render_report_tex(context: dict[str, Any]) -> str:
         r"\setlength{\parskip}{0.58em}" "\n"
         r"\setlength{\emergencystretch}{3em}" "\n"
         r"\renewcommand{\arraystretch}{1.28}" "\n"
+        r"\pagestyle{fancy}" "\n"
+        r"\fancyhf{}" "\n"
+        r"\lhead{\textcolor{Muted}{CyberOrion · 安全分析}}" "\n"
+        r"\rhead{\textcolor{Muted}{证据优先}}" "\n"
+        r"\cfoot{\textcolor{Muted}{\thepage}}" "\n"
+        r"\renewcommand{\headrulewidth}{0.35pt}" "\n"
+        r"\renewcommand{\footrulewidth}{0pt}" "\n"
         r"\newcommand{\panel}[1]{\par\noindent\textcolor{OrionGold}{\rule[-0.35em]{2.2pt}{2.05em}}\hspace{0.75em}\begin{minipage}[t]{0.88\linewidth}\raggedright #1\end{minipage}\par}" "\n"
         r"\newcommand{\sectionrule}{\vspace{-0.2em}\textcolor{OrionCyan}{\rule{\linewidth}{0.8pt}}\vspace{0.15em}}" "\n"
         r"\begin{document}" "\n"
@@ -256,10 +306,14 @@ def render_report_tex(context: dict[str, Any]) -> str:
         r"\textcolor{Muted}{统计口径：" + _latex_escape(usage.get("basis", "")) + "。}" "\n"
         r"\section*{三、知识库与威胁背景}" "\n"
         r"\sectionrule" "\n"
-        r"\panel{\small " + _latex_paragraphs(_short_text(knowledge_text, 2600)) + "}\n"
+        r"\panel{\small " + _latex_paragraphs(_short_text(knowledge_text, 3600)) + "}\n"
         r"\section*{四、执行链路与关键证据}" "\n"
         r"\sectionrule" "\n"
-        r"\textcolor{Muted}{以下摘录来自实际终端记录，优先保留工具调用、Agent 调度、结果与错误线索。}" "\n"
+        r"\textcolor{Muted}{以下内容来自实际终端记录，按 Agent 调度、结果、错误和证据线索组织；未记录内容不作补写。}" "\n"
+        r"\subsection*{Agent 调度摘要}" "\n"
+        + _evidence_block([_short_text(line, 520) for line in dispatch_lines])
+        + "\n"
+        r"\subsection*{关键证据摘录}" "\n"
         r"\begingroup\small\raggedright" "\n"
         + _evidence_block(evidence_lines)
         + "\n"
@@ -333,7 +387,7 @@ async def generate_report_artifacts(
     recording: dict[str, Any],
     output_dir: str | Path,
 ) -> dict[str, Any]:
-    """Run Report Agent, write LaTeX source and compile a PDF when supported."""
+    """Run Report Agent, write structured source artifacts, and compile a PDF."""
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     context = build_report_context(recording)

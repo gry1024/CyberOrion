@@ -25,7 +25,7 @@ def test_report_contains_background_execution_usage_and_recommendations() -> Non
             "task_type": "attack_chain",
             "status": "success",
             "summary": "攻击链分析",
-            "frames": [{"data": "tool_call dispatch_subagent\n最终结果"}],
+            "frames": [{"data": "tool_call dispatch_agent\n最终结果"}],
         }
     )
 
