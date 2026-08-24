@@ -464,6 +464,8 @@ body {
 
 .cai-terminal {
   height: 100%;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--terminal-border);
@@ -472,6 +474,8 @@ body {
 
 .cai-terminal .xterm {
   height: 100%;
+  width: 100%;
+  min-width: 0;
 }
 
 .cai-history {

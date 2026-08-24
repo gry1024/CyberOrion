@@ -30,7 +30,7 @@ export default function App() {
       <div className="flex h-full overflow-hidden">
         <Sidebar view={view} onView={setView} />
         <main className="flex min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
-          <div className={view === 'cai' ? 'flex min-h-0 flex-1' : 'hidden'} aria-hidden={view !== 'cai'}>
+          <div className={view === 'cai' ? 'flex min-h-0 min-w-0 flex-1 overflow-hidden' : 'hidden'} aria-hidden={view !== 'cai'}>
             <CaiTerminalView active={view === 'cai'} />
           </div>
           {view === 'arena' && <ArenaView />}
