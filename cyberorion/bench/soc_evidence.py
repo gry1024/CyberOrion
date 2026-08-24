@@ -207,9 +207,16 @@ def parse_prediction(raw: str) -> dict:
         return {"parse_ok": False, "prediction": _empty_prediction(), "error": str(exc)}
     normalized = _empty_prediction()
     normalized.update({key: value.get(key, default) for key, default in normalized.items()})
-    for key in ("incident_labels", "attack_techniques", "evidence_ids", "response_actions", "claims", "tool_trace"):
-        if not isinstance(normalized[key], list):
-            normalized[key] = []
+    # 模型偶尔会把字段项生成为对象；评分只接受 schema 中声明的元素类型。
+    # 丢弃畸形项并按缺失字段低分，绝不能让单条异常回答终止整轮实验。
+    for key in ("incident_labels", "attack_techniques", "evidence_ids", "response_actions"):
+        value = normalized[key]
+        normalized[key] = [item for item in value if isinstance(item, str)] \
+            if isinstance(value, list) else []
+    for key in ("claims", "tool_trace"):
+        value = normalized[key]
+        normalized[key] = [item for item in value if isinstance(item, dict)] \
+            if isinstance(value, list) else []
     try:
         normalized["confidence"] = max(0.0, min(1.0, float(normalized["confidence"])))
     except (TypeError, ValueError):

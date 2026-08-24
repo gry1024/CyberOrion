@@ -37,6 +37,20 @@ def test_threat_intel_keeps_complete_answer_set(tmp_path: Path) -> None:
     assert threat_intel.load_questions(path)[0]["correct_options"] == ["A", "C"]
 
 
+def test_threat_intel_base_does_not_require_local_kb(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(threat_intel, "load_questions", lambda: [{
+        "idx": 0, "question": "q", "options": ["A. x"],
+        "correct_options": ["A"], "topic": "t", "difficulty": "easy",
+    }])
+
+    async def llm(system: str, user: str) -> str:
+        return 'ANSWER: ["A"]'
+
+    run = asyncio.run(threat_intel.run_bench(
+        n=1, mode="base", llm=llm, log_dir=tmp_path))
+    assert run["scores"]["correct_mc_pct"] == 1.0
+
+
 def test_oversize_asset_forces_daily_representative_set(tmp_path: Path) -> None:
     huge = tmp_path / "huge.jsonl"
     with huge.open("wb") as stream:
@@ -82,6 +96,13 @@ def test_secalertbench_official_label_schema_and_split_dedup(tmp_path: Path) -> 
     assert len(loaded) == 1
     assert loaded[0]["label"] == "attack"
     assert loaded[0]["alert_type"] == "代码执行"
+
+
+def test_secalertbench_accepts_explicit_runtime_text_verdict() -> None:
+    verdict, confidence = secalertbench._parse_verdict(
+        "Investigation complete. verdict: attack; confidence high.")
+    assert verdict == "attack"
+    assert confidence == 0.0
 
 
 def test_compare_parent_keeps_three_arms_under_one_run(tmp_path: Path,

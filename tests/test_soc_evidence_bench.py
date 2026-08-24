@@ -93,6 +93,17 @@ def test_parse_aggregate_and_report_contract(tmp_path: Path):
     assert scores["failure_taxonomy"]["missing_evidence"] == 1
 
 
+def test_parse_prediction_drops_malformed_list_items_without_crashing():
+    parsed = soc_evidence.parse_prediction(
+        '{"verdict":"malicious","attack_techniques":[{"id":"T1110"},"T1021.001"],'
+        '"evidence_ids":[{"id":"E1"},"E2"],"claims":["bad",{"evidence_ids":["E2"]}]}'
+    )
+    assert parsed["parse_ok"] is True
+    assert parsed["prediction"]["attack_techniques"] == ["T1021.001"]
+    assert parsed["prediction"]["evidence_ids"] == ["E2"]
+    assert parsed["prediction"]["claims"] == [{"evidence_ids": ["E2"]}]
+
+
 def test_run_bench_persists_evidence_and_markdown_report(tmp_path: Path):
     async def fake_llm(system: str, user: str) -> str:
         return json.dumps(prediction(), ensure_ascii=False)
