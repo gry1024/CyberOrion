@@ -305,7 +305,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   }, [playRecording])
 
   return (
-    <div className="flex h-full min-h-0 bg-[var(--color-bg)]">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 bg-[var(--color-bg)]">
       <aside className="cai-side">
         <div className="cai-side__header">
           <div className="cai-side__eyebrow">CAI CLI</div>
