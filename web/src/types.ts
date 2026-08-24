@@ -42,6 +42,8 @@ export interface CaiRecordingSummary {
   summary: string
   source: 'builtin' | 'live' | string
   frame_count: number
+  has_report: boolean
+  report_url?: string
 }
 
 export interface CaiRecording extends CaiRecordingSummary {

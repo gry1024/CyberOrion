@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..kb.rag import AttackKB, get_kb
@@ -143,46 +142,3 @@ def knowledge_context(
         "confidence": round(confidence, 3),
         "sources": sources,
     }
-
-
-def _knowledge_tool():
-    from cai.sdk.agents import function_tool
-
-    @function_tool(
-        name_override="retrieve_security_knowledge",
-        description_override=(
-            "根据任务背景、观察证据和期望产出检索 ATT&CK、漏洞、法规等安全知识，"
-            "返回带来源、风险提示、建议和置信度的结构化参考。"
-        ),
-    )
-    def retrieve_security_knowledge(
-        background: str,
-        evidence: str = "",
-        expected_output: str = "",
-    ) -> str:
-        """为主 Agent 检索安全知识并返回 JSON 结构化结果。"""
-        return json.dumps(
-            knowledge_context(background, evidence, expected_output),
-            ensure_ascii=False,
-        )
-
-    return retrieve_security_knowledge
-
-
-def build_knowledge_agent() -> Any:
-    """构建可作为 Agent-as-tool 使用的知识 Agent。"""
-    from cai.sdk.agents import Agent
-
-    return Agent(
-        name="Knowledge Agent",
-        description="面向安全任务的垂直知识检索与结构化参考 Agent。",
-        instructions=(
-            "你是 CyberOrion 知识 Agent。接收主 Agent 给出的任务背景、证据和期望产出，"
-            "调用 retrieve_security_knowledge 检索知识库。只引用返回的条目和来源；"
-            "未命中时明确说明依据不足，不得编造 ATT&CK、CVE、法规或 0day 事实。"
-        ),
-        tools=[_knowledge_tool()],
-    )
-
-
-retrieve_security_knowledge = _knowledge_tool()

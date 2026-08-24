@@ -97,6 +97,8 @@ export const api = {
     get('/api/cai/recordings') as Promise<{ count: number; recordings: CaiRecordingSummary[] }>,
   getCaiRecording: (id: string) =>
     get(`/api/cai/recordings/${encodeURIComponent(id)}`) as Promise<CaiRecording>,
+  getCaiReportURL: (id: string) =>
+    url(`/api/cai/recordings/${encodeURIComponent(id)}/report`),
 
   getStatus: () => get('/api/status') as Promise<ControllerStatus>,
   getScenario: () => get('/api/scenario') as Promise<ScenarioInfo>,

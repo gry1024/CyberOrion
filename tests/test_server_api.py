@@ -177,6 +177,39 @@ def test_cai_recording_detail_returns_replay_frames(client: TestClient) -> None:
     assert data["frames"][0]["data"]
 
 
+def test_cai_recording_report_endpoint_returns_pdf_when_generated(
+    tmp_path: Path,
+    monkeypatch,
+    client: TestClient,
+) -> None:
+    import server as server_mod
+
+    recordings = tmp_path / "recordings"
+    recordings.mkdir()
+    (recordings / "run_report.json").write_text(
+        json.dumps({
+            "id": "run_report",
+            "source": "live",
+            "task_type": "attack_chain",
+            "frames": [{"t": 0, "data": "report"}],
+        }),
+        encoding="utf-8",
+    )
+    report_dir = recordings / "run_report"
+    report_dir.mkdir()
+    (report_dir / "report.pdf").write_bytes(b"%PDF-1.4 test")
+    monkeypatch.setattr(server_mod, "_CAI_RECORDINGS_DIR", recordings)
+
+    listing = client.get("/api/cai/recordings")
+    assert listing.status_code == 200
+    item = next(row for row in listing.json()["recordings"] if row["id"] == "run_report")
+    assert item["has_report"] is True
+
+    response = client.get("/api/cai/recordings/run_report/report")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+
+
 def test_cai_recordings_include_live_runs_and_detail(
     tmp_path: Path,
     monkeypatch,

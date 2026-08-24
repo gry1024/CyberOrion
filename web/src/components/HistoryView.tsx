@@ -29,6 +29,10 @@ function requestReplay(id: string): void {
   window.dispatchEvent(new CustomEvent('cai-replay-request', { detail: id }))
 }
 
+function openReport(id: string): void {
+  window.open(api.getCaiReportURL(id), '_blank', 'noopener,noreferrer')
+}
+
 function RecordingCard({
   item,
   onDetail,
@@ -59,6 +63,14 @@ function RecordingCard({
         </button>
         <button className="btn" onClick={() => requestReplay(item.id)}>
           回放
+        </button>
+        <button
+          className="btn"
+          onClick={() => openReport(item.id)}
+          disabled={!item.has_report}
+          title={item.has_report ? '浏览最终 PDF 报告' : '该任务未生成 PDF 报告'}
+        >
+          报告
         </button>
       </div>
     </article>

@@ -592,8 +592,10 @@ def _builtin_cai_recordings() -> list[dict[str, Any]]:
 
 def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
     frames = recording.get("frames")
+    recording_id = str(recording.get("id") or "")
+    report_pdf = _CAI_RECORDINGS_DIR / recording_id / "report.pdf"
     return {
-        "id": recording.get("id") or "",
+        "id": recording_id,
         "title": recording.get("title") or recording.get("id") or "",
         "kind": recording.get("kind") or "terminal",
         "ctf_name": recording.get("ctf_name") or "",
@@ -604,6 +606,8 @@ def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
         "summary": recording.get("summary") or "",
         "source": recording.get("source") or "live",
         "frame_count": len(frames) if isinstance(frames, list) else int(recording.get("frame_count") or 0),
+        "has_report": report_pdf.is_file(),
+        "report_url": f"/api/cai/recordings/{recording_id}/report" if report_pdf.is_file() else "",
     }
 
 
@@ -692,6 +696,20 @@ async def cai_recording_detail(recording_id: str) -> dict[str, Any]:
     return recording
 
 
+@app.get("/api/cai/recordings/{recording_id}/report")
+async def cai_recording_report(recording_id: str) -> Any:
+    if not _CAI_RECORDING_ID_RE.match(recording_id):
+        raise HTTPException(status_code=400, detail="invalid recording id")
+    report_path = _CAI_RECORDINGS_DIR / recording_id / "report.pdf"
+    if not report_path.is_file():
+        raise HTTPException(status_code=404, detail="CAI report not generated")
+    return FileResponse(
+        report_path,
+        media_type="application/pdf",
+        filename=f"{recording_id}.pdf",
+    )
+
+
 def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     explicit_agent = str(
@@ -706,7 +724,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         or env.get("CAI_TASK_TYPE")
         or ""
     ).strip().lower()
-    allowed_tasks = {"general", "ctf", "code_repair", "attack_chain"}
+    allowed_tasks = {"general", "ctf", "code_repair", "attack_chain", "purple_team"}
     env["CAI_AGENT_TYPE"] = explicit_agent or "cyberorion_agent"
     env["CAI_TASK_TYPE"] = explicit_task if explicit_task in allowed_tasks else "general"
     env.setdefault("CAI_LICENSE_OFF", "1")
@@ -935,7 +953,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
             else:
                 status = "unknown"
             recording_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
-            _write_cai_recording({
+            recording = {
                 "id": recording_id,
                 "title": f"CyberOrion {'CTF' if ctf_name else task_type} 运行 {recording_id}",
                 "kind": kind,
@@ -953,7 +971,22 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 "source": "live",
                 "exit_code": proc.returncode if proc else None,
                 "frames": record_frames,
-            })
+            }
+            if task_type in {"attack_chain", "purple_team"}:
+                try:
+                    from cyberorion.reporting import generate_report_artifacts
+
+                    report_result = await generate_report_artifacts(
+                        recording,
+                        _CAI_RECORDINGS_DIR / recording_id,
+                    )
+                    recording["report_status"] = report_result["status"]
+                    recording["report_error"] = report_result.get("error", "")
+                except Exception as exc:
+                    logger.exception("failed to generate final CAI report")
+                    recording["report_status"] = "failed"
+                    recording["report_error"] = f"{type(exc).__name__}: {exc}"
+            _write_cai_recording(recording)
         with suppress(Exception):
             await ws.close()
 
