@@ -694,6 +694,21 @@ async def cai_recording_detail(recording_id: str) -> dict[str, Any]:
 
 def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
+    explicit_agent = str(
+        overrides.get("CAI_AGENT_TYPE")
+        or overrides.get("cai_agent_type")
+        or env.get("CAI_AGENT_TYPE")
+        or ""
+    ).strip()
+    explicit_task = str(
+        overrides.get("CAI_TASK_TYPE")
+        or overrides.get("cai_task_type")
+        or env.get("CAI_TASK_TYPE")
+        or ""
+    ).strip().lower()
+    allowed_tasks = {"general", "ctf", "code_repair", "attack_chain"}
+    env["CAI_AGENT_TYPE"] = explicit_agent or "cyberorion_agent"
+    env["CAI_TASK_TYPE"] = explicit_task if explicit_task in allowed_tasks else "general"
     env.setdefault("CAI_LICENSE_OFF", "1")
     env.setdefault("CAI_SKIP_UPDATE_CHECK", "1")
     env.setdefault("CAI_STREAM", "true")
@@ -701,9 +716,10 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env.setdefault("TERM", "xterm-256color")
     env.setdefault("PYTHONUNBUFFERED", "1")
     if _CAI_SOURCE_DIR.is_dir():
-        env["PYTHONPATH"] = str(_CAI_SOURCE_DIR / "src") + (
-            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-        )
+        python_paths = [str(_CAI_SOURCE_DIR / "src"), str(_HERE)]
+        if env.get("PYTHONPATH"):
+            python_paths.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(python_paths)
     for key in (
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -786,6 +802,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
     cmd = _cai_command(first)
     started_at = _utc_now_iso()
     started_mono = time.monotonic()
+    task_type = env.get("CAI_TASK_TYPE", "general")
     record_frames: list[dict[str, Any]] = []
     record_bytes = 0
     ctf_name = str(first.get("CTF_NAME") or first.get("ctf_name") or "").strip()
@@ -920,8 +937,9 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
             recording_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
             _write_cai_recording({
                 "id": recording_id,
-                "title": f"CAI {'CTF' if ctf_name else '终端'} 运行 {recording_id}",
+                "title": f"CyberOrion {'CTF' if ctf_name else task_type} 运行 {recording_id}",
                 "kind": kind,
+                "task_type": task_type,
                 "ctf_name": ctf_name,
                 "challenge": challenge,
                 "status": status,
@@ -929,7 +947,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 "created_at": started_at,
                 "ended_at": ended_at,
                 "summary": (
-                    f"真实 CAI {'CTF' if ctf_name else '终端'}测试记录。"
+                    f"真实 CyberOrion {'CTF' if ctf_name else task_type} 测试记录。"
                     + (f" CTF={ctf_name} Challenge={challenge}." if ctf_name else "")
                 ),
                 "source": "live",

@@ -7,6 +7,7 @@ import type { ViewKey } from '../types'
 
 const NAV: { key: ViewKey; label: string }[] = [
   { key: 'cai', label: 'CAI 终端' },
+  { key: 'kb', label: '安全知识库' },
   { key: 'history', label: 'CAI 历史' },
   { key: 'docs', label: '框架文档' },
 ]
@@ -45,7 +46,7 @@ export function Sidebar({
         <button
           className="sidebar-item"
           onClick={newSession}
-          title="进入 CAI 原生终端"
+          title="进入 CyberOrion 终端"
         >
           <span style={{ fontSize: 13, lineHeight: 1, color: 'var(--color-accent)' }}>＋</span>
           CAI 终端

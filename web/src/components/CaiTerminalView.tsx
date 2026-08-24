@@ -10,9 +10,16 @@ interface RunConfig {
   ctf?: CaiCtfItem
   challenge?: string
   prompt?: string
+  taskType?: 'general' | 'ctf' | 'code_repair' | 'attack_chain'
 }
 
 const DEFAULT_CTF_PROMPT = 'Solve this CAI CTF challenge. Work step by step, validate the flag, and stop when the flag is confirmed.'
+const TASK_PROMPTS: Record<NonNullable<RunConfig['taskType']>, string> = {
+  general: '',
+  ctf: DEFAULT_CTF_PROMPT,
+  code_repair: '修复代码漏洞。先定位并复现问题，给出最小安全修复，运行回归验证，并输出面向安全人员的漏洞修复报告。',
+  attack_chain: '复原攻击链条。分析提供的日志与流量证据，建立时间线，标注受害资产、攻击来源、行为和 ATT&CK 技术，最后输出面向安全人员的结构化报告。',
+}
 const REPLAY_STORAGE_KEY = 'cyberorion:cai-replay-id'
 const DEMO_REPLAY_ID = 'demo_picoctf_static_flag'
 
@@ -46,7 +53,8 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const [ctfs, setCtfs] = useState<CaiCtfItem[]>([])
   const [selectedName, setSelectedName] = useState('')
   const [challenge, setChallenge] = useState('')
-  const [prompt, setPrompt] = useState(DEFAULT_CTF_PROMPT)
+  const [taskType, setTaskType] = useState<NonNullable<RunConfig['taskType']>>('general')
+  const [prompt, setPrompt] = useState(TASK_PROMPTS.general)
   const [running, setRunning] = useState(false)
   const [replaying, setReplaying] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -84,7 +92,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     if (!term) return
     term.clear()
     term.write('\x1b[1;36mCAI Web Terminal\x1b[0m\r\n')
-    term.write('Use the left panel to start native CAI, run a CAI CTF, or replay a saved CAI run.\r\n')
+    term.write('Use the left panel to start CyberOrion, run a CyberOrion CTF, or replay a saved run.\r\n')
     term.write('This is an interactive PTY bridge: type directly in the terminal after CAI starts.\r\n')
     term.write('The terminal area renders raw CAI CLI output through PTY + ANSI.\r\n\r\n')
   }, [])
@@ -133,11 +141,13 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         rows: term.rows,
         cols: term.cols,
         continue_mode: false,
+        CAI_AGENT_TYPE: 'cyberorion_agent',
+        CAI_TASK_TYPE: config.taskType ?? 'general',
       }
       const promptText = (config.prompt ?? '').trim()
       if (promptText) payload.prompt = promptText
       if (config.ctf) {
-        payload.CAI_AGENT_TYPE = 'one_tool_agent'
+        payload.CAI_TASK_TYPE = 'ctf'
         payload.CTF_NAME = config.ctf.name
         payload.CTF_INSIDE = config.ctf.ctf_inside
       }
@@ -164,9 +174,15 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     start({
       ctf: selected,
       challenge,
-      prompt,
+      prompt: prompt.trim() || DEFAULT_CTF_PROMPT,
+      taskType: 'ctf',
     })
   }, [challenge, prompt, selected, start])
+
+  const startDemo = useCallback(() => {
+    const demoPrompt = TASK_PROMPTS[taskType]
+    start({ taskType, prompt: demoPrompt })
+  }, [start, taskType])
 
   useEffect(() => {
     let stale = false
@@ -293,17 +309,34 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       <aside className="cai-side">
         <div className="cai-side__header">
           <div className="cai-side__eyebrow">CAI CLI</div>
-          <h1>原生终端</h1>
+          <h1>CyberOrion 终端</h1>
           <p>网页只转发 CAI PTY 输入输出；终端颜色、框线和报错都按 CLI 原样显示。</p>
         </div>
 
         <section className="cai-help">
           <strong>怎么使用</strong>
-          <span>Start CAI：真实启动 CAI 交互终端；启动完成后可直接在右侧终端输入。</span>
-          <span>Start CTF：按所选 CTF / Challenge / Prompt 调用 CAI 实时运行。</span>
-          <span>Demo Replay：只用于演示回放，不会替代 Start CAI 或 Start CTF。</span>
+          <span>Start CyberOrion：启动默认主 Agent；可先选择修复代码漏洞或复原攻击链条 demo 环境。</span>
+          <span>Start CyberOrion CTF：按所选 CTF / Challenge / Prompt 调用 CyberOrion 实时运行。</span>
+          <span>Demo Replay：只用于演示回放，不会替代 Start CyberOrion 或 Start CyberOrion CTF。</span>
           <span>CAI 历史只列出真实运行记录；演示素材只从 Demo Replay 手动进入。</span>
           <span>如果 CTF 镜像或 registry token 缺失，错误会原样显示在终端并写入历史。</span>
+        </section>
+
+        <section className="cai-control">
+          <label>任务环境</label>
+          <select
+            value={taskType}
+            onChange={(e) => {
+              const next = e.target.value as NonNullable<RunConfig['taskType']>
+              setTaskType(next)
+              if (next !== 'ctf') setPrompt(TASK_PROMPTS[next])
+            }}
+            disabled={running || replaying}
+          >
+            <option value="general">通用安全任务</option>
+            <option value="code_repair">Demo · 修复代码漏洞</option>
+            <option value="attack_chain">Demo · 复原攻击链条</option>
+          </select>
         </section>
 
         <section className="cai-control">
@@ -360,10 +393,10 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
             disabled={running || replaying || !selected}
             onClick={startCtf}
           >
-            Start CTF
+            Start CyberOrion CTF
           </button>
-          <button className="btn" disabled={running || replaying} onClick={() => start({})}>
-            Start CAI
+          <button className="btn" disabled={running || replaying} onClick={startDemo}>
+            Start CyberOrion
           </button>
           <button className="btn" disabled={running || replaying} onClick={() => playRecording(DEMO_REPLAY_ID)}>
             Demo Replay

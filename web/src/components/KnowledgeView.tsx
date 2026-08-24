@@ -292,8 +292,8 @@ export function KnowledgeView() {
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-4">
       {/* 标题栏 */}
       <div className="flex flex-none items-baseline gap-4 px-1 pt-1">
-        <h1 className="text-[13px] font-semibold text-fg">知识图谱</h1>
-        <span className="eyebrow">攻击知识，尽收眼底</span>
+        <h1 className="text-[13px] font-semibold text-fg">安全知识库</h1>
+        <span className="eyebrow">ATT&CK、漏洞、法规与威胁情报</span>
         <span className="ml-auto text-[11px] text-text-3">
           共 {stats?.total.toLocaleString() ?? '—'} 篇文档
         </span>
