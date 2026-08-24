@@ -412,7 +412,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-hidden p-2">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2">
         <div ref={hostRef} className="cai-terminal" />
       </div>
     </div>
