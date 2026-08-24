@@ -1,0 +1,2 @@
+Aug 24 09:00:01 web-01 sshd[1201]: Failed password for analyst from 198.51.100.24
+Aug 24 09:00:08 web-01 sshd[1208]: Accepted password for analyst from 198.51.100.24

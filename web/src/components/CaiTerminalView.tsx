@@ -4,24 +4,36 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '../api'
 import { pushToast } from '../toasts'
-import type { CaiCtfItem, CaiRecording } from '../types'
+import type { CaiCtfItem, CaiRecording, CaiTaskEnvironment, CaiTopTask } from '../types'
 
 interface RunConfig {
   ctf?: CaiCtfItem
   challenge?: string
   prompt?: string
   taskType?: 'general' | 'ctf' | 'code_repair' | 'attack_chain'
+  topTask?: CaiTopTask
 }
 
 const DEFAULT_CTF_PROMPT = 'Solve this CAI CTF challenge. Work step by step, validate the flag, and stop when the flag is confirmed.'
+const TASK_TABS: Array<{ id: CaiTopTask; label: string }> = [
+  { id: 'chat', label: 'Chat with CyberOrion' },
+  { id: 'ctf', label: 'CTF' },
+  { id: 'attack_chain', label: '复原攻击链条' },
+  { id: 'code_repair', label: '修复代码漏洞' },
+]
 const TASK_PROMPTS: Record<NonNullable<RunConfig['taskType']>, string> = {
-  general: '',
+  general: '你是 CyberOrion。请先说明你的任务计划、可调用的 Agent、需要的证据，然后按用户输入继续。',
   ctf: DEFAULT_CTF_PROMPT,
-  code_repair: '修复代码漏洞。先定位并复现问题，给出最小安全修复，运行回归验证，并输出面向安全人员的漏洞修复报告。',
-  attack_chain: '复原攻击链条。分析提供的日志与流量证据，建立时间线，标注受害资产、攻击来源、行为和 ATT&CK 技术，最后输出面向安全人员的结构化报告。',
+  code_repair: '修复代码漏洞。工作区包含 src/vulnerable_app.py 和 tests/test_vulnerable_app.py。先复现 SQL 注入，再调度 CodeAgent 修复，最后运行 pytest 并输出 diff、测试结果和风险说明。',
+  attack_chain: '复原攻击链条。工作区包含 evidence/timeline.jsonl、web_access.log 和 auth.log。先调用 Knowledge Agent 获取背景，再调度 Network Security Analyzer、DFIR、Replay Attack Agent 分析证据，最后输出时间线、ATT&CK 映射、事实/推断/未验证项。',
 }
 const REPLAY_STORAGE_KEY = 'cyberorion:cai-replay-id'
-const DEMO_REPLAY_ID = 'demo_picoctf_static_flag'
+const DEMO_REPLAY_IDS: Record<CaiTopTask, string> = {
+  chat: 'demo_cyberorion_chat',
+  ctf: 'demo_picoctf_static_flag',
+  attack_chain: 'demo_attack_chain_reconstruction',
+  code_repair: 'demo_code_repair_sql_injection',
+}
 
 function wsUrl(): string {
   const url = new URL('ws/cai', new URL(import.meta.env.BASE_URL, window.location.href))
@@ -43,6 +55,37 @@ function eventReplayId(event: Event): string {
   return ''
 }
 
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+}
+
+function taskTypeFor(topTask: CaiTopTask): NonNullable<RunConfig['taskType']> {
+  if (topTask === 'ctf') return 'ctf'
+  if (topTask === 'attack_chain') return 'attack_chain'
+  if (topTask === 'code_repair') return 'code_repair'
+  return 'general'
+}
+
+function defaultDescription(topTask: CaiTopTask): string {
+  if (topTask === 'ctf') return '调用 CAI 内置 CTF 目录，在授权靶场中完成挑战并验证结果。'
+  if (topTask === 'attack_chain') return '读取离线日志与流量证据，调度多个 CAI Agent 复原攻击链条。'
+  if (topTask === 'code_repair') return '在隔离代码工作区复现并修复漏洞，保留 diff 和测试输出。'
+  return '开放式安全问答与任务规划；普通聊天不触发最终 PDF 报告。'
+}
+
+function outputSections(text: string): Array<{ title: string; body: string }> {
+  const markers = [
+    { title: 'Reasoning / 思考摘要', re: /(reasoning|thinking|思考|推理)/i },
+    { title: 'Tool Calls / 工具调用', re: /(tool|dispatch_subagent|delegate_knowledge_agent|工具|调用)/i },
+    { title: 'Agent Results / Agent 结果', re: /(agent|result|report|最终|结论|输出)/i },
+  ]
+  const lines = text.split(/\r?\n/).filter((line) => line.trim())
+  return markers.map((marker) => ({
+    title: marker.title,
+    body: lines.filter((line) => marker.re.test(line)).slice(-80).join('\n'),
+  })).filter((section) => section.body)
+}
+
 export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -51,25 +94,32 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const replayTimersRef = useRef<number[]>([])
   const replayingRef = useRef(false)
   const [ctfs, setCtfs] = useState<CaiCtfItem[]>([])
+  const [taskEnvironments, setTaskEnvironments] = useState<CaiTaskEnvironment[]>([])
+  const [topTask, setTopTask] = useState<CaiTopTask>('chat')
   const [selectedName, setSelectedName] = useState('')
   const [challenge, setChallenge] = useState('')
-  const [taskType, setTaskType] = useState<NonNullable<RunConfig['taskType']>>('general')
   const [prompt, setPrompt] = useState(TASK_PROMPTS.general)
   const [running, setRunning] = useState(false)
   const [replaying, setReplaying] = useState(false)
   const [loading, setLoading] = useState(true)
   const [replayTitle, setReplayTitle] = useState('')
+  const [wrapOutput, setWrapOutput] = useState(true)
+  const [outputText, setOutputText] = useState('')
 
-  const selected = useMemo(
-    () => ctfs.find((item) => item.name === selectedName),
-    [ctfs, selectedName],
-  )
+  const taskType = taskTypeFor(topTask)
+  const selected = useMemo(() => ctfs.find((item) => item.name === selectedName), [ctfs, selectedName])
+  const selectedEnvironment = taskEnvironments.find((item) => item.id === topTask)
   const challenges = selected?.challenges ?? []
   const challengeDetail = selected?.challenge_details?.[challenge] ?? ''
+  const sections = useMemo(() => outputSections(outputText), [outputText])
 
   useEffect(() => {
     replayingRef.current = replaying
   }, [replaying])
+
+  const appendOutput = useCallback((text: string) => {
+    setOutputText((current) => `${current}${stripAnsi(text)}`.slice(-500000))
+  }, [])
 
   const stopReplay = useCallback(() => {
     replayTimersRef.current.forEach((timer) => window.clearTimeout(timer))
@@ -92,9 +142,8 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     if (!term) return
     term.clear()
     term.write('\x1b[1;36mCAI Web Terminal\x1b[0m\r\n')
-    term.write('Use the left panel to start CyberOrion, run a CyberOrion CTF, or replay a saved run.\r\n')
-    term.write('This is an interactive PTY bridge: type directly in the terminal after CAI starts.\r\n')
-    term.write('The terminal area renders raw CAI CLI output through PTY + ANSI.\r\n\r\n')
+    term.write('Top task tabs: Chat with CyberOrion / CTF / Attack Chain / Code Repair.\r\n')
+    term.write('Use wrap mode or the audit panel to read long lines, tool calls, reasoning summaries and deliverables.\r\n\r\n')
   }, [])
 
   const playRecording = useCallback((id: string) => {
@@ -104,6 +153,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     api.getCaiRecording(id)
       .then((recording: CaiRecording) => {
         term.clear()
+        setOutputText('')
         setReplayTitle(recording.title)
         setReplaying(true)
         const speed = 0.45
@@ -111,6 +161,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
           const delay = Math.min(Math.max(frame.t * 1000 * speed, index * 35), 12000)
           return window.setTimeout(() => {
             term.write(frame.data)
+            appendOutput(frame.data)
             if (index === recording.frames.length - 1) {
               setReplaying(false)
               replayTimersRef.current = []
@@ -122,30 +173,41 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         setReplaying(false)
         pushToast(`CAI 回放加载失败: ${e instanceof Error ? e.message : String(e)}`, { title: 'CAI' })
       })
-  }, [stop])
+  }, [appendOutput, stop])
 
   const start = useCallback((config: RunConfig) => {
     const term = termRef.current
     if (!term) return
     stopReplay()
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.close()
-    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close()
     fitRef.current?.fit()
     term.clear()
+    setOutputText('')
     const ws = new WebSocket(wsUrl())
     wsRef.current = ws
     setRunning(true)
     ws.onopen = () => {
+      const selectedTask = config.topTask ?? topTask
+      const selectedType = config.taskType ?? taskTypeFor(selectedTask)
+      const environment = taskEnvironments.find((item) => item.id === selectedTask)
       const payload: Record<string, unknown> = {
         rows: term.rows,
         cols: term.cols,
         continue_mode: false,
         CAI_AGENT_TYPE: 'cyberorion_agent',
-        CAI_TASK_TYPE: config.taskType ?? 'general',
+        CAI_TASK_TYPE: selectedType,
       }
       const promptText = (config.prompt ?? '').trim()
       if (promptText) payload.prompt = promptText
+      if (environment?.workdir) payload.task_workdir = environment.workdir
+      if (environment) {
+        payload.CAI_TASK_CONTEXT = [
+          `任务：${environment.title}`,
+          `任务说明：${environment.description}`,
+          environment.workspace ? `工作区：${environment.workspace}` : '',
+          '必须展示 reasoning 摘要、工具参数、工具返回、子 Agent 交付结果和最终交付物。',
+        ].filter(Boolean).join('\n')
+      }
       if (config.ctf) {
         payload.CAI_TASK_TYPE = 'ctf'
         payload.CTF_NAME = config.ctf.name
@@ -154,7 +216,11 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       if (config.challenge) payload.CTF_CHALLENGE = config.challenge
       ws.send(JSON.stringify(payload))
     }
-    ws.onmessage = (event) => term.write(String(event.data))
+    ws.onmessage = (event) => {
+      const text = String(event.data)
+      term.write(text)
+      appendOutput(text)
+    }
     ws.onerror = () => {
       pushToast('CAI WebSocket 连接失败', { title: 'CAI' })
       setRunning(false)
@@ -163,33 +229,32 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       setRunning(false)
       wsRef.current = null
     }
-  }, [stopReplay])
+  }, [appendOutput, stopReplay, taskEnvironments, topTask])
 
-  const startCtf = useCallback(() => {
-    if (!selected) {
-      termRef.current?.write('\r\n[CAI web] No CTF selected. Load the CAI CTF catalog, select a challenge, then start again.\r\n')
-      pushToast('没有可启动的 CAI CTF。请等待 catalog 加载完成或刷新页面。', { title: 'CAI' })
+  const startCurrentTask = useCallback(() => {
+    if (topTask === 'ctf') {
+      if (!selected) {
+        termRef.current?.write('\r\n[CAI web] No CTF selected. Load the CAI CTF catalog, select a challenge, then start again.\r\n')
+        pushToast('没有可启动的 CAI CTF。请等待 catalog 加载完成或刷新页面。', { title: 'CAI' })
+        return
+      }
+      start({ ctf: selected, challenge, prompt: prompt.trim() || DEFAULT_CTF_PROMPT, taskType: 'ctf', topTask: 'ctf' })
       return
     }
-    start({
-      ctf: selected,
-      challenge,
-      prompt: prompt.trim() || DEFAULT_CTF_PROMPT,
-      taskType: 'ctf',
-    })
-  }, [challenge, prompt, selected, start])
+    start({ taskType, topTask, prompt: prompt.trim() || TASK_PROMPTS[taskType] })
+  }, [challenge, prompt, selected, start, taskType, topTask])
 
-  const startDemo = useCallback(() => {
-    const demoPrompt = TASK_PROMPTS[taskType]
-    start({ taskType, prompt: demoPrompt })
-  }, [start, taskType])
+  const demoReplay = useCallback(() => {
+    playRecording(DEMO_REPLAY_IDS[topTask])
+  }, [playRecording, topTask])
 
   useEffect(() => {
     let stale = false
-    api.getCaiCtfs()
-      .then((data) => {
+    Promise.all([api.getCaiCtfs(), api.getCaiTaskEnvironments()])
+      .then(([ctfData, environmentData]) => {
         if (stale) return
-        const sorted = data.ctfs.slice().sort((a, b) => {
+        setTaskEnvironments(environmentData.tasks)
+        const sorted = ctfData.ctfs.slice().sort((a, b) => {
           const byDiff = difficultyRank(a.difficulty) - difficultyRank(b.difficulty)
           return byDiff || a.name.localeCompare(b.name)
         })
@@ -200,10 +265,14 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
           setChallenge(first.challenges[0] ?? '')
         }
       })
-      .catch((e) => pushToast(`CAI CTF 列表加载失败: ${e instanceof Error ? e.message : String(e)}`, { title: 'CAI' }))
+      .catch((e) => pushToast(`CAI 资源加载失败: ${e instanceof Error ? e.message : String(e)}`, { title: 'CAI' }))
       .finally(() => { if (!stale) setLoading(false) })
     return () => { stale = true }
   }, [])
+
+  useEffect(() => {
+    setPrompt(TASK_PROMPTS[taskTypeFor(topTask)])
+  }, [topTask])
 
   useEffect(() => {
     if (!hostRef.current || termRef.current) return
@@ -219,22 +288,6 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         foreground: '#d6deeb',
         cursor: '#8be9fd',
         selectionBackground: '#264f78',
-        black: '#000000',
-        red: '#ff6b6b',
-        green: '#48c78e',
-        yellow: '#e7b955',
-        blue: '#59a7ff',
-        magenta: '#c4a7ff',
-        cyan: '#5eead4',
-        white: '#d6deeb',
-        brightBlack: '#6b7280',
-        brightRed: '#ff8787',
-        brightGreen: '#69db7c',
-        brightYellow: '#ffd43b',
-        brightBlue: '#74c0fc',
-        brightMagenta: '#d0bfff',
-        brightCyan: '#99f6e4',
-        brightWhite: '#ffffff',
       },
     })
     const fit = new FitAddon()
@@ -244,22 +297,17 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     termRef.current = term
     fitRef.current = fit
     writeIntro()
-
     const onResize = () => {
       fit.fit()
       const ws = wsRef.current
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }))
-      }
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }))
     }
     const ro = new ResizeObserver(onResize)
     ro.observe(hostRef.current)
     const disposable = term.onData((data) => {
       if (replayingRef.current) return
       const ws = wsRef.current
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'input', data }))
-      }
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }))
     })
     return () => {
       disposable.dispose()
@@ -281,8 +329,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   }, [active])
 
   useEffect(() => {
-    if (!selected) return
-    setChallenge(selected.challenges[0] ?? '')
+    if (selected) setChallenge(selected.challenges[0] ?? '')
   }, [selectedName, selected])
 
   useEffect(() => {
@@ -305,115 +352,87 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   }, [playRecording])
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 bg-[var(--color-bg)]">
-      <aside className="cai-side">
-        <div className="cai-side__header">
-          <div className="cai-side__eyebrow">CAI CLI</div>
-          <h1>CyberOrion 终端</h1>
-          <p>网页只转发 CAI PTY 输入输出；终端颜色、框线和报错都按 CLI 原样显示。</p>
-        </div>
-
-        <section className="cai-help">
-          <strong>怎么使用</strong>
-          <span>Start CyberOrion：启动默认主 Agent；可先选择修复代码漏洞或复原攻击链条 demo 环境。</span>
-          <span>Start CyberOrion CTF：按所选 CTF / Challenge / Prompt 调用 CyberOrion 实时运行。</span>
-          <span>Demo Replay：只用于演示回放，不会替代 Start CyberOrion 或 Start CyberOrion CTF。</span>
-          <span>CAI 历史只列出真实运行记录；演示素材只从 Demo Replay 手动进入。</span>
-          <span>如果 CTF 镜像或 registry token 缺失，错误会原样显示在终端并写入历史。</span>
-        </section>
-
-        <section className="cai-control">
-          <label>任务环境</label>
-          <select
-            value={taskType}
-            onChange={(e) => {
-              const next = e.target.value as NonNullable<RunConfig['taskType']>
-              setTaskType(next)
-              if (next !== 'ctf') setPrompt(TASK_PROMPTS[next])
-            }}
-            disabled={running || replaying}
-          >
-            <option value="general">通用安全任务</option>
-            <option value="code_repair">Demo · 修复代码漏洞</option>
-            <option value="attack_chain">Demo · 复原攻击链条</option>
-          </select>
-        </section>
-
-        <section className="cai-control">
-          <label>CTF</label>
-          <select
-            value={selectedName}
-            onChange={(e) => setSelectedName(e.target.value)}
-            disabled={loading || running || replaying}
-          >
-            {ctfs.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name} · {item.difficulty || 'Unknown'}
-              </option>
-            ))}
-          </select>
-        </section>
-
-        <section className="cai-control">
-          <label>Challenge</label>
-          <select value={challenge} onChange={(e) => setChallenge(e.target.value)} disabled={running || replaying || !challenges.length}>
-            {(challenges.length ? challenges : ['']).map((item) => (
-              <option key={item || 'default'} value={item}>{item || 'Default'}</option>
-            ))}
-          </select>
-        </section>
-
-        <section className="cai-control">
-          <label>CTF Prompt</label>
-          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={running || replaying} rows={4} />
-        </section>
-
-        {selected && (
-          <section className="cai-ctf-detail">
-            <div>{selected.type || 'CTF'} · {selected.difficulty || 'Unknown'} · {selected.ctf_inside ? 'ctf_inside' : 'external service'}</div>
-            {selected.description && <p>{selected.description}</p>}
-            {selected.instructions && <p><b>Instructions:</b> {selected.instructions}</p>}
-            {challengeDetail && <p><b>{challenge || 'Challenge'}:</b> {challengeDetail}</p>}
-            {Object.keys(selected.challenge_details || {}).length > 0 && (
-              <div className="cai-task-list">
-                <b>全部任务</b>
-                {Object.entries(selected.challenge_details).map(([name, detail]) => (
-                  <p key={name}><b>{name}:</b> {detail || 'No detail provided by CAI catalog.'}</p>
-                ))}
-              </div>
-            )}
-            {selected.techniques && <code>{selected.techniques}</code>}
-            {selected.source && <code>{selected.source}</code>}
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-bg)]">
+      <div className="cai-task-tabs">
+        {TASK_TABS.map((tab) => (
+          <button key={tab.id} className={topTask === tab.id ? 'is-active' : ''} disabled={running || replaying} onClick={() => setTopTask(tab.id)}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <aside className="cai-side">
+          <div className="cai-side__header">
+            <div className="cai-side__eyebrow">CAI · {selectedEnvironment?.available === false ? 'unavailable' : 'ready'}</div>
+            <h1>{selectedEnvironment?.title ?? TASK_TABS.find((item) => item.id === topTask)?.label}</h1>
+            <p>{selectedEnvironment?.description ?? defaultDescription(topTask)}</p>
+          </div>
+          <section className="cai-help">
+            <strong>过程可见性</strong>
+            <span>终端右侧增加完整审计面板，长行默认换行。</span>
+            <span>可展开查看 reasoning 摘要、工具调用、Agent 交付结果和最终报告线索。</span>
+            <span>不会伪造模型未返回的隐藏 CoT；只展示 CAI 实际输出的 reasoning / thinking / tool events。</span>
           </section>
-        )}
-
-        <div className="cai-actions">
-          <button
-            className="btn"
-            disabled={running || replaying || !selected}
-            onClick={startCtf}
-          >
-            Start CyberOrion CTF
-          </button>
-          <button className="btn" disabled={running || replaying} onClick={startDemo}>
-            Start CyberOrion
-          </button>
-          <button className="btn" disabled={running || replaying} onClick={() => playRecording(DEMO_REPLAY_ID)}>
-            Demo Replay
-          </button>
-          <button className="btn" disabled={!running && !replaying} onClick={stop}>
-            Stop
-          </button>
+          {topTask === 'ctf' && (
+            <>
+              <section className="cai-control">
+                <label>CTF</label>
+                <select value={selectedName} onChange={(e) => setSelectedName(e.target.value)} disabled={loading || running || replaying}>
+                  {ctfs.map((item) => <option key={item.name} value={item.name}>{item.name} · {item.difficulty || 'Unknown'}</option>)}
+                </select>
+              </section>
+              <section className="cai-control">
+                <label>Challenge</label>
+                <select value={challenge} onChange={(e) => setChallenge(e.target.value)} disabled={running || replaying || !challenges.length}>
+                  {(challenges.length ? challenges : ['']).map((item) => <option key={item || 'default'} value={item}>{item || 'Default'}</option>)}
+                </select>
+              </section>
+            </>
+          )}
+          <section className="cai-control">
+            <label>任务 Prompt</label>
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={running || replaying} rows={7} />
+          </section>
+          {topTask === 'ctf' && selected && (
+            <section className="cai-ctf-detail">
+              <div>{selected.type || 'CTF'} · {selected.difficulty || 'Unknown'} · {selected.ctf_inside ? 'ctf_inside' : 'external service'}</div>
+              {selected.description && <p>{selected.description}</p>}
+              {selected.instructions && <p><b>Instructions:</b> {selected.instructions}</p>}
+              {challengeDetail && <p><b>{challenge || 'Challenge'}:</b> {challengeDetail}</p>}
+              {selected.techniques && <code>{selected.techniques}</code>}
+            </section>
+          )}
+          {topTask !== 'ctf' && selectedEnvironment?.workspace && (
+            <section className="cai-ctf-detail">
+              <div>任务工作区</div>
+              <code>{selectedEnvironment.workspace}</code>
+              <p>{topTask === 'attack_chain' ? '包含 timeline.jsonl、web_access.log、auth.log 证据。' : '包含漏洞代码、测试文件和可运行 pytest 环境。'}</p>
+            </section>
+          )}
+          <div className="cai-actions">
+            <button className="btn" disabled={running || replaying || (topTask === 'ctf' && !selected)} onClick={startCurrentTask}>开始</button>
+            <button className="btn" disabled={!running && !replaying} onClick={stop}>Stop</button>
+            <button className="btn" disabled={running || replaying} onClick={demoReplay}>Demo 回放</button>
+            <button className="btn" onClick={() => setWrapOutput((value) => !value)}>{wrapOutput ? '关闭换行' : '开启换行'}</button>
+          </div>
+          <div className="cai-status">
+            <span className={running || replaying ? 'is-running' : ''}>{running ? 'RUNNING' : replaying ? 'REPLAY' : 'IDLE'}</span>
+            <span>{replaying ? replayTitle : loading ? 'loading resources' : `${ctfs.length} CTFs · ${taskEnvironments.length} tasks`}</span>
+          </div>
+        </aside>
+        <div className="cai-main-grid">
+          <div className="cai-terminal-wrap"><div ref={hostRef} className="cai-terminal" /></div>
+          <aside className="cai-audit-panel">
+            <div className="cai-audit-panel__header"><b>过程 / 交付结果</b><span>{outputText.length.toLocaleString()} chars</span></div>
+            <div className={wrapOutput ? 'cai-plain-output is-wrapped' : 'cai-plain-output'}>{outputText || '启动任务后，这里会以可换行文本展示完整终端输出。'}</div>
+            {sections.map((section) => (
+              <details key={section.title} className="cai-audit-section" open>
+                <summary>{section.title}</summary>
+                <pre>{section.body}</pre>
+              </details>
+            ))}
+          </aside>
         </div>
-
-        <div className="cai-status">
-          <span className={running || replaying ? 'is-running' : ''}>{running ? 'RUNNING' : replaying ? 'REPLAY' : 'IDLE'}</span>
-          <span>{replaying ? replayTitle : loading ? 'loading catalog' : `${ctfs.length} CTFs`}</span>
-        </div>
-      </aside>
-
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2">
-        <div ref={hostRef} className="cai-terminal" />
       </div>
     </div>
   )

@@ -158,13 +158,18 @@ def test_cai_env_preserves_explicit_alias_key(monkeypatch) -> None:
     assert env["ALIAS_API_KEY"] == "alias-key"
 
 
-def test_cai_recordings_exclude_builtin_demo_from_history(client: TestClient) -> None:
+def test_cai_recordings_include_function_demo_history(client: TestClient) -> None:
     r = client.get("/api/cai/recordings")
 
     assert r.status_code == 200
     data = r.json()
     ids = {item["id"] for item in data["recordings"]}
-    assert "demo_picoctf_static_flag" not in ids
+    assert {
+        "demo_cyberorion_chat",
+        "demo_picoctf_static_flag",
+        "demo_attack_chain_reconstruction",
+        "demo_code_repair_sql_injection",
+    } <= ids
 
 
 def test_cai_recording_detail_returns_replay_frames(client: TestClient) -> None:

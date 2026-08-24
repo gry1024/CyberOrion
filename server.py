@@ -113,6 +113,56 @@ _CAI_RECORDINGS_DIR = Path(
 _CAI_RECORDING_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 _CAI_MAX_RECORDING_BYTES = 2_000_000
 _CAI_MAX_RECORDING_FRAMES = 5000
+_CAI_TASK_ROOT = _HERE / "task_environments"
+
+
+def _cai_task_catalog() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "chat",
+            "task_type": "general",
+            "title": "Chat with CyberOrion",
+            "description": "开放式安全问答与任务规划，不自动生成最终 PDF 报告。",
+            "workdir": "",
+            "demo": False,
+        },
+        {
+            "id": "ctf",
+            "task_type": "ctf",
+            "title": "CTF",
+            "description": "调用 CAI 内置 CTF 目录，在授权靶场中完成挑战并验证结果。",
+            "workdir": "",
+            "demo": True,
+        },
+        {
+            "id": "attack_chain",
+            "task_type": "attack_chain",
+            "title": "复原攻击链条",
+            "description": "读取离线日志与流量证据，调用 Network Security Analyzer、DFIR 和 Replay Attack Agent 协作重建攻击链。",
+            "workdir": "attack_chain",
+            "demo": True,
+        },
+        {
+            "id": "code_repair",
+            "task_type": "code_repair",
+            "title": "修复代码漏洞",
+            "description": "在隔离代码工作区复现 SQL 注入，调用 CodeAgent/Retester 完成最小修复并运行回归测试。",
+            "workdir": "code_repair",
+            "demo": True,
+        },
+    ]
+
+
+def _resolve_task_workdir(value: Any) -> Path | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidate = (_CAI_TASK_ROOT / raw).resolve()
+    try:
+        candidate.relative_to(_CAI_TASK_ROOT.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_dir() else None
 
 
 def _load_env() -> None:
@@ -251,6 +301,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CyberOrion Arena", version="1.0.0", lifespan=lifespan)
+
+
+@app.get("/api/cai/task-environments")
+async def cai_task_environments() -> dict[str, Any]:
+    """Return the four top-level CAI task entries and their real workspaces."""
+    tasks = []
+    for item in _cai_task_catalog():
+        entry = dict(item)
+        workdir = _resolve_task_workdir(item["workdir"])
+        entry["available"] = item["id"] in {"chat", "ctf"} or workdir is not None
+        entry["workspace"] = str(workdir) if workdir else ""
+        tasks.append(entry)
+    return {"tasks": tasks}
 # ===============================================================================
 # REST: hostguard (host maintenance via SSH + blue team architecture)
 # --------------------------------------------------------------------------- #
@@ -586,8 +649,89 @@ def _cai_smoke_recording() -> dict[str, Any]:
     }
 
 
+def _cai_task_demo_recording(
+    recording_id: str,
+    title: str,
+    task_type: str,
+    summary: str,
+    frames: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "id": recording_id,
+        "title": title,
+        "kind": "demo",
+        "task_type": task_type,
+        "ctf_name": "",
+        "challenge": "",
+        "status": "success",
+        "duration_sec": frames[-1]["t"] if frames else 0,
+        "created_at": "2026-08-24T18:58:00Z",
+        "summary": summary,
+        "source": "builtin",
+        "frames": frames,
+    }
+
+
+def _cai_chat_demo_recording() -> dict[str, Any]:
+    return _cai_task_demo_recording(
+        "demo_cyberorion_chat",
+        "演示回放：Chat with CyberOrion",
+        "general",
+        "展示普通聊天不会触发最终 PDF，但会说明可用 Agent、计划与限制。",
+        [
+            {"t": 0.0, "data": "$ cyberorion chat\r\n"},
+            {"t": 0.5, "data": "Reasoning summary: clarify scope, identify needed evidence, avoid unsafe assumptions.\r\n"},
+            {"t": 1.0, "data": "Available tools: delegate_knowledge_agent, dispatch_subagent.\r\n"},
+            {"t": 1.7, "data": "Result: ready to plan a security task; no final Report Agent call for simple chat.\r\n"},
+        ],
+    )
+
+
+def _cai_attack_chain_demo_recording() -> dict[str, Any]:
+    return _cai_task_demo_recording(
+        "demo_attack_chain_reconstruction",
+        "演示回放：复原攻击链条",
+        "attack_chain",
+        "展示 Knowledge Agent、Network Security Analyzer、DFIR 和 Replay Attack Agent 的协作链。",
+        [
+            {"t": 0.0, "data": "$ cyberorion attack_chain --workspace task_environments/attack_chain\r\n"},
+            {"t": 0.4, "data": "Reasoning summary: evidence-first reconstruction; do not fill gaps without logs.\r\n"},
+            {"t": 0.9, "data": "Tool: delegate_knowledge_agent {background: attack chain reconstruction, evidence: timeline.jsonl/web_access.log/auth.log}\r\n"},
+            {"t": 1.5, "data": "Agent Result: Knowledge Agent returned ATT&CK mapping guidance for Valid Accounts, Web Shell, Command and Scripting Interpreter.\r\n"},
+            {"t": 2.1, "data": "Tool: dispatch_subagent {preferred_agent: Network Security Analyzer, task: correlate web_access.log and timeline events}\r\n"},
+            {"t": 2.9, "data": "Agent Result: Network Security Analyzer linked 198.51.100.24 login -> /uploads/.cache.php -> shell download.\r\n"},
+            {"t": 3.5, "data": "Tool: dispatch_subagent {preferred_agent: DFIR, task: validate host evidence and separate facts from hypotheses}\r\n"},
+            {"t": 4.2, "data": "Final Deliverable: timeline, evidence table, ATT&CK mapping, unknowns, recommendations. Report Agent compiles PDF for systematic task.\r\n"},
+        ],
+    )
+
+
+def _cai_code_repair_demo_recording() -> dict[str, Any]:
+    return _cai_task_demo_recording(
+        "demo_code_repair_sql_injection",
+        "演示回放：修复代码漏洞",
+        "code_repair",
+        "展示 CodeAgent 复现 SQL 注入、修复参数化查询并由 Retester 验证。",
+        [
+            {"t": 0.0, "data": "$ cyberorion code_repair --workspace task_environments/code_repair\r\n"},
+            {"t": 0.5, "data": "Reasoning summary: reproduce first, patch minimally, run regression tests.\r\n"},
+            {"t": 1.0, "data": "Tool: dispatch_subagent {preferred_agent: CodeAgent, task: inspect vulnerable_app.py and reproduce SQL injection}\r\n"},
+            {"t": 1.8, "data": "Agent Result: CodeAgent found string-concatenated SQL in find_user and produced parameterized query patch.\r\n"},
+            {"t": 2.5, "data": "Tool: dispatch_subagent {preferred_agent: Retester, task: run python -m pytest tests/vulnerability_regression.py}\r\n"},
+            {"t": 3.2, "data": "Agent Result: Retester verified normal lookup passes and injection input returns None.\r\n"},
+            {"t": 3.9, "data": "Final Deliverable: vulnerability summary, diff, tests, residual risk and remediation advice.\r\n"},
+        ],
+    )
+
+
 def _builtin_cai_recordings() -> list[dict[str, Any]]:
-    return [_cai_demo_recording(), _cai_smoke_recording()]
+    return [
+        _cai_chat_demo_recording(),
+        _cai_demo_recording(),
+        _cai_attack_chain_demo_recording(),
+        _cai_code_repair_demo_recording(),
+        _cai_smoke_recording(),
+    ]
 
 
 def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
@@ -625,7 +769,9 @@ def _read_cai_recording_file(path: Path) -> dict[str, Any] | None:
 
 
 def _list_cai_recordings() -> list[dict[str, Any]]:
-    recordings: list[dict[str, Any]] = []
+    recordings: list[dict[str, Any]] = [
+        _summarize_cai_recording(item) for item in _builtin_cai_recordings()
+    ]
     if _CAI_RECORDINGS_DIR.is_dir():
         for path in _CAI_RECORDINGS_DIR.glob("*.json"):
             data = _read_cai_recording_file(path)
@@ -727,6 +873,9 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     allowed_tasks = {"general", "ctf", "code_repair", "attack_chain", "purple_team"}
     env["CAI_AGENT_TYPE"] = explicit_agent or "cyberorion_agent"
     env["CAI_TASK_TYPE"] = explicit_task if explicit_task in allowed_tasks else "general"
+    task_context = overrides.get("CAI_TASK_CONTEXT") or overrides.get("task_context")
+    if task_context:
+        env["CAI_TASK_CONTEXT"] = str(task_context)
     env.setdefault("CAI_LICENSE_OFF", "1")
     env.setdefault("CAI_SKIP_UPDATE_CHECK", "1")
     env.setdefault("CAI_STREAM", "true")
@@ -747,6 +896,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         "CAI_MODEL",
         "CAI_FORCE_HTTPX",
         "CAI_AGENT_TYPE",
+        "CAI_TASK_CONTEXT",
         "ALIAS_API_KEY",
         "ANTHROPIC_API_KEY",
         "CTF_NAME",
@@ -821,6 +971,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
     started_at = _utc_now_iso()
     started_mono = time.monotonic()
     task_type = env.get("CAI_TASK_TYPE", "general")
+    task_workdir = _resolve_task_workdir(first.get("task_workdir"))
     record_frames: list[dict[str, Any]] = []
     record_bytes = 0
     ctf_name = str(first.get("CTF_NAME") or first.get("ctf_name") or "").strip()
@@ -855,7 +1006,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
-            cwd=str(_CAI_SOURCE_DIR if _CAI_SOURCE_DIR.is_dir() else _HERE),
+            cwd=str(task_workdir or (_CAI_SOURCE_DIR if _CAI_SOURCE_DIR.is_dir() else _HERE)),
             env=env,
             start_new_session=True,
             close_fds=True,
@@ -970,6 +1121,8 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 ),
                 "source": "live",
                 "exit_code": proc.returncode if proc else None,
+                "task_workdir": str(task_workdir) if task_workdir else "",
+                "task_context": env.get("CAI_TASK_CONTEXT", ""),
                 "frames": record_frames,
             }
             if task_type in {"attack_chain", "purple_team"}:

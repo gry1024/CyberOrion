@@ -1144,3 +1144,126 @@ html { zoom: 1.18; }
 .stream-output  { font-size: 12.5px !important; }
 .kimi-msg       { font-size: 14px !important; }
 .markdown-body  { font-size: 14px !important; }
+
+.cai-task-tabs {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-bg-2);
+  padding: 6px 8px 0;
+}
+
+.cai-task-tabs button {
+  border: 1px solid transparent;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--color-fg-3);
+  cursor: pointer;
+  font: 11.5px/1.3 var(--font-sans);
+  padding: 7px 10px;
+}
+
+.cai-task-tabs button:hover,
+.cai-task-tabs button.is-active {
+  border-color: var(--color-hairline);
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.cai-task-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.cai-main-grid {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+  gap: 8px;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.cai-terminal-wrap {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cai-audit-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--terminal-border);
+  background: #05080b;
+  color: var(--terminal-text);
+}
+
+.cai-audit-panel__header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--terminal-border);
+  background: #0d1117;
+  color: var(--terminal-muted);
+  font: 10px/1.3 var(--font-mono);
+  padding: 7px 9px;
+}
+
+.cai-audit-panel__header b {
+  color: var(--terminal-text);
+  font-weight: 600;
+}
+
+.cai-plain-output {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  border-bottom: 1px solid var(--terminal-border);
+  color: #cbd5df;
+  font: 10.5px/1.5 var(--font-mono);
+  padding: 10px;
+  white-space: pre;
+}
+
+.cai-plain-output.is-wrapped {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cai-audit-section {
+  flex: none;
+  max-height: 180px;
+  overflow: auto;
+  border-bottom: 1px solid var(--terminal-border);
+  background: #071014;
+}
+
+.cai-audit-section summary {
+  cursor: pointer;
+  color: var(--color-cyan);
+  font: 10px/1.3 var(--font-mono);
+  padding: 7px 9px;
+}
+
+.cai-audit-section pre {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--terminal-text);
+  font: 10px/1.5 var(--font-mono);
+  padding: 0 9px 9px;
+}
+
+@media (max-width: 1100px) {
+  .cai-main-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, 1fr) minmax(220px, 0.55fr);
+  }
+}

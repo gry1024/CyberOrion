@@ -25,6 +25,19 @@ export interface CaiCtfCatalog {
   ctfs: CaiCtfItem[]
 }
 
+export type CaiTopTask = 'chat' | 'ctf' | 'attack_chain' | 'code_repair'
+
+export interface CaiTaskEnvironment {
+  id: CaiTopTask
+  task_type: 'general' | 'ctf' | 'attack_chain' | 'code_repair'
+  title: string
+  description: string
+  workdir: string
+  workspace: string
+  available: boolean
+  demo: boolean
+}
+
 export interface CaiRecordingFrame {
   t: number
   data: string

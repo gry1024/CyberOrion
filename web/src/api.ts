@@ -6,6 +6,7 @@ import type {
   CaiCtfCatalog,
   CaiRecording,
   CaiRecordingSummary,
+  CaiTaskEnvironment,
   BenchMode,
   BenchQuestionPreview,
   BenchRunDetail,
@@ -93,6 +94,8 @@ async function getText(path: string): Promise<string> {
 
 export const api = {
   getCaiCtfs: () => get('/api/cai/ctfs') as Promise<CaiCtfCatalog>,
+  getCaiTaskEnvironments: () =>
+    get('/api/cai/task-environments') as Promise<{ tasks: CaiTaskEnvironment[] }>,
   getCaiRecordings: () =>
     get('/api/cai/recordings') as Promise<{ count: number; recordings: CaiRecordingSummary[] }>,
   getCaiRecording: (id: string) =>

