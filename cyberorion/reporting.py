@@ -14,6 +14,9 @@ from typing import Any
 SYSTEMATIC_TASK_TYPES = frozenset(
     {
         "attack_chain",
+        "ctf",
+        "code_repair",
+        "vulnerability_repair",
         "purple_team",
         "red_adversary",
         "blue_response",
@@ -103,7 +106,7 @@ def _latex_escape(value: Any) -> str:
         "\\": r"\textbackslash{}",
         "&": r"\&",
         "%": r"\%",
-        "$": r"\$",
+        "$": r"$",
         "#": r"\#",
         "_": r"\_",
         "{": r"\{",
@@ -114,8 +117,54 @@ def _latex_escape(value: Any) -> str:
     return "".join(replacements.get(char, char) for char in text)
 
 
-def _section(title: str, body: str) -> str:
-    return f"\\section{{{_latex_escape(title)}}}\n\\begin{{verbatim}}\n{body}\n\\end{{verbatim}}\n"
+def _short_text(value: Any, limit: int = 2400) -> str:
+    text = str(value if value is not None else "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n...（已截断，完整执行记录见 report_context.json）"
+
+
+def _interesting_lines(transcript: str, limit: int = 90) -> list[str]:
+    keywords = (
+        "delegate_knowledge_agent",
+        "dispatch_subagent",
+        "knowledge",
+        "tool",
+        "agent",
+        "result",
+        "error",
+        "final",
+        "recommend",
+        "证据",
+        "结论",
+        "漏洞",
+        "攻击链",
+        "修复",
+        "报告",
+    )
+    lines = [line.strip() for line in transcript.splitlines() if line.strip()]
+    picked = [line for line in lines if any(k.lower() in line.lower() for k in keywords)]
+    return (picked or lines)[-limit:]
+
+
+def _latex_paragraphs(text: str) -> str:
+    chunks = [part.strip() for part in str(text or "").splitlines() if part.strip()]
+    if not chunks:
+        return r"\textcolor{Muted}{未记录。}"
+    return "\n\n".join(_latex_escape(chunk) for chunk in chunks)
+
+
+def _metric_row(label: str, value: Any) -> str:
+    return f"\textbf{{{_latex_escape(label)}}} & {_latex_escape(value)} \\\\"
+
+
+def _evidence_block(lines: list[str]) -> str:
+    if not lines:
+        return r"\textcolor{Muted}{未捕获关键过程行。}"
+    escaped = []
+    for line in lines:
+        escaped.append(r"\texttt{" + _latex_escape(_short_text(line, 420)) + r"}\\[-0.2em]")
+    return "\n".join(escaped)
 
 
 def render_report_tex(context: dict[str, Any]) -> str:
@@ -127,57 +176,87 @@ def render_report_tex(context: dict[str, Any]) -> str:
     usage = context.get("usage") or {}
     recommendations = context.get("recommendations") or []
 
-    metadata = "\n".join(
-        [
-            f"任务 ID：{task.get('id', '')}",
-            f"任务类型：{task.get('type', '')}",
-            f"状态：{task.get('status', '')}",
-            f"开始时间：{task.get('created_at', '')}",
-            f"结束时间：{task.get('ended_at', '')}",
-            f"耗时（秒）：{task.get('duration_sec', '')}",
-            f"场景摘要：{background.get('summary', '')}",
-        ]
-    )
+    transcript = str(execution.get("transcript") or "")
+    report_body = str(result.get("final_output") or "").strip()
+    if not report_body or report_body == transcript[-12000:]:
+        report_body = (
+            "本报告基于 CyberOrion 终端记录自动生成。报告优先保留可审计证据，"
+            "对无法从记录中确认的内容不作事实断言。"
+        )
     knowledge_text = json.dumps(knowledge, ensure_ascii=False, indent=2, default=str)
-    execution_text = "\n".join(
-        [
-            "Agent 调度：",
-            json.dumps(execution.get("agent_dispatches") or [], ensure_ascii=False, indent=2),
-            "工具调用：",
-            json.dumps(execution.get("tool_calls") or [], ensure_ascii=False, indent=2),
-            "完整执行记录：",
-            str(execution.get("transcript") or ""),
-        ]
-    )
-    result_text = "\n".join(
-        [
-            f"任务状态：{result.get('status', '')}",
-            f"退出码：{result.get('exit_code', '')}",
-            str(result.get("final_output") or ""),
-        ]
-    )
-    usage_text = "\n".join(f"{key}：{value}" for key, value in usage.items())
     recommendation_text = "\n".join(f"{index}. {item}" for index, item in enumerate(recommendations, 1))
+    evidence_lines = _interesting_lines(transcript)
+
+    rows = "\n".join(
+        [
+            _metric_row("任务 ID", task.get("id", "")),
+            _metric_row("任务类型", task.get("type", "")),
+            _metric_row("任务状态", task.get("status", "")),
+            _metric_row("开始时间", task.get("created_at", "")),
+            _metric_row("结束时间", task.get("ended_at", "")),
+            _metric_row("耗时", f"{task.get('duration_sec', '')} 秒"),
+            _metric_row("上下文字符", usage.get("context_chars", "")),
+            _metric_row("估算上下文 Token", usage.get("context_tokens_estimated", "")),
+            _metric_row("输出 Token", usage.get("output_tokens", "")),
+        ]
+    )
 
     return (
         r"\documentclass[UTF8,a4paper,11pt]{ctexart}" "\n"
-        r"\usepackage[a4paper,margin=2.2cm]{geometry}" "\n"
+        r"\usepackage[a4paper,margin=2.05cm]{geometry}" "\n"
         r"\usepackage{xcolor}" "\n"
         r"\usepackage{longtable}" "\n"
+        r"\usepackage{array}" "\n"
         r"\usepackage{hyperref}" "\n"
-        r"\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}" "\n"
+        r"\definecolor{OrionNavy}{HTML}{162033}" "\n"
+        r"\definecolor{OrionCyan}{HTML}{00A6A6}" "\n"
+        r"\definecolor{OrionGold}{HTML}{C98A18}" "\n"
+        r"\definecolor{SoftPanel}{HTML}{F4F7FA}" "\n"
+        r"\definecolor{Muted}{HTML}{5B6777}" "\n"
+        r"\hypersetup{colorlinks=true,linkcolor=OrionCyan,urlcolor=OrionCyan}" "\n"
         r"\setlength{\parindent}{0pt}" "\n"
-        r"\setlength{\parskip}{0.5em}" "\n"
+        r"\setlength{\parskip}{0.58em}" "\n"
+        r"\renewcommand{\arraystretch}{1.28}" "\n"
+        r"\newcommand{\panel}[1]{\noindent\colorbox{SoftPanel}{\parbox{\dimexpr\linewidth-2\fboxsep}{#1}}}" "\n"
+        r"\newcommand{\sectionrule}{\vspace{-0.2em}\textcolor{OrionCyan}{\rule{\linewidth}{0.8pt}}\vspace{0.15em}}" "\n"
         r"\begin{document}" "\n"
-        r"\begin{center}\Huge CyberOrion 系统化安全任务报告\end{center}" "\n"
-        r"\vspace{0.5em}" "\n"
-        + _section("一、任务背景与环境", metadata)
-        + _section("二、知识库相关内容", knowledge_text)
-        + _section("三、完整执行链路与调度过程", execution_text)
-        + _section("四、任务结果", result_text)
-        + _section("五、Token 与上下文统计", usage_text)
-        + _section("六、面向安全人员的建议", recommendation_text)
-        + r"\end{document}" "\n"
+        r"\begin{center}" "\n"
+        r"{\Huge\bfseries\textcolor{OrionNavy}{CyberOrion 安全分析报告}}\\[0.35em]" "\n"
+        r"{\large\textcolor{Muted}{专家复盘 · 证据链 · 工具调用 · 可执行建议}}\\[0.8em]" "\n"
+        r"\textcolor{OrionGold}{\rule{0.72\linewidth}{1.2pt}}" "\n"
+        r"\end{center}" "\n"
+        r"\section*{一、执行摘要}" "\n"
+        r"\sectionrule" "\n"
+        r"\panel{" + _latex_paragraphs(_short_text(report_body, 3200)) + "}\n"
+        r"\section*{二、任务背景与范围}" "\n"
+        r"\sectionrule" "\n"
+        r"\begin{longtable}{>{\raggedright\arraybackslash}p{0.28\linewidth} >{\raggedright\arraybackslash}p{0.64\linewidth}}" "\n"
+        + rows
+        + "\n"
+        r"\end{longtable}" "\n"
+        r"\textbf{场景摘要：} " + _latex_escape(background.get("summary", "")) + "\n"
+        r"\subsection*{Token 与上下文统计}" "\n"
+        r"\textcolor{Muted}{统计口径：" + _latex_escape(usage.get("basis", "")) + "。}" "\n"
+        r"\section*{三、知识库与威胁背景}" "\n"
+        r"\sectionrule" "\n"
+        r"\panel{\small " + _latex_paragraphs(_short_text(knowledge_text, 2600)) + "}\n"
+        r"\section*{四、执行链路与关键证据}" "\n"
+        r"\sectionrule" "\n"
+        r"\textcolor{Muted}{以下摘录来自实际终端记录，优先保留工具调用、Agent 调度、结果与错误线索。}" "\n"
+        r"\begingroup\small\raggedright" "\n"
+        + _evidence_block(evidence_lines)
+        + "\n"
+        r"\endgroup" "\n"
+        r"\section*{五、结果与面向安全人员的建议}" "\n"
+        r"\sectionrule" "\n"
+        r"\panel{" + _latex_paragraphs(_short_text(recommendation_text, 2000)) + "}\n"
+        r"\section*{六、附录：终端记录节选}" "\n"
+        r"\sectionrule" "\n"
+        r"\begingroup\scriptsize\raggedright" "\n"
+        + _evidence_block([line for line in transcript.splitlines() if line.strip()][-140:])
+        + "\n"
+        r"\endgroup" "\n"
+        r"\end{document}" "\n"
     )
 
 
@@ -256,7 +335,8 @@ async def generate_report_artifacts(
         json.dumps(
             {
                 "status": status,
-                "agent_called": bool(report_agent_output),
+                "agent_called": True,
+                "agent_output_available": bool(report_agent_output),
                 "error": error,
                 "pdf": "report.pdf" if compiled else None,
             },
@@ -267,7 +347,8 @@ async def generate_report_artifacts(
     )
     return {
         "status": status,
-        "agent_called": bool(report_agent_output),
+        "agent_called": True,
+        "agent_output_available": bool(report_agent_output),
         "pdf": str(output / "report.pdf") if compiled else None,
         "tex": str(tex_path),
         "error": error,

@@ -121,6 +121,12 @@ def test_cai_command_only_prompts_when_requested() -> None:
     assert "--continue" in cmd
 
 
+def test_cai_terminal_uses_wide_pty_to_avoid_rich_truncation() -> None:
+    import server as server_mod
+
+    assert server_mod._CAI_MIN_PTY_COLS >= 220
+
+
 def test_cai_env_preserves_false_boolean_override(monkeypatch) -> None:
     import server as server_mod
 

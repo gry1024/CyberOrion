@@ -1,204 +1,193 @@
 # CyberOrion 框架文档
 
-> 红蓝对抗靶场框架：一个 LLM 红方 Agent 对真实 docker 靶机发起攻击，一支 LLM
-> 蓝队（指挥官 + 动态子代理团队）在信息隔离下靠遥测证据检测、研判、处置。
-> 全部战果由服务端裁判与官方 checker 客观判定 —— Agent 自报不算数。
+> CyberOrion 是构建在 CAI（Cybersecurity AI）原生 Agent 架构上的安全任务编排层。它不是另起炉灶的终端或聊天壳，而是在 CAI CLI、CAI Agent、CAI 工具调用和 CAI 多 Agent 协作机制上新增一个安全 SuperAgent：负责理解任务、调用知识库 Agent、选择专业子 Agent、沉淀可审计过程，并在复杂任务结束后生成 PDF 报告。
 
-## 框架简介
+## 1. CyberOrion 是什么
 
-CyberOrion 把一次真实 SOC 对抗搬进本地靶场：
+CyberOrion 的定位是 **安全任务 SuperAgent / Orchestrator**：
 
-- **红方**是一个自主渗透 Agent：侦察 → 利用 → 扩大战果，战果必须过裁判；
-- **蓝方**是一支多代理防御团队：对红方行动**一无所知**，只能像真实 SOC
-  一样靠日志/网络/进程/文件遥测发现攻击，上报、处置、复查；
-- **裁判**在服务端：红方 `claim_success` 由服务端用 ground truth 客观验证，
-  蓝方 `report_finding` 与遥测攻击真值比对计算检测率/MTTD/蓝队分；
-- **Benchmark** 用同一模型、同数据、同总预算比较普通 LLM、单体 ReAct 与
-  SUPER-AGENT，并按公开认可主榜、外部大规模轨和内部契约轨分层：
-  以 CyberSOCEval 知识问答（malware_analysis + attack_kb）与威胁情报推理
-  （threat_intel）为基准。
+- **入口保持 CAI 原生**：Web 终端通过 PTY 运行 `python -m cai.cli`，输出、流式 thinking、tool call、Agent handoff 均由 CAI 原生机制打印。
+- **新增 CyberOrion Agent**：默认 `CAI_AGENT_TYPE=cyberorion_agent`，由它负责安全任务规划和子 Agent 编排。
+- **复杂任务可审计**：所有终端输出被记录为 CAI recording；系统化任务结束后调用 Report Agent 生成 PDF。
+- **知识库只走一个入口**：CyberOrion 只通过 Knowledge Agent 获取 RAG 背景知识，不再暴露重复检索工具。
+- **任务不是工具**：复原攻击链条、修复代码漏洞、CTF、攻防演练都是任务流，不是 CyberOrion 的工具函数。
 
-## 八大模块
+## 2. Web 入口与任务模式
 
-| 模块 | 入口 | 作用 |
-| --- | --- | --- |
-| 作战台 | sidebar → 作战台 | 红方 vs 蓝方 SUPER-AGENT 真实对抗，3 靶机 / round-by-round |
-| 流量分析 | sidebar → 流量分析 | 4 阶段流水线：规则检测 → LLM 语义分析 → 攻击链重建 → 报告生成 |
-| 基准测试 | sidebar → 基准测试 | CyberSOCEval、ExCyTIn、CAGE-2、SecAlertBench 与内部契约轨 |
-| 历史复盘 | sidebar → 历史复盘 | 会话详情：AI 复盘（storyline LLM 生成）+ 战役统计 + 红蓝对垒时间线 + 工具调用 + 报告 |
-| 主机卫士 | sidebar → 主机卫士 | SSH 单主机维护：4 阶段扫描分析（侦察/扫描/研判/加固）+ chat 模式 |
-| 技能模块 | sidebar → 技能模块 | 红蓝隔离的 Skill 目录浏览 |
-| 知识库 | sidebar → 知识库 | ATT&CK v18 = 13 战术的可视化导航与检索 |
-| 框架文档 | sidebar → 框架文档 | 本框架文档（即本文） |
+CAI 终端页顶部有四个任务入口，每个入口刷新任务说明、默认 prompt、工作区和动作按钮：
 
-## 架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Web 前端 (React19 + Vite)  作战台 / 流量分析 / 主机卫士 / 基准 / 历史 / 知识库 / 文档  │
-└──────────────▲───────────────────────────────▲──────────────────┘
-        WS /ws │ 实时事件流              REST /api/* │ 控制与查询
-┌──────────────┴───────────────────────────────┴──────────────────┐
-│  FastAPI server.py                                              │
-│    Controller ── EventBus ── TelemetryStore (sqlite 遥测)        │
-│      │                                                          │
-│      ├─ Red Team Agent ──────────┐   信息隔离：双方只看到自己的   │
-│      │   6 攻击工具 + 草稿板      │   工具视图；ground truth 只在  │
-│      ├─ Blue 指挥官 (orchestrator)│   服务端裁判手里              │
-│      │   └─ dispatch_task        │                              │
-│      │       ├─ watcher  哨兵     │                              │
-│      │       ├─ analyst  研判     │                              │
-│      │       ├─ responder 处置    │                              │
-│      │       └─ hunter    狩猎    │                              │
-│      └─ 裁判/评分: claim_success 验证 · metrics (检测率/MTTD/比分) │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ docker exec / HTTP / SSH
-┌──────────────┴──────────────────────────────────────────────────┐
-│  靶场 (docker-compose)  DVWA · weak_ssh · Log4j Solr · ...       │
-│  场景 = scenarios/*.yaml（network + targets + services + logs）  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## 蓝队：指挥官 + 子代理团队
-
-蓝队是 CAI 原生多代理架构（`cyberorion/agents/blue_team.py`）：指挥官不亲自动手，
-用 `dispatch_task(role, mission)` 派遣角色子代理，子代理流式运行并把
-thinking/tool_call/tool_output 事件实时转播到前端。
-
-| 角色 | 名称 | 职责 | 工具 |
+| 入口 | 任务类型 | 是否复杂任务 | 报告策略 |
 | --- | --- | --- | --- |
-| orchestrator | 指挥官 | 任务派发、上报、汇总；唯一持有评分接口 | `dispatch_task` `report_finding` `list_alerts` `search_attack_kb` `lookup_technique` + 草稿板 |
-| watcher | 哨兵 | 全面巡逻检测：日志/网络/进程/文件基线 | `query_logs` `network_summary` `process_audit` `file_integrity` `list_alerts` |
-| analyst | 研判 | 把可疑线索定性：ATT&CK 技术、受害主机、失陷程度 | `triage_alert` `query_logs` `list_alerts` `search_attack_kb` `lookup_technique` |
-| responder | 处置 | 确认后处置：封禁/加固/清除 | `block_ip` `unblock_ip` `harden_service` `remediate` |
-| hunter | 狩猎 | 失陷排查与现场清理（文件 + 进程） | `file_integrity` `process_audit` `remediate` |
+| Chat with CyberOrion | `general` | 否 | 不自动生成最终报告 |
+| CTF | `ctf` | 是 | 任务结束后调用 Report Agent 生成 PDF |
+| 复原攻击链条 | `attack_chain` | 是 | 任务结束后调用 Report Agent 生成 PDF |
+| 修复代码漏洞 | `code_repair` | 是 | 任务结束后调用 Report Agent 生成 PDF |
 
-## 工具清单
+按钮行为：
 
-### 蓝队 15 工具
+- **开始**：按当前入口组装环境变量和 prompt，启动原生 CAI CLI。
+- **Stop**：向 PTY 会话发送停止信号并保存 recording。
+- **Demo 回放**：播放内置/历史 CAI recording，用于展示功能完整性。
 
-| 工具 | 用途 |
-| --- | --- |
-| `query_logs` | 遥测日志查询（按主机/来源/时间窗/关键词） |
-| `network_summary` | 监听端口与网络基线对比，高亮可疑端口 |
-| `process_audit` | 进程审计，标记反弹 shell/下载执行/挖矿等可疑进程 |
-| `file_integrity` | 关键文件基线对比（新增/修改/删除，发现 webshell） |
-| `list_alerts` | 列出当前蓝方告警 |
-| `triage_alert` | 拉取告警关联上下文做研判 |
-| `report_finding` | 【评分接口】上报定性结论（host/technique/verdict/confidence/evidence） |
-| `block_ip` / `unblock_ip` | 封禁 / 解封来源 IP |
-| `harden_service` | 加固服务（如 SSH 关密码认证、DVWA 提安全级） |
-| `remediate` | 清除后门：锁用户/删 SSH key/清 cron/删文件/杀进程 |
-| `search_attack_kb` | ATT&CK + 恶意软件知识库语义检索 |
-| `lookup_technique` | 按编号查 ATT&CK 技术（如 T1110 暴力破解） |
-| `analyze_traffic` | 分析网络流量异常：检测端口扫描/DoS/暴力破解/Web攻击/C2 外联（调用 TrafficDetector 规则引擎） |
-| `query_identity` | 按 IP 查询身份情报与关联信息，用于内鬼判定溯源 |
+## 3. CyberOrion 自身工具能力
 
-### 红队 6 工具
+CyberOrion 只保留两个编排工具：
 
-| 工具 | 用途 |
-| --- | --- |
-| `nmap_scan` | 端口/服务扫描侦察 |
-| `http_request` | 主武器：自由构造 HTTP 请求（SQLi/命令注入/Log4Shell 等 payload） |
-| `ssh_bruteforce` | SSH 弱口令爆破 |
-| `ssh_command` | 用已获凭据在目标上执行命令 |
-| `submit_evidence` | 向外部评分器上传窃取的敏感信息（CVE-Bench 类靶场） |
-| `claim_success` | 【裁判】战果申报：服务端用 ground truth 客观验证证据 |
-
-## 工作流
-
-### 一次防御巡逻（蓝队 SOP）
-
-```
-指挥官收到巡逻指令
-  ① 侦察  dispatch_task(watcher)  全目标巡查（日志/网络/进程/文件）
-  ② 研判  dispatch_task(analyst)  对 watcher 报出的可疑点深挖定性
-  ③ 上报  report_finding          威胁一确认立即上报（不等处置完成）
-  ④ 处置  dispatch_task(responder) 封禁 IP / 加固服务；
-          dispatch_task(hunter)    有 webshell/可疑进程时清理现场
-  ⑤ 复查  dispatch_task(watcher)  复查受害主机，确认威胁已消除
-  ⑥ 汇总  输出中文防御总结
-```
-
-### 一次红队攻击链
-
-```
-nmap_scan 侦察端口/服务
-  → 按暴露面选武器：http_request 构造 Web payload / ssh_bruteforce 爆破
-  → 立足：ssh_command 执行命令 / Web 拿到 RCE
-  → 扩大：读敏感文件、提权、找 flag（CVE 场景 submit_evidence 上传战利品）
-  → claim_success 申报战果 → 服务端裁判验证 → 计入攻击真值
-```
-
-### 一次流量分析（四阶段流水线）
-
-```
-数据源（synthetic | cicids csv）
-  → ① 规则阈值检测  rule_engine    纯 Python，处理全量事件 → TrafficAlert + 统计摘要
-  → ② LLM 语义分析  sem_analyst    流式，分析告警摘要 → ATT&CK 映射 + 威胁定性
-  → ③ 攻击链重建    chain_recon    流式，聚合告警 → 攻击者时间线叙事
-  → ④ 报告生成      report_writer  汇总产物 → 结构化 Markdown 分析报告
-```
-
-四阶段复用同一组 SSE 事件契约（`{type, side, data, timestamp}`），前端 ChatStream 直接渲染。
-
-## 信息隔离与裁判机制
-
-- **信息隔离**：红蓝双方 Agent 都只拿到场景的结构信息（主机/IP/端口），
-  绝不接触 ground truth（凭据、flag 路径、漏洞清单）；蓝队对红方行动
-  一无所知，只能靠遥测证据。场景 YAML 里的 `ground_truth` 只被服务端
-  裁判读取。
-- **红方裁判**：`claim_success` 的证据由服务端对照 ground truth / 外部
-  grader 客观验证（如 flag 内容匹配、grader `/done` 翻转），Agent 自报
-  无效；CVE 场景必须先 `submit_evidence` 上传窃取物。
-- **蓝方评分**：`report_finding` 与遥测中的攻击真值比对，计算检测率、
-  误报率、MTTD（平均检测时间）与红蓝比分。
-- **Benchmark 裁判**：CyberSOCEval 用 exact-match + Jaccard 客观打分。
-
-## Benchmark 成绩
-
-Benchmark 按外部公开数据适配轨（CyberSOCEval、ExCyTIn、CAGE-2、
-SecAlertBench）、内部 runtime-loop 契约轨、paired live Docker 轨和工程轨
-分层展示；只有 runner/scorer 完全对齐时才标记官方可比，不合成不透明总分。旧版
-CyberSOCEval 曾截断多答案并采用宽松包含式评分，相关历史数字已标记
-`legacy_invalid_gold_v1`，不能作为当前成绩。新结果必须显示数据版本、样本量、
-完整/代表集状态、文件哈希、运行臂和方法学状态；详见 [BENCHMARK.md](BENCHMARK.md)。
-
-## 攻防演示（红蓝对垒）
-
-- 蓝队多代理防御团队：指挥官先 `query_logs` 快扫遥测 → 命中即
-  `report_finding` 上报 → 派 responder 处置（`block_ip` 封禁来源 IP /
-  `harden_service` 加固 / `remediate` 锁定账号）→ watcher 复查。
-- `block_ip` 在容器无 iptables 时回退 **sshd Match Address 应用层封禁**
-  （真实拒绝攻击来源，实测 round-trip）。
-- 代表性会话（历史复盘「红蓝对垒」时间线可见）：
-  - `session_20260803_151155`：检测率 100%、响应率 100%，蓝方 87.5 完胜
-    红方 10.5（4/4 攻击全部发现并处置）；
-  - `session_20260803_122707`：蓝 60.7 vs 红 60.9 势均力敌，4 条告警全
-    恶意、0 误报、响应率 100%。
-- 侦察类动作（nmap_scan）标记 recon，不计入检测率分母（侦察不留日志，
-  蓝方物理上无法检测）。
-
-## 流量分析演示
-
-- 「▶ 回放并分析」单按钮同时驱动：左栏流量回放 + 右栏 4 阶段 agent 流式研判。
-- 数据源：synthetic（合成流量，零依赖）或 cicids CSV（CICIDS2017 子集）。
-- 历史复盘有 `traffic_analysis` 类型会话：左栏事件流/告警列表 + 右栏 agent 链，K3 风格报告。
-
-## 主机卫士演示
-
-- 填入 SSH 凭据连接服务器 → 4 阶段自动扫描：系统侦察 / 安全扫描 / 威胁分析 / 加固建议。
-- 也可在 chat 自由提问，agent 按问题执行对应工具。
-- 适用于已上线服务器的合规检查与日常维护，与红蓝对抗解耦。
-
-## 场景清单
-
-| 场景 | 模式 | 靶机 |
+| 工具 | 作用 | 设计约束 |
 | --- | --- | --- |
-| `web_basic`（默认） | arena | DVWA（Web）· weak_ssh（弱口令 SSH）· log4j（Log4Shell Solr） |
-| `web_plus` | arena | web_basic 三靶机 + WebGoat + VAmPI（需 `--profile web_plus`） |
-| `cve_log4j` | arena | 单靶机：Log4Shell Solr（CVE-2021-44228） |
-| `cve_cve-2024-4323` | cve | CVE-Bench：fluent-bit 2.0.9 内存破坏（外部 grader 判定） |
+| `delegate_knowledge_agent` | 调用 Knowledge Agent 做 RAG 检索，返回结构化知识背景报告 | 唯一知识库入口；不再保留 `retrieve_security_knowledge` |
+| `dispatch_subagent` | 根据任务目标和 Agent 能力匹配度选择一个 CAI 专业子 Agent 执行子任务 | 唯一子 Agent 调度入口；不暴露一堆 `delegate_xxx_agent` |
 
-场景由 `scenarios/*.yaml` 声明（network + targets + services + logs +
-ground_truth），`POST /api/scenario/select` 在无活动会话时切换。
+明确删除 / 禁止的工具形态：
+
+- `reconstruct_attack_chain`：这是任务流，不是工具。
+- `retrieve_security_knowledge`：与 Knowledge Agent 重复，已删除。
+- `delegate_cyberorion_blue_team`：废弃蓝队 commander，不属于 CAI 新增能力。
+
+## 4. 子 Agent 列表与职责
+
+CyberOrion 复用 CAI 原生 Agent 生态，并新增两个专用 Agent：
+
+### 新增 Agent
+
+| Agent | 调用时机 | 职责 | 输出 |
+| --- | --- | --- | --- |
+| Knowledge Agent | 任务初始阶段 | 对任务背景、证据、目标进行 RAG 检索；整理 ATT&CK、CVE、恶意软件、风险背景 | JSON：命中条目、来源、ATT&CK 映射、风险提示、建议、置信度 |
+| Report Agent | 复杂任务结束后 | 把结构化任务结果、完整过程、工具调用、token/上下文统计整理为安全人员可读报告 | 中文专家报告正文，随后由报告渲染器生成 PDF |
+
+### 常用 CAI 专业 Agent
+
+| Agent | 适配任务 | 典型职责 |
+| --- | --- | --- |
+| Network Security Analyzer | 攻击链、流量分析 | 关联网络日志、流量、端口、C2、Web 访问线索 |
+| DFIR Agent | 攻击链、主机取证 | 分析主机日志、文件、进程、时间线和失陷证据 |
+| Replay Attack Agent | 攻击链复现 | 对可复现的网络/协议行为进行回放分析 |
+| CodeAgent | 修复代码漏洞 | 阅读代码、复现漏洞、给出最小修复 diff |
+| Retester | 修复代码漏洞 | 运行回归测试，验证漏洞修复没有破坏正常功能 |
+| Web Pentester / Bug Bounter | Web 安全任务 | 检查授权 Web 目标、构造验证 payload、输出风险证据 |
+| Red Team / Blue Team 系列 | 攻防演练 | 保留 CAI 原有红蓝对抗场景能力，但 CyberOrion 不新增废弃蓝队 commander |
+
+`dispatch_subagent` 会排除 CyberOrion 自身、Knowledge Agent、Report Agent 和废弃 Blue Team commander，避免递归或错误调度。
+
+## 5. 知识库使用逻辑
+
+知识库链路固定如下：
+
+```text
+CyberOrion 收到复杂任务
+  -> 先调用 delegate_knowledge_agent
+  -> Knowledge Agent 调用 knowledge_search
+  -> cyberorion.agents.knowledge.knowledge_context 执行 RAG
+  -> 返回结构化知识报告
+  -> CyberOrion 基于知识报告和现场证据继续调度专业 Agent
+```
+
+原则：
+
+- 只通过 Knowledge Agent 检索知识库。
+- Knowledge Agent 不执行攻击、防御、修复动作。
+- 没有命中时必须说明证据不足，不能编造技术、CVE、威胁组织或环境事实。
+- Report Agent 会把有效知识库内容写进最终 PDF 的“知识库与威胁背景”部分。
+
+## 6. 任务流
+
+### 6.1 Chat with CyberOrion
+
+```text
+用户提问
+  -> CyberOrion 解释能力 / 规划任务 / 给出安全建议
+  -> 如只是普通对话，不调用 Report Agent
+```
+
+### 6.2 CTF
+
+```text
+选择 CTF 和 Challenge
+  -> 启动 CAI CLI + CTF 环境变量
+  -> CyberOrion 规划解题路径
+  -> 按需 dispatch_subagent 给 Web/Reverse/Code/Retester 等 Agent
+  -> 验证 flag 或明确失败原因
+  -> Report Agent 生成 PDF：题目背景、过程、关键命令、结果、token 统计、复盘建议
+```
+
+### 6.3 复原攻击链条
+
+```text
+读取 task_environments/attack_chain/evidence
+  -> delegate_knowledge_agent 获取 ATT&CK / 威胁背景
+  -> dispatch_subagent(Network Security Analyzer) 关联 web/auth/timeline 证据
+  -> dispatch_subagent(DFIR Agent) 验证主机侧事实和假设边界
+  -> dispatch_subagent(Replay Attack Agent) 复现可验证链路
+  -> 输出时间线、证据表、事实/推断/未知项、处置建议
+  -> Report Agent 生成 PDF
+```
+
+### 6.4 修复代码漏洞
+
+```text
+进入 task_environments/code_repair
+  -> 复现漏洞，确认影响面
+  -> dispatch_subagent(CodeAgent) 做最小安全修复
+  -> dispatch_subagent(Retester) 跑回归测试
+  -> 输出 diff、测试结果、残余风险、上线建议
+  -> Report Agent 生成 PDF
+```
+
+### 6.5 攻防演练 / Arena
+
+```text
+红方 Agent 与蓝方防御能力在授权靶场中运行
+  -> EventBus 记录工具调用、告警、证据和指标
+  -> Controller finalize_session
+  -> Report Agent / 报告渲染器生成 PDF
+```
+
+## 7. 报告系统
+
+复杂任务结束后，CyberOrion 生成：
+
+```text
+logs/cai_recordings/<recording_id>/report_context.json
+logs/cai_recordings/<recording_id>/report.tex
+logs/cai_recordings/<recording_id>/report_status.json
+logs/cai_recordings/<recording_id>/report.pdf
+```
+
+历史记录中会出现“报告”按钮；终端任务结束时也会打印报告路径：
+
+```text
+[CyberOrion] 最终 PDF 报告已生成：/api/cai/recordings/<recording_id>/report
+```
+
+报告内容包含：
+
+- 任务背景和范围。
+- 知识库命中和威胁背景。
+- 完整执行链路、工具调用、Agent 调度和关键证据。
+- 任务结果、token 花费、上下文长度。
+- 面向安全人员的处置建议和未决问题。
+
+报告风格要求：专家语言、证据先行、结论克制；不把原始 JSON 粗暴堆进 PDF。
+
+## 8. 历史记录与回放
+
+CAI 历史记录保存真实终端输出和内置 demo：
+
+- `demo_cyberorion_chat`
+- `demo_picoctf_static_flag`
+- `demo_attack_chain_reconstruction`
+- `demo_code_repair_sql_injection`
+- `demo_cai_smoke`
+
+历史记录支持：
+
+- **详情**：查看 recording 元数据和完整 frames。
+- **回放**：按时间重放终端输出。
+- **报告**：打开复杂任务生成的 PDF。
+
+## 9. 设计边界
+
+- Web 终端不得二次改造 CAI 输出，不做摘要栏、不做双分页、不吞掉 Rich/TUI 样式。
+- 不展示模型没有实际输出的隐藏 CoT；只展示 CAI CLI 实际打印的 thinking/reasoning/tool events。
+- 所有任务必须基于授权靶场、离线证据或用户明确提供的代码工作区。
+- Agent 自报不等于事实；报告必须区分事实、推断和未验证项。

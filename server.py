@@ -113,6 +113,7 @@ _CAI_RECORDINGS_DIR = Path(
 _CAI_RECORDING_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 _CAI_MAX_RECORDING_BYTES = 2_000_000
 _CAI_MAX_RECORDING_FRAMES = 5000
+_CAI_MIN_PTY_COLS = 220
 _CAI_TASK_ROOT = _HERE / "task_environments"
 _DEEPSEEK_COMPATIBLE_MODELS = {
     "deepseek-v4-pro",
@@ -992,7 +993,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
         first = {}
 
     rows = int(first.get("rows") or 32)
-    cols = int(first.get("cols") or 120)
+    cols = max(_CAI_MIN_PTY_COLS, int(first.get("cols") or 120))
     env = _safe_cai_env(first)
     cmd = _cai_command(first)
     started_at = _utc_now_iso()
@@ -1075,7 +1076,7 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     os.write(master_fd, str(obj.get("data", "")).encode())
                 elif obj.get("type") == "resize":
                     r = int(obj.get("rows") or rows)
-                    c = int(obj.get("cols") or cols)
+                    c = max(_CAI_MIN_PTY_COLS, int(obj.get("cols") or cols))
                     size = struct.pack("HHHH", max(1, r), max(1, c), 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, size)
                     if proc:
@@ -1143,20 +1144,27 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 "task_context": env.get("CAI_TASK_CONTEXT", ""),
                 "frames": record_frames,
             }
-            if task_type in {"attack_chain", "purple_team"}:
-                try:
-                    from cyberorion.reporting import generate_report_artifacts
+            try:
+                from cyberorion.reporting import generate_report_artifacts, should_generate_report
 
+                if should_generate_report(task_type):
                     report_result = await generate_report_artifacts(
                         recording,
                         _CAI_RECORDINGS_DIR / recording_id,
                     )
                     recording["report_status"] = report_result["status"]
                     recording["report_error"] = report_result.get("error", "")
-                except Exception as exc:
-                    logger.exception("failed to generate final CAI report")
-                    recording["report_status"] = "failed"
-                    recording["report_error"] = f"{type(exc).__name__}: {exc}"
+                    recording["report_url"] = f"/api/cai/recordings/{recording_id}/report"
+                    report_text = (
+                        "\r\n[CyberOrion] 最终 PDF 报告已生成："
+                        f"/api/cai/recordings/{recording_id}/report\r\n"
+                    )
+                    record_output(report_text)
+                    await _ws_send_text(ws, report_text)
+            except Exception as exc:
+                logger.exception("failed to generate final CAI report")
+                recording["report_status"] = "failed"
+                recording["report_error"] = f"{type(exc).__name__}: {exc}"
             _write_cai_recording(recording)
         with suppress(Exception):
             await ws.close()

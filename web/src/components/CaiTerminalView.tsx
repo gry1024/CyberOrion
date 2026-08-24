@@ -27,6 +27,7 @@ const TASK_PROMPTS: Record<NonNullable<RunConfig['taskType']>, string> = {
   code_repair: '修复代码漏洞。工作区包含 src/vulnerable_app.py 和 tests/test_vulnerable_app.py。先复现 SQL 注入，再调度 CodeAgent 修复，最后运行 pytest 并输出 diff、测试结果和风险说明。',
   attack_chain: '复原攻击链条。工作区包含 evidence/timeline.jsonl、web_access.log 和 auth.log。先调用 Knowledge Agent 获取背景，再调度 Network Security Analyzer、DFIR、Replay Attack Agent 分析证据，最后输出时间线、ATT&CK 映射、事实/推断/未验证项。',
 }
+const MIN_CAI_TERMINAL_COLS = 220
 const REPLAY_STORAGE_KEY = 'cyberorion:cai-replay-id'
 const DEMO_REPLAY_IDS: Record<CaiTopTask, string> = {
   chat: 'demo_cyberorion_chat',
@@ -160,7 +161,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
       const environment = taskEnvironments.find((item) => item.id === selectedTask)
       const payload: Record<string, unknown> = {
         rows: term.rows,
-        cols: term.cols,
+        cols: Math.max(MIN_CAI_TERMINAL_COLS, term.cols),
         continue_mode: false,
         CAI_AGENT_TYPE: 'cyberorion_agent',
         CAI_TASK_TYPE: selectedType,
@@ -265,7 +266,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     const onResize = () => {
       fit.fit()
       const ws = wsRef.current
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }))
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: Math.max(MIN_CAI_TERMINAL_COLS, term.cols) }))
     }
     const ro = new ResizeObserver(onResize)
     ro.observe(hostRef.current)
