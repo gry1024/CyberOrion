@@ -33,10 +33,15 @@ _READ_ONLY = re.compile(r"^\s*(select|with|pragma\s+table_info)\b", re.I)
 
 def _normalise(row: dict, index: int) -> dict | None:
     question = (row.get("question") or row.get("prompt") or row.get("input")
-                or row.get("task") or row.get("instructions"))
+                or row.get("task") or row.get("instructions")
+                or (row.get("initial_context") or {}).get("question")
+                or row.get("description"))
     scoring = row.get("scoring") if isinstance(row.get("scoring"), dict) else {}
+    judge = scoring.get("llm_judge") if isinstance(scoring.get("llm_judge"), dict) else {}
+    submission = judge.get("submission") if isinstance(judge.get("submission"), dict) else {}
     answer = (row.get("answer") if "answer" in row else row.get("target")
-              if "target" in row else scoring.get("target"))
+              if "target" in row else scoring.get("target")
+              or submission.get("description"))
     if not question or answer is None:
         return None
     return {
@@ -58,9 +63,15 @@ def load_questions(paths: list[Path]) -> list[dict]:
             for path in yaml_paths:
                 value = yaml.safe_load(path.read_text(encoding="utf-8"))
                 if isinstance(value, dict):
-                    value.setdefault("id", path.stem)
-                    value.setdefault("incident", path.parent.name)
-                    rows.append(value)
+                    tasks = value.get("tasks")
+                    candidates = tasks if isinstance(tasks, list) else [value]
+                    for task in candidates:
+                        if not isinstance(task, dict):
+                            continue
+                        task = dict(task)
+                        task.setdefault("id", task.get("task_id") or path.stem)
+                        task.setdefault("incident", path.parent.name)
+                        rows.append(task)
         except (ImportError, OSError, ValueError):
             pass
     return [item for i, row in enumerate(rows)
@@ -178,12 +189,15 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
     data_files, representative_decision = resolve_representative_files(SUITE, files)
     questions = load_questions(data_files)
     databases = [p for p in data_files if p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}]
-    if not questions or not databases:
-        raise BenchmarkAssetMissing(SUITE, "需要题目 JSON/JSONL 与至少一个 SQLite 遥测库")
+    if not questions:
+        raise BenchmarkAssetMissing(SUITE, "未识别 ACESEvals YAML/JSON 题目与可评分目标")
+    if mode != "base" and not databases:
+        raise BenchmarkAssetMissing(
+            SUITE, "工具臂需要 SQLite 遥测投影；官方 ACESEvals 模式应使用其 Docker/Inspect harness")
     count, size_decision = apply_size_policy(
         SUITE, profile, n, len(questions), files)
     selected = stratified_sample(questions, count, seed, ("incident", "hop_length"))
-    sql_tools = ReadOnlySQLTools(databases[0])
+    sql_tools = ReadOnlySQLTools(databases[0]) if databases else None
     llm = llm or make_llm(timeout=LLM_TIMEOUT)
     sem = asyncio.Semaphore(max(1, concurrency))
     output: list[dict | None] = [None] * len(selected)

@@ -34,11 +34,7 @@ def _heuristic_policy(observation: Any) -> Any:
     Decoy/Analyse 信息后可观测）；这里采用保守策略：发现 compromised
     就 Restore，否则 Sleep。策略仅作 baseline 占位。
     """
-    from CybORG.Simulator.Actions import Sleep
-    try:
-        from CybORG.Simulator.Actions.ConcreteActions.Restore import Restore
-    except Exception:  # 不同 CybORG 版本的模块路径差异
-        Restore = None  # type: ignore[assignment]
+    from CybORG.Shared.Actions import Sleep, Restore
 
     try:
         for hostname, info in (observation or {}).items():
@@ -47,8 +43,7 @@ def _heuristic_policy(observation: Any) -> Any:
             compromised = str(getattr(info, "get", lambda *_: "")(
                 "compromised", "")) if isinstance(info, dict) else ""
             if compromised and compromised.lower() not in ("no", "none", ""):
-                if Restore is not None:
-                    return Restore(hostname=hostname, agent="Blue")
+                return Restore(hostname=hostname, agent="Blue")
     except Exception:
         pass
     return Sleep()
@@ -56,7 +51,7 @@ def _heuristic_policy(observation: Any) -> Any:
 
 def _mapped_action(spec: Any) -> tuple[Any, bool, str | None]:
     """把审计过的高层动作规格映射为 CAGE-2 原生动作。"""
-    from CybORG.Simulator.Actions import Sleep
+    from CybORG.Shared.Actions import Sleep
     if not isinstance(spec, dict):
         return Sleep(), False, "action spec is not an object"
     action = str(spec.get("action") or spec.get("type") or "sleep").lower()
@@ -65,7 +60,7 @@ def _mapped_action(spec: Any) -> tuple[Any, bool, str | None]:
         return (Sleep(), action == "sleep",
                 None if action == "sleep" else "hostname is required")
     try:
-        from CybORG.Simulator import Actions
+        from CybORG.Shared import Actions
         cls = {"analyse": getattr(Actions, "Analyse", None),
                "remove": getattr(Actions, "Remove", None),
                "restore": getattr(Actions, "Restore", None)}.get(action)
@@ -74,7 +69,7 @@ def _mapped_action(spec: Any) -> tuple[Any, bool, str | None]:
                            "restore": "Restore"}.get(action)
             if module_name:
                 module = __import__(
-                    f"CybORG.Simulator.Actions.ConcreteActions.{module_name}",
+                    f"CybORG.Shared.Actions.{module_name}",
                     fromlist=[module_name])
                 cls = getattr(module, module_name, None)
         if cls is not None:
@@ -90,6 +85,29 @@ def _mapped_action(spec: Any) -> tuple[Any, bool, str | None]:
 def _action_from_spec(spec: Any) -> Any:
     """兼容旧调用方：非法规格安全降级为 Sleep。"""
     return _mapped_action(spec)[0]
+
+
+def _challenge_action_index(wrapper: Any, action: Any) -> int | None:
+    """将原生动作映射为 ChallengeWrapper 所要求的离散 action id。
+
+    CAGE-2 官方 ``ChallengeWrapper`` 在内部叠加了 ``EnumActionWrapper``，
+    因而不能直接把 ``Sleep`` / ``Restore`` 对象交给 ``step``。只读取其
+    已公开的 ``possible_actions`` 表；找不到完全匹配项就返回 None，让调用方
+    将该步标为非法而不是猜一个动作。
+    """
+    choices = getattr(getattr(wrapper, "env", None), "env", None)
+    choices = getattr(choices, "possible_actions", None)
+    if not isinstance(choices, list):
+        return None
+    for index, candidate in enumerate(choices):
+        if type(candidate) is not type(action):
+            continue
+        if getattr(candidate, "hostname", None) != getattr(action, "hostname", None):
+            continue
+        if getattr(candidate, "agent", None) != getattr(action, "agent", None):
+            continue
+        return index
+    return None
 
 
 def run_cage2(episodes: int = 3, steps: int = 100,
@@ -139,10 +157,13 @@ def run_cage2(episodes: int = 3, steps: int = 100,
     if configured:
         scenario = Path(configured)
     else:
-        root = Path(os.getenv("CYBERORION_CAGE2_DIR", "/opt/cyborg"))
+        # 与外部 benchmark 资产清单保持一致：没有显式配置时优先使用
+        # 仓库内已验证的官方 checkout，而不是历史开发机上的 /opt/cyborg。
+        # 不存在时仍返回结构化错误，绝不猜测或创建路径。
+        default_root = Path(__file__).resolve().parents[3] / "benchmarks" / "external" / "cage2"
+        root = Path(os.getenv("CYBERORION_CAGE2_DIR", str(default_root))).expanduser()
         candidates = list(root.rglob("Scenario2.yaml")) if root.exists() else []
-        scenario = candidates[0] if candidates else Path(
-            "/opt/cyborg/CybORG/CybORG/Shared/Scenarios/Scenario2.yaml")
+        scenario = candidates[0] if candidates else root / "CybORG" / "CybORG" / "Shared" / "Scenarios" / "Scenario2.yaml"
     if not scenario.is_file():
         return {"error": f"CAGE-2 scenario not found: {scenario}",
                 "install": _INSTALL_HINT}
@@ -173,10 +194,18 @@ def run_cage2(episodes: int = 3, steps: int = 100,
                 action, valid, invalid_reason = _mapped_action(spec)
             else:
                 action, valid, invalid_reason = _heuristic_policy(obs), True, None
+            if official_wrapper:
+                action_index = _challenge_action_index(wrapped, action)
+                if action_index is None:
+                    valid = False
+                    invalid_reason = invalid_reason or "action not present in ChallengeWrapper action space"
+                    # Sleep 是官方离散表的第一个动作；此回退不会将无效动作
+                    # 伪装成有效处置，且 illegal_actions 仍被计入。
+                    action_index = 0
             restore_actions += int(action.__class__.__name__.lower() == "restore")
             illegal_actions += int(not valid)
             if official_wrapper:
-                obs, reward, done, info = wrapped.step(action)
+                obs, reward, done, info = wrapped.step(action_index)
             else:
                 result = env.step(agent="Blue", action=action)
                 obs, reward, done, info = (result.observation, result.reward,

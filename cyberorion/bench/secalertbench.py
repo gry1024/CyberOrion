@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import random
 import statistics
 import time
@@ -66,6 +67,14 @@ def _parse_verdict(raw: Any) -> tuple[str, float]:
     except (ValueError, TypeError, json.JSONDecodeError):
         value = {}
     verdict = str(value.get("verdict") or value.get("label") or "unknown").lower()
+    if verdict == "unknown" and isinstance(raw, str):
+        # runtime complete 摘要可为自然语言；只接受显式 verdict/label 字段，
+        # 避免从含糊描述中推断分数。
+        match = re.search(r"\b(?:verdict|label)\s*[:=]\s*"
+                          r"(attack|benign|malicious|non[- ]?attack)\b",
+                          raw, flags=re.I)
+        if match:
+            verdict = match.group(1).lower()
     if verdict in {"malicious", "attack", "positive", "true", "1"}:
         verdict = "attack"
     elif verdict in {"benign", "non-attack", "non_attack", "negative", "false", "0"}:

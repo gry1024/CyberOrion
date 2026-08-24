@@ -145,7 +145,7 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     """
     if mode not in MODES:
         raise ValueError(f"threat_intel 未知 mode: {mode!r}（支持 {MODES}）")
-    if kb is None:
+    if mode == "rag" and kb is None:
         from ..kb.rag import get_kb
         kb = get_kb()
     if llm is None:
