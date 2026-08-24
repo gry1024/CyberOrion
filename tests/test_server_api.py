@@ -136,6 +136,8 @@ def test_cai_env_forwards_model_credentials(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("ALIAS_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE_URL", raising=False)
     monkeypatch.setenv("OPENAI_API_BASE", "https://model.example/v1")
     monkeypatch.setenv("CAI_MODEL", "deepseek-chat")
 
@@ -156,6 +158,28 @@ def test_cai_env_preserves_explicit_alias_key(monkeypatch) -> None:
     env = server_mod._safe_cai_env({})
 
     assert env["ALIAS_API_KEY"] == "alias-key"
+
+
+def test_cai_env_normalizes_deepseek_compatible_model(monkeypatch) -> None:
+    import server as server_mod
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("CAI_MODEL", "gpt-4o")
+
+    env = server_mod._safe_cai_env({})
+
+    assert env["CAI_MODEL"] == "deepseek-v4-flash"
+
+
+def test_cai_env_strips_openai_prefix_for_deepseek_compatible_model(monkeypatch) -> None:
+    import server as server_mod
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("CAI_MODEL", "openai/deepseek-v4-flash")
+
+    env = server_mod._safe_cai_env({})
+
+    assert env["CAI_MODEL"] == "deepseek-v4-flash"
 
 
 def test_cai_recordings_include_function_demo_history(client: TestClient) -> None:

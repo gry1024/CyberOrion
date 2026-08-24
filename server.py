@@ -114,6 +114,12 @@ _CAI_RECORDING_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 _CAI_MAX_RECORDING_BYTES = 2_000_000
 _CAI_MAX_RECORDING_FRAMES = 5000
 _CAI_TASK_ROOT = _HERE / "task_environments"
+_DEEPSEEK_COMPATIBLE_MODELS = {
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+}
+_DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
 
 
 def _cai_task_catalog() -> list[dict[str, Any]]:
@@ -890,6 +896,19 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env.setdefault("CAI_DEBUG", "1")
     env.setdefault("TERM", "xterm-256color")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    model_base_url = (
+        env.get("OPENAI_BASE_URL")
+        or env.get("OPENAI_API_BASE")
+        or env.get("OPENAI_API_BASE_URL")
+        or ""
+    ).lower()
+    if "deepseek" in model_base_url:
+        current_model = str(env.get("CAI_MODEL") or "").removeprefix("openai/").strip()
+        env["CAI_MODEL"] = (
+            current_model
+            if current_model in _DEEPSEEK_COMPATIBLE_MODELS
+            else _DEEPSEEK_DEFAULT_MODEL
+        )
     if _CAI_SOURCE_DIR.is_dir():
         python_paths = [str(_CAI_SOURCE_DIR / "src"), str(_HERE)]
         if env.get("PYTHONPATH"):
