@@ -88,6 +88,7 @@ CyberOrion 收到复杂任务
 - Knowledge Agent 不执行攻击、防御、修复动作。
 - 没有命中时必须说明证据不足，不能编造技术、CVE、威胁组织或环境事实。
 - Report Agent 会把有效知识库内容写进最终 PDF 的“知识库与威胁背景”部分。
+- 历史 Arena 链路中的 `watcher`、`dispatch_task` 只作为 CAI 兼容概念保留；CyberOrion 新任务流统一通过 `dispatch_subagent` 表达专业 Agent 调度。
 
 ## 6. 任务流
 

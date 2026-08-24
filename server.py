@@ -627,6 +627,7 @@ def _cai_demo_recording() -> dict[str, Any]:
         "id": "demo_picoctf_static_flag",
         "title": "演示回放：CAI 完成 picoctf_static_flag",
         "kind": "demo",
+        "task_type": "ctf",
         "ctf_name": "picoctf_static_flag",
         "challenge": "FLAG",
         "status": "success",

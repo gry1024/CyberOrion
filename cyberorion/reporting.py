@@ -34,6 +34,14 @@ def _strip_terminal(text: str) -> str:
     return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(text or ""))
 
 
+def _latex_safe_text(value: Any) -> str:
+    """Normalize terminal text before LaTeX escaping."""
+    text = str(value if value is not None else "")
+    text = re.sub(r"[\u2800-\u28ff]", "*", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    return text
+
+
 def _recording_transcript(recording: dict[str, Any]) -> str:
     frames = recording.get("frames") or []
     return _strip_terminal(
@@ -101,18 +109,20 @@ def build_report_context(recording: dict[str, Any], report_agent_output: str = "
 
 
 def _latex_escape(value: Any) -> str:
-    text = str(value if value is not None else "")
+    text = _latex_safe_text(value)
     replacements = {
         "\\": r"\textbackslash{}",
         "&": r"\&",
         "%": r"\%",
-        "$": r"$",
+        "$": r"\$",
         "#": r"\#",
         "_": r"\_",
         "{": r"\{",
         "}": r"\}",
         "~": r"\textasciitilde{}",
         "^": r"\textasciicircum{}",
+        "<": r"\textless{}",
+        ">": r"\textgreater{}",
     }
     return "".join(replacements.get(char, char) for char in text)
 
@@ -155,7 +165,7 @@ def _latex_paragraphs(text: str) -> str:
 
 
 def _metric_row(label: str, value: Any) -> str:
-    return f"\textbf{{{_latex_escape(label)}}} & {_latex_escape(value)} \\\\"
+    return r"\textbf{" + _latex_escape(label) + r"} & " + _latex_escape(value) + r" \\"
 
 
 def _evidence_block(lines: list[str]) -> str:
@@ -163,7 +173,10 @@ def _evidence_block(lines: list[str]) -> str:
         return r"\textcolor{Muted}{未捕获关键过程行。}"
     escaped = []
     for line in lines:
-        escaped.append(r"\texttt{" + _latex_escape(_short_text(line, 420)) + r"}\\[-0.2em]")
+        escaped.append(
+            r"\noindent\hangindent=1.2em\hangafter=1 "
+            r"\textcolor{Muted}{\footnotesize " + _latex_escape(_short_text(line, 420)) + r"}\\[-0.15em]"
+        )
     return "\n".join(escaped)
 
 
@@ -208,6 +221,9 @@ def render_report_tex(context: dict[str, Any]) -> str:
         r"\usepackage{longtable}" "\n"
         r"\usepackage{array}" "\n"
         r"\usepackage{hyperref}" "\n"
+        r"\IfFontExistsTF{Noto Serif CJK SC}{\setCJKmainfont{Noto Serif CJK SC}}{}" "\n"
+        r"\IfFontExistsTF{Noto Sans CJK SC}{\setCJKsansfont{Noto Sans CJK SC}}{}" "\n"
+        r"\IfFontExistsTF{Noto Serif CJK SC}{\setmainfont{Noto Serif CJK SC}}{}" "\n"
         r"\definecolor{OrionNavy}{HTML}{162033}" "\n"
         r"\definecolor{OrionCyan}{HTML}{00A6A6}" "\n"
         r"\definecolor{OrionGold}{HTML}{C98A18}" "\n"
@@ -216,8 +232,9 @@ def render_report_tex(context: dict[str, Any]) -> str:
         r"\hypersetup{colorlinks=true,linkcolor=OrionCyan,urlcolor=OrionCyan}" "\n"
         r"\setlength{\parindent}{0pt}" "\n"
         r"\setlength{\parskip}{0.58em}" "\n"
+        r"\setlength{\emergencystretch}{3em}" "\n"
         r"\renewcommand{\arraystretch}{1.28}" "\n"
-        r"\newcommand{\panel}[1]{\noindent\colorbox{SoftPanel}{\parbox{\dimexpr\linewidth-2\fboxsep}{#1}}}" "\n"
+        r"\newcommand{\panel}[1]{\par\noindent\textcolor{OrionGold}{\rule[-0.35em]{2.2pt}{2.05em}}\hspace{0.75em}\begin{minipage}[t]{0.88\linewidth}\raggedright #1\end{minipage}\par}" "\n"
         r"\newcommand{\sectionrule}{\vspace{-0.2em}\textcolor{OrionCyan}{\rule{\linewidth}{0.8pt}}\vspace{0.15em}}" "\n"
         r"\begin{document}" "\n"
         r"\begin{center}" "\n"
@@ -277,9 +294,9 @@ async def _call_report_agent(context: dict[str, Any]) -> str:
                     "不要执行新的安全动作，不要编造缺失数据：\n"
                     + json.dumps(context, ensure_ascii=False, default=str)
                 ),
-                max_turns=1,
+                max_turns=2,
             ),
-            timeout=30,
+            timeout=90,
         )
         return str(getattr(result, "final_output", "") or "").strip()
     except Exception:
