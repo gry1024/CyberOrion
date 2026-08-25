@@ -174,7 +174,7 @@ def test_cai_env_normalizes_deepseek_compatible_model(monkeypatch) -> None:
 
     env = server_mod._safe_cai_env({})
 
-    assert env["CAI_MODEL"] == "deepseek/deepseek-v4-flash"
+    assert env["CAI_MODEL"] == "deepseek-v4-flash"
 
 
 def test_cai_env_strips_openai_prefix_for_deepseek_compatible_model(monkeypatch) -> None:
@@ -185,7 +185,7 @@ def test_cai_env_strips_openai_prefix_for_deepseek_compatible_model(monkeypatch)
 
     env = server_mod._safe_cai_env({})
 
-    assert env["CAI_MODEL"] == "deepseek/deepseek-v4-flash"
+    assert env["CAI_MODEL"] == "deepseek-v4-flash"
 
 
 def test_cai_recordings_include_function_demo_history(client: TestClient) -> None:

@@ -901,6 +901,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     env.setdefault("CAI_LICENSE_OFF", "1")
     env.setdefault("CAI_SKIP_UPDATE_CHECK", "1")
     env.setdefault("CAI_STREAM", "true")
+    env["CAI_SINGLE_SHOT_CLI"] = "1"
     env.setdefault("CAI_TRACING", "false")
     env.setdefault("CAI_DEBUG", "1")
     env.setdefault("TERM", "xterm-256color")
@@ -918,7 +919,10 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
             if current_model in _DEEPSEEK_COMPATIBLE_MODELS
             else _DEEPSEEK_DEFAULT_MODEL
         )
-        env["CAI_MODEL"] = f"deepseek/{normalized_model}"
+        # DeepSeek's OpenAI-compatible endpoint expects the bare API model
+        # name. The provider is already selected by the DeepSeek base URL.
+        env["CAI_MODEL"] = normalized_model
+        env["CAI_FORCE_HTTPX"] = "1"
         if env.get("OPENAI_API_KEY"):
             env.setdefault("DEEPSEEK_API_KEY", env["OPENAI_API_KEY"])
     if _CAI_SOURCE_DIR.is_dir():
@@ -947,6 +951,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         "CTF_INSTANCE_ID",
         "CTF_CONTAINER_NAME",
         "CAIBENCH_IMG_REGISTRY_TOKEN",
+        "CAI_SINGLE_SHOT_CLI",
     ):
         if key in overrides:
             value = overrides[key]
@@ -1187,6 +1192,8 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     report_text = (
                         "\r\n[CyberOrion] 最终 PDF 报告已生成："
                         f"{report_url}\r\n"
+                        "[CyberOrion] 报告文件位置："
+                        f"{report_result.get('pdf', '')}\r\n"
                         if report_result["status"] == "ready"
                         else (
                             "\r\n[CyberOrion] 报告 Agent 已调用，但 PDF 生成失败；"
@@ -1199,6 +1206,12 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                 logger.exception("failed to generate final CAI report")
                 recording["report_status"] = "failed"
                 recording["report_error"] = f"{type(exc).__name__}: {exc}"
+                report_text = (
+                    "\r\n[CyberOrion] 报告 Agent 调用或 PDF 生成异常："
+                    f"{recording['report_error']}\r\n"
+                )
+                record_output(report_text)
+                await _ws_send_text(ws, report_text)
             _write_cai_recording(recording)
         with suppress(Exception):
             await ws.close()

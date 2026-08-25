@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -333,28 +335,35 @@ def render_report_tex(context: dict[str, Any]) -> str:
 
 async def _call_report_agent(context: dict[str, Any]) -> str:
     """Ask the CAI Report Agent for the final structured narrative."""
-    try:
-        cai_source = Path(__file__).resolve().parents[2] / "cai-latest" / "src"
+    source_candidates = [
+        os.getenv("CAI_SOURCE_DIR", ""),
+        "/opt/cai-latest",
+        "/tmp/cai-latest",
+        str(Path(__file__).resolve().parents[2] / "cai-latest"),
+    ]
+    for candidate in source_candidates:
+        if not candidate:
+            continue
+        cai_source = Path(candidate).expanduser() / "src"
         if cai_source.is_dir() and str(cai_source) not in sys.path:
             sys.path.insert(0, str(cai_source))
-        from cai.sdk.agents import Runner
-        from cai.agents.report_agent import report_agent
+            break
+    from cai.sdk.agents import Runner
+    from cai.agents.report_agent import report_agent
 
-        result = await asyncio.wait_for(
-            Runner.run(
-                report_agent,
-                (
-                    "请基于以下 JSON 事实生成中文安全报告正文。只使用提供的事实，"
-                    "不要执行新的安全动作，不要编造缺失数据：\n"
-                    + json.dumps(context, ensure_ascii=False, default=str)
-                ),
-                max_turns=2,
+    result = await asyncio.wait_for(
+        Runner.run(
+            report_agent,
+            (
+                "请基于以下 JSON 事实生成中文安全报告正文。只使用提供的事实，"
+                "不要执行新的安全动作，不要编造缺失数据：\n"
+                + json.dumps(context, ensure_ascii=False, default=str)
             ),
-            timeout=90,
-        )
-        return str(getattr(result, "final_output", "") or "").strip()
-    except Exception:
-        return ""
+            max_turns=2,
+        ),
+        timeout=90,
+    )
+    return str(getattr(result, "final_output", "") or "").strip()
 
 
 def _compile_tex(tex_path: Path) -> tuple[bool, str]:
@@ -383,6 +392,408 @@ def _compile_tex(tex_path: Path) -> tuple[bool, str]:
     return True, ""
 
 
+def _find_report_font(names: tuple[str, ...]) -> Path | None:
+    configured = os.getenv("CYBERORION_REPORT_FONT", "").strip()
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    roots = [
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        Path("/root/.fonts"),
+        Path("/home/groy/.fonts"),
+        Path("/opt/cyberorion/assets/fonts"),
+        Path("/mnt/c/Windows/Fonts"),
+    ]
+    for root in roots:
+        for name in names:
+            candidates.append(root / name)
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                with candidate.open("rb"):
+                    return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _register_report_fonts() -> tuple[str, str]:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    regular_path = _find_report_font(
+        (
+            "NotoSansCJK-Regular.ttf",
+            "NotoSansCJKsc-Regular.ttf",
+            "NotoSansSC-Regular.ttf",
+            "NotoSansSC-VF.ttf",
+            "simhei.ttf",
+            "simsun.ttf",
+        )
+    )
+    bold_path = _find_report_font(
+        (
+            "NotoSansCJK-Bold.ttf",
+            "NotoSansCJKsc-Bold.ttf",
+            "NotoSansSC-Bold.ttf",
+            "NotoSansSC-VF.ttf",
+            "simhei.ttf",
+            "simsunb.ttf",
+        )
+    )
+    if regular_path is None:
+        raise RuntimeError(
+            "未找到可嵌入的中文 TrueType 字体；请安装 fonts-noto-cjk，"
+            "或设置 CYBERORION_REPORT_FONT"
+        )
+    bold_path = bold_path or regular_path
+    regular_name = "CyberOrionCJK"
+    bold_name = "CyberOrionCJKBold"
+    if regular_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(regular_name, str(regular_path)))
+    if bold_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(bold_name, str(bold_path)))
+    return regular_name, bold_name
+
+
+def _pdf_inline_text(value: Any) -> str:
+    from xml.sax.saxutils import escape
+
+    text = _strip_terminal(_latex_safe_text(value)).strip()
+    if not text:
+        return "未记录。"
+    return "<br/>".join(escape(line) for line in text.splitlines())
+
+
+def _pdf_bullets(values: list[Any], limit: int = 12) -> list[str]:
+    result: list[str] = []
+    for value in values[:limit]:
+        text = _pdf_inline_text(value)
+        if text != "未记录。":
+            result.append(f"- {text}")
+    return result or ["未记录。"]
+
+
+def _render_report_pdf_reportlab(context: dict[str, Any], pdf_path: Path) -> tuple[bool, str]:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            HRFlowable,
+            KeepTogether,
+            PageBreak,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
+
+        regular_font, bold_font = _register_report_fonts()
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    task = context.get("task") or {}
+    background = context.get("background") or {}
+    knowledge = context.get("knowledge") or {}
+    execution = context.get("execution") or {}
+    result = context.get("result") or {}
+    usage = context.get("usage") or {}
+    recommendations = context.get("recommendations") or []
+    transcript = str(execution.get("transcript") or "")
+    dispatch_lines = _dispatch_summary(execution, transcript)
+    evidence_lines = _interesting_lines(transcript, 70)
+    report_body = str(result.get("final_output") or "").strip()
+
+    navy = colors.HexColor("#17243A")
+    cyan = colors.HexColor("#0E9F9A")
+    gold = colors.HexColor("#C98A18")
+    ink = colors.HexColor("#1F2937")
+    muted = colors.HexColor("#637083")
+    panel = colors.HexColor("#F3F6F8")
+    line_color = colors.HexColor("#D7E0E6")
+    code_bg = colors.HexColor("#101820")
+
+    styles = getSampleStyleSheet()
+    styles.add(
+        ParagraphStyle(
+            name="OrionTitle",
+            parent=styles["Title"],
+            fontName=bold_font,
+            fontSize=22,
+            leading=28,
+            alignment=TA_CENTER,
+            textColor=navy,
+            spaceAfter=4 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionSubtitle",
+            parent=styles["Normal"],
+            fontName=regular_font,
+            fontSize=10,
+            leading=15,
+            alignment=TA_CENTER,
+            textColor=muted,
+            spaceAfter=5 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionSection",
+            parent=styles["Heading1"],
+            fontName=bold_font,
+            fontSize=14,
+            leading=19,
+            textColor=navy,
+            spaceBefore=5 * mm,
+            spaceAfter=2 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionSubsection",
+            parent=styles["Heading2"],
+            fontName=bold_font,
+            fontSize=10.5,
+            leading=15,
+            textColor=cyan,
+            spaceBefore=3 * mm,
+            spaceAfter=1.5 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionBody",
+            parent=styles["BodyText"],
+            fontName=regular_font,
+            fontSize=9.5,
+            leading=15,
+            textColor=ink,
+            wordWrap="CJK",
+            spaceAfter=2.4 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionMuted",
+            parent=styles["BodyText"],
+            fontName=regular_font,
+            fontSize=8,
+            leading=12,
+            textColor=muted,
+            wordWrap="CJK",
+            spaceAfter=1.5 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionBullet",
+            parent=styles["BodyText"],
+            fontName=regular_font,
+            fontSize=9,
+            leading=14,
+            leftIndent=4 * mm,
+            firstLineIndent=-3 * mm,
+            textColor=ink,
+            wordWrap="CJK",
+            spaceAfter=1.2 * mm,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OrionCode",
+            parent=styles["Code"],
+            fontName=regular_font,
+            fontSize=7.8,
+            leading=11,
+            textColor=colors.HexColor("#E6EDF3"),
+            backColor=code_bg,
+            borderPadding=3 * mm,
+            wordWrap="CJK",
+            spaceAfter=2 * mm,
+        )
+    )
+
+    def paragraph(value: Any, style: str = "OrionBody") -> Paragraph:
+        return Paragraph(_pdf_inline_text(value), styles[style])
+
+    def add_section(story: list[Any], number: str, title: str) -> None:
+        story.append(Paragraph(f"{number}  {title}", styles["OrionSection"]))
+        story.append(HRFlowable(width="100%", thickness=0.8, color=cyan, spaceAfter=3 * mm))
+
+    def add_bullets(story: list[Any], values: list[Any]) -> None:
+        story.extend(Paragraph(text, styles["OrionBullet"]) for text in _pdf_bullets(values))
+
+    def add_panel(story: list[Any], content: list[Any]) -> None:
+        table = Table([[content]], colWidths=[174 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), panel),
+                    ("BOX", (0, 0), (-1, -1), 0.5, line_color),
+                    ("LINEBEFORE", (0, 0), (0, -1), 2.2, gold),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5 * mm),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5 * mm),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4 * mm),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+                ]
+            )
+        )
+        story.append(table)
+        story.append(Spacer(1, 2 * mm))
+
+    def draw_page(canvas: Any, doc: Any) -> None:
+        canvas.saveState()
+        width, height = A4
+        canvas.setStrokeColor(line_color)
+        canvas.setLineWidth(0.5)
+        canvas.line(18 * mm, height - 14 * mm, width - 18 * mm, height - 14 * mm)
+        canvas.setFont(regular_font, 7.5)
+        canvas.setFillColor(muted)
+        canvas.drawString(18 * mm, height - 10.5 * mm, "CyberOrion · 安全分析")
+        canvas.drawRightString(width - 18 * mm, height - 10.5 * mm, "证据优先 · 可复核")
+        canvas.line(18 * mm, 13 * mm, width - 18 * mm, 13 * mm)
+        canvas.drawCentredString(width / 2, 8 * mm, f"{doc.page}")
+        canvas.restoreState()
+
+    metrics = [
+        ["任务 ID", str(task.get("id") or "未记录")],
+        ["任务类型", str(task.get("type") or "未记录")],
+        ["任务状态", str(task.get("status") or "未记录")],
+        ["开始时间", str(task.get("created_at") or "未记录")],
+        ["结束时间", str(task.get("ended_at") or "未记录")],
+        ["耗时", f"{task.get('duration_sec') or 0} 秒"],
+        ["上下文字符", str(usage.get("context_chars") or 0)],
+        ["估算上下文 Token", str(usage.get("context_tokens_estimated") or 0)],
+        ["输出 Token", str(usage.get("output_tokens") or "未提供")],
+    ]
+    metric_table = Table(
+        [[paragraph(row[0], "OrionMuted"), paragraph(row[1], "OrionBody")] for row in metrics],
+        colWidths=[43 * mm, 131 * mm],
+        repeatRows=0,
+    )
+    metric_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), panel),
+                ("BOX", (0, 0), (-1, -1), 0.5, line_color),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, line_color),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1 * mm),
+            ]
+        )
+    )
+
+    story: list[Any] = [
+        Spacer(1, 8 * mm),
+        Paragraph("CyberOrion 安全分析报告", styles["OrionTitle"]),
+        Paragraph("专家复盘 · 证据链 · Agent 调度 · 可执行建议", styles["OrionSubtitle"]),
+        HRFlowable(width="70%", thickness=1.3, color=gold, spaceAfter=5 * mm),
+    ]
+    add_section(story, "一", "执行摘要")
+    add_panel(
+        story,
+        [
+            paragraph(
+                report_body
+                or "本报告基于 CyberOrion 的实际终端记录生成。报告只陈述记录中可复核的事实，"
+                "并明确区分知识背景、现场证据、推断和未验证事项。"
+            )
+        ],
+    )
+
+    add_section(story, "二", "任务背景与范围")
+    story.append(metric_table)
+    story.append(Spacer(1, 2 * mm))
+    story.append(paragraph(f"场景摘要：{background.get('summary') or '未提供。'}"))
+    if background.get("ctf_name") or background.get("challenge"):
+        story.append(
+            paragraph(
+                f"CTF：{background.get('ctf_name') or '未记录'}；"
+                f"Challenge：{background.get('challenge') or '未记录'}",
+                "OrionMuted",
+            )
+        )
+    story.append(
+        paragraph(
+            f"统计口径：{usage.get('basis') or 'CAI 终端记录估算'}。",
+            "OrionMuted",
+        )
+    )
+
+    add_section(story, "三", "知识库与威胁背景")
+    story.append(paragraph(_knowledge_summary(knowledge)))
+    if knowledge.get("sources"):
+        story.append(Paragraph("来源：" + "、".join(
+            _pdf_inline_text(item) for item in knowledge.get("sources", [])[:12]
+        ), styles["OrionMuted"]))
+
+    add_section(story, "四", "执行链路与关键证据")
+    story.append(
+        paragraph(
+            "以下内容按实际终端记录组织。Agent 返回为空、工具失败或证据不足时，报告保留该状态，"
+            "不以推测替代缺失过程。",
+            "OrionMuted",
+        )
+    )
+    story.append(Paragraph("Agent 调度摘要", styles["OrionSubsection"]))
+    add_bullets(story, dispatch_lines)
+    story.append(Paragraph("关键过程与中间结果", styles["OrionSubsection"]))
+    add_bullets(story, evidence_lines)
+
+    add_section(story, "五", "任务结果与安全建议")
+    add_panel(
+        story,
+        [
+            paragraph(
+                f"最终状态：{result.get('status') or '未记录'}；"
+                f"进程退出码：{result.get('exit_code') if result.get('exit_code') is not None else '未记录'}。"
+            ),
+            paragraph(_short_text(result.get("final_output") or "", 4200)),
+        ],
+    )
+    add_bullets(story, recommendations)
+
+    add_section(story, "六", "附录：终端证据节选")
+    appendix_lines = [line for line in transcript.splitlines() if line.strip()][-100:]
+    if appendix_lines:
+        for raw_line in appendix_lines:
+            story.append(
+                Paragraph(
+                    _pdf_inline_text(_short_text(raw_line, 460)),
+                    styles["OrionCode"],
+                )
+            )
+    else:
+        story.append(paragraph("未捕获终端证据。", "OrionMuted"))
+
+    try:
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        document = SimpleDocTemplate(
+            str(pdf_path),
+            pagesize=A4,
+            rightMargin=18 * mm,
+            leftMargin=18 * mm,
+            topMargin=20 * mm,
+            bottomMargin=18 * mm,
+            title="CyberOrion 安全分析报告",
+            author="CyberOrion Report Agent",
+        )
+        document.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, ""
+
+
 async def generate_report_artifacts(
     recording: dict[str, Any],
     output_dir: str | Path,
@@ -391,7 +802,13 @@ async def generate_report_artifacts(
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     context = build_report_context(recording)
-    report_agent_output = await _call_report_agent(context)
+    report_agent_output = ""
+    agent_error = ""
+    agent_called = True
+    try:
+        report_agent_output = await _call_report_agent(context)
+    except Exception as exc:
+        agent_error = f"{type(exc).__name__}: {exc}"
     if report_agent_output:
         context = build_report_context(recording, report_agent_output)
     (output / "report_context.json").write_text(
@@ -401,14 +818,31 @@ async def generate_report_artifacts(
     tex_path = output / "report.tex"
     tex_path.write_text(render_report_tex(context), encoding="utf-8")
     compiled, error = await asyncio.to_thread(_compile_tex, tex_path)
+    renderer = "latex" if compiled else ""
+    fallback_error = ""
+    if not compiled:
+        fallback_pdf = output / "report.pdf"
+        fallback_ok, fallback_error = await asyncio.to_thread(
+            _render_report_pdf_reportlab,
+            context,
+            fallback_pdf,
+        )
+        if fallback_ok:
+            compiled = True
+            renderer = "reportlab"
+        else:
+            error = f"{error}; ReportLab fallback: {fallback_error}" if error else fallback_error
     status = "ready" if compiled else "unavailable"
     (output / "report_status.json").write_text(
         json.dumps(
             {
                 "status": status,
-                "agent_called": True,
+                "agent_called": agent_called,
                 "agent_output_available": bool(report_agent_output),
+                "agent_error": agent_error,
                 "error": error,
+                "latex_error": error if renderer == "reportlab" else "",
+                "renderer": renderer or None,
                 "pdf": "report.pdf" if compiled else None,
             },
             ensure_ascii=False,
@@ -418,9 +852,11 @@ async def generate_report_artifacts(
     )
     return {
         "status": status,
-        "agent_called": True,
+        "agent_called": agent_called,
         "agent_output_available": bool(report_agent_output),
+        "agent_error": agent_error,
         "pdf": str(output / "report.pdf") if compiled else None,
         "tex": str(tex_path),
         "error": error,
+        "renderer": renderer or None,
     }

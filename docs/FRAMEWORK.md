@@ -84,63 +84,52 @@ Skill 不是额外工具。CyberOrion 根据 `CAI_TASK_TYPE` 只加载一份匹�
 
 ## 4. Agent 总表
 
-下表覆盖 `cai-latest/src/cai/agents/` 中可被发现的 Agent。工具以实际模块中的
-`tools`、`functions` 或工具工厂为准；带“条件”表示会受 CAI 配置或 API Key 影响。
+下表按 `cai-latest/src/cai/agents/` 的实际 `Agent` 对象整理，并按对象 ID 去重。
+“工具”列是 Agent 当前的实际工具名；工具本身仍由 CAI 原生 Agent 使用，
+CyberOrion 不会把它们复制成自己的工具。`Knowledge Agent` 和 `Report Agent`
+是 CyberOrion 新增的两个专用 Agent；`CyberOrion Blue Team commander` 不在清单中。
 
-### 4.1 CyberOrion 专用 Agent
+| Agent | 描述与特性 | 工具 |
+| --- | --- | --- |
+| CyberOrion | 安全 SuperAgent；理解任务、按需加载 Skill、统一匹配并调度 Agent、汇总证据和结果 | `dispatch_agent` |
+| Knowledge Agent | 唯一知识库入口；执行 RAG，返回命中条目、来源、ATT&CK 映射、风险、建议和置信度；不执行现场动作 | `knowledge_search` |
+| Report Agent | 系统化任务收口 Agent；把背景、知识、完整链路、工具调用、Agent 返回、token、上下文和建议整理成中文报告正文 | 无 |
+| Advanced Persistent Threat Agent | 多阶段 APT 演练；覆盖持久化、隐蔽、横向移动、OPSEC 和 ATT&CK 行动规划 | `think`、`thought`、`generic_linux_command`、`execute_code`、`write_key_findings`、`read_key_findings`、`fetch_url`、`Todo_list` |
+| AndroidSAST | Android 静态安全测试；建立应用结构、发现代码和配置漏洞 | `app_mapper`、`generic_linux_command`、`execute_code` |
+| AppLogicMapper | Android 应用逻辑分析；输出应用操作逻辑地图和关键路径 | `generic_linux_command`、`execute_code` |
+| Blue Team Agent | CAI 原生蓝队；系统防御、监控、事件响应和安全验证；不读取红队 ground truth | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`fetch_url` |
+| Blue Team GCTR | 带博弈分析的蓝队变体；定期评估攻防策略和均衡 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`fetch_url` |
+| Bug Bounter | Bug bounty 和 Web/API 漏洞发现；强调授权测试和负责任披露 | `generic_linux_command`、`execute_code`、`shodan_search`、`shodan_host_info`、`fetch_url` |
+| Bug Bounter GCTR | 带博弈分析的 Bug bounty 变体 | `generic_linux_command`、`execute_code`、`shodan_search`、`shodan_host_info`、`fetch_url` |
+| CodeAgent | 隔离工作区代码 Agent；迭代读取、编写、执行和修复代码 | 当前无固定工具对象，由 CAI 代码执行能力驱动 |
+| Continuous Ops Agent | 持续运营调度；校验 tick、tmux 和权限策略，启动周期性 Selection worker | `generic_linux_command`、`think` |
+| CTF agent | CTF 挑战执行；使用通用 Linux 命令侦察、验证和交付 flag | `generic_linux_command` |
+| DFIR Agent | 数字取证与事件响应；分析主机证据、日志、时间线和失陷迹象 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`think`、`fetch_url` |
+| DNS_SMTP_Agent | 邮件欺骗和 DMARC 风险评估；检查 DNS/SMTP 配置 | `check_mail_spoofing_vulnerability`、`execute_cli_command` |
+| Flag discriminator | 从工具输出中提取并判断 CTF flag | 无固定工具 |
+| Memory Analysis Specialist | 运行时内存检查、监控、修改和行为分析 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code` |
+| Network Security Analyzer | 网络监控、捕获、会话关联和攻击迹象分析 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`capture_remote_traffic`、`remote_capture_session`、`fetch_url` |
+| Orchestration Agent | CAI 默认多 Agent 编排；宽度优先侦察、并行专家、分支比较和后续收敛 | `check_available_agents`、`analyze_task_requirements`、`get_agent_number`、`run_dual_approach_contest`、`run_parallel_specialists`、`run_specialist` |
+| Purple Team - Blue | CAI 原生紫队蓝方；防御、监控和响应 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`fetch_url` |
+| Purple Team - Red | CAI 原生紫队红方；授权侦察、验证和利用模拟 | `generic_linux_command`、`execute_code`、`fetch_url` |
+| Red Team Agent | CAI 原生红队；授权侦察、漏洞验证和利用模拟 | `generic_linux_command`、`execute_code`、`fetch_url` |
+| Red Team GCTR | 带博弈分析的红队变体 | `generic_linux_command`、`execute_code`、`fetch_url` |
+| Replay Attack Agent | 网络协议回放和反制验证；进行数据包操纵、流量回放和可复现验证 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`capture_remote_traffic`、`remote_capture_session` |
+| Retester Agent | 漏洞复测与分诊；判断可利用性、消除误报、执行回归验证 | `generic_linux_command`、`execute_code` |
+| Reverse Engineering Specialist | 固件、二进制、反汇编和反编译分析；定位可利用缺陷 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code`、`fetch_url` |
+| Risk & Compliance Agent | NIS2、EU CRA、ISO/IEC 27001、IEC 62443、OWASP 控制映射和证据差距分析；不构成法律意见 | `generic_linux_command`、`verify_csv_inventory`、`think`、`fetch_url` |
+| Selection Agent | 专业 Agent 路由器；分析任务需求并选择合适的 CAI specialist | `check_available_agents`、`analyze_task_requirements`、`get_agent_number` |
+| Sub-GHz SDR Specialist | HackRF/Sub-GHz 信号捕获、回放和协议分析；覆盖 IoT、车载、工业和无线场景 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code` |
+| ThoughtAgent | 输出安全评估或 CTF 的下一步计划和假设 | `think` |
+| Use Case Agent | 生成网络安全案例、CTF 和演练场景 | `null_tool` |
+| Web App Pentester | 授权 Web 应用测试；请求、响应、漏洞验证和证据留存 | `generic_linux_command`、`execute_code`、`web_request_framework`、`fetch_url` |
+| Wi-Fi Security Tester | Wi-Fi 安全测试；无线攻击、密码恢复和通信干扰验证 | `generic_linux_command`、`run_ssh_command_with_credentials`、`execute_code` |
+| reporting agent | CAI 历史 HTML 报告兼容 Agent；不由 CyberOrion 的最终 PDF 流程调度 | 无固定工具 |
 
-| Agent | 描述 | 特性 | 工具 |
-| --- | --- | --- | --- |
-| CyberOrion | 安全 SuperAgent 与任务编排器 | 任务理解、Skill 加载、能力匹配、过程汇总、复杂任务收口 | `dispatch_agent` |
-| Knowledge Agent | 唯一安全知识库 RAG 子 Agent | 只检索知识和整理来源；不执行攻击、防御或代码修改；返回命中、来源、ATT&CK、风险、建议、置信度 | `knowledge_search` |
-| Report Agent | 系统化任务最终报告 Agent | 只在任务结束调用；把背景、知识、调度、工具、结果、token、上下文和建议整理为中文正文 | 无运行时工具 |
-
-### 4.2 取证、网络和漏洞分析 Agent
-
-| Agent | 描述 | 特性 | 工具 |
-| --- | --- | --- | --- |
-| Network Security Analyzer | 网络安全分析 | 监控、捕获、关联网络通信和攻击迹象 | 模块 `tools`：网络分析、命令和代码执行工具 |
-| DFIR Agent | 数字取证与事件响应 | 分析主机证据、日志、时间线、失陷迹象和响应动作 | 模块 `tools`：取证分析工具 |
-| Replay Attack Agent | 网络回放与协议验证 | 数据包操纵、协议回放、可复现链路验证 | 模块 `tools`：回放与网络命令工具 |
-| CodeAgent | 可执行代码 Agent | 在隔离工作区读取代码、生成并执行 Python、迭代修复 | `LocalPythonInterpreter`、代码执行能力 |
-| Retester Agent | 漏洞复测与分诊 | 判断可利用性、消除误报、运行回归验证 | 模块 `tools`：测试与验证工具 |
-| Web App Pentester | Web 应用测试 | 授权 Web 侦察、漏洞验证、请求和响应证据 | 模块 `tools`：Web/HTTP、命令和代码执行工具 |
-| Bug Bounter | Bug bounty 与漏洞发现 | Web 安全、API 测试、负责任披露 | 模块 `tools`：Web、API、搜索和命令工具 |
-| Reverse Engineering Specialist | 二进制与逆向 | 固件、反汇编、反编译、漏洞发现 | `functions`：代码、命令和逆向工具 |
-| Memory Analysis Specialist | 运行时内存分析 | 进程内存检查、监控、修改和运行时行为分析 | `functions`：内存分析工具 |
-| AndroidSAST | Android 静态分析 | 应用逻辑映射、SAST、漏洞发现 | `app_mapper`、`generic_linux_command`、`execute_code` |
-| AppLogicMapper | Android 应用逻辑映射 | 为 Android 应用建立完整操作逻辑地图 | 应用逻辑映射函数工具 |
-
-### 4.3 红蓝与攻防 Agent
-
-| Agent | 描述 | 特性 | 工具 |
-| --- | --- | --- | --- |
-| Red Team Agent | 红队安全评估 | 侦察、漏洞利用、授权目标验证 | 模块 `tools`：侦察、Web、SSH、命令和证据提交 |
-| Blue Team Agent | CAI 原生防御 Agent | 系统防御、监控、事件响应；不接触红队 ground truth | `generic_linux_command`、SSH、`execute_code`、Web 情报工具；计划/搜索工具条件启用 |
-| Blue Team Agent（`blue_teamer.py`） | CAI 原生蓝队单体 Agent | 作为 CAI 兼容 Agent 保留，CyberOrion 不为它增加新 commander | 同上，依赖 CAI 配置 |
-| Advanced Persistent Threat Agent | 高级持续性威胁模拟 | 多阶段行动、隐蔽、持久化、横向移动、长期目标与 ATT&CK | 模块 `tools`：授权演练工具 |
-| Wi-Fi Security Tester | Wi-Fi 安全测试 | 无线攻击、密码恢复、通信干扰 | `functions`：无线测试工具 |
-| Sub-GHz SDR Specialist | Sub-GHz/SDR 分析 | HackRF 捕获、回放、协议分析，覆盖 IoT/车载/工控 | `functions`：SDR 工具 |
-| DNS_SMTP_Agent | 邮件欺骗评估 | DMARC、DNS/SMTP 配置和 spoofing 风险 | `check_mail_spoofing_vulnerability`、`execute_cli_command` |
-
-### 4.4 编排、治理和辅助 Agent
-
-| Agent | 描述 | 特性 | 工具 |
-| --- | --- | --- | --- |
-| Orchestration Agent | CAI 默认多 Agent 编排器 | breadth-first 并行侦察、分支比较、后续专业 Agent 收敛 | `_tools`：编排和专业 Agent 工具 |
-| Selection Agent | CAI 专业 Agent 路由器 | 元问题分析、handoff、选择最合适的 CAI specialist | `check_available_agents`、`analyze_task_requirements`、`get_agent_number`；搜索条件启用 |
-| Continuous Ops Agent | 持续运营调度 | 校验 tick、tmux、权限策略并启动 Selection Agent worker loop | 模块 `tools`：持续任务控制工具 |
-| Risk & Compliance Agent | 风险与合规支持 | NIS2、EU CRA、ISO/IEC 27001、IEC 62443、OWASP 控制映射与证据差距分析 | 模块 `tools`：合规检索和映射工具 |
-| Prompt Injection Detector | 提示注入检测 | 检查输入/输出中的注入、越权和不可信指令 | guardrail 接口，不作为 CyberOrion 调度工具 |
-| Memory Analysis Specialist | 运行时状态辅助分析 | 处理内存与状态证据，服务于取证和漏洞分析 | `functions`：内存分析工具 |
-| ThoughtAgent | 下一步分析规划 | 生成安全评估或 CTF 的下一步计划 | `think` |
-| Flag discriminator | flag 提取 | 从工具和 Agent 输出中提取并判断 flag | 无固定工具 |
-| CTF agent | CTF 挑战执行 | 通用 Linux 命令、验证和交付 | `generic_linux_command` |
-| Use Case Agent | 网络安全案例生成 | 创建安全场景、CTF 和演练案例 | 模块 `tools`：案例生成工具 |
-| reporting agent | CAI HTML 报告兼容 Agent | CAI 历史兼容对象；CyberOrion 最终报告使用专用 Report Agent | 无固定工具 |
-
-> `Memory Analysis Specialist` 在 CAI 源码中承担运行时内存分析职责；表中只保留
-> 一条职责说明，避免模块级别和 Agent 名称重复造成误解。
+说明：`Blue Team Agent`、`Blue Team GCTR` 和 `Purple Team - Blue` 都是 CAI
+原生对象，不是新增的 CyberOrion 蓝队 commander；CyberOrion 只通过统一的
+`dispatch_agent` 选择它们。`reporting agent` 仅为 CAI 兼容对象，最终报告使用
+上表的 `Report Agent`。
 
 ## 5. Agent 发现与排除规则
 
@@ -230,15 +219,21 @@ logs/cai_recordings/<recording_id>/report.pdf
 2. 完整执行链、工具调用、Agent 调度、关键中间结果和证据；
 3. 任务结果、状态、token 花费、上下文长度、局限性和安全人员建议。
 
+LaTeX/XeLaTeX 可用时优先使用 `report.tex` 编译；生产没有 LaTeX 时自动使用
+ReportLab 兜底，并写入 `report_status.json` 的 `renderer=reportlab`。ReportLab
+版本要求由 `Dockerfile` 固定；生产还需安装可嵌入的中文 TrueType 字体
+（推荐 `fonts-noto-cjk`），否则系统会把报告标记为不可用并保留源文件。
 写作原则是“专家人话 + 严谨代码/日志证据”：先给结论，再给证据和边界；不把
-原始 JSON 直接当正文，不把知识库背景写成现场事实。
+原始 JSON 直接当正文，不把知识库背景写成现场事实。PDF 地址由终端和历史记录
+按钮提供：`/api/cai/recordings/<recording_id>/report`。
 
 ## 9. 模型稳定性
 
-DeepSeek OpenAI-compatible endpoint 使用 provider-qualified 模型名，例如
-`deepseek/deepseek-v4-flash`，避免 LiteLLM 报 `LLM Provider NOT provided`。DeepSeek
-不支持的 `store`、并行工具参数由 CAI provider 路径过滤；流式适配器每次请求只创建
-一个 `litellm.acompletion` stream，避免重复调用。
+DeepSeek OpenAI-compatible endpoint 使用裸 API 模型名 `deepseek-v4-flash`。
+服务端会根据 DeepSeek base URL 规范化 `CAI_MODEL`，并设置 `CAI_FORCE_HTTPX=1`
+绕过 LiteLLM 的 provider 推断；Knowledge Agent 和 Report Agent 也只使用裸模型名。
+CAI 的 direct HTTPX 层仍会防御性地移除遗留的 `deepseek/` 前缀，并过滤不被端点
+接受的参数。流式适配器每次请求只创建一个 stream，避免重复请求和重复输出。
 
 若 provider 返回 400、空响应或上下文错误，系统应保留真实错误、结束当前任务并生成
 可读的失败报告，不得无限重试、伪造成功或吞掉证据。
