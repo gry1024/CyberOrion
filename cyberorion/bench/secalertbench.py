@@ -9,6 +9,7 @@ import re
 import random
 import statistics
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,22 @@ def load_alerts(paths: list[Path]) -> list[dict]:
     return list(unique.values())
 
 
+def select_representative_alerts(rows: list[dict], n: int, seed: int) -> list[dict]:
+    """固定种子分层选样；代表集必须同时含 attack 与 benign。"""
+    available = Counter(row["label"] for row in rows)
+    if not available.get("attack") or not available.get("benign"):
+        from .assets import BenchmarkAssetMissing
+        raise BenchmarkAssetMissing(
+            SUITE, "SecAlertBench 代表集源数据必须同时包含 attack 与 benign")
+    if n < 2:
+        raise ValueError("SecAlertBench representative n 必须至少为 2 才能覆盖两类")
+    selected = stratified_sample(rows, n, seed, ("label", "alert_type", "enterprise"))
+    selected_counts = Counter(row["label"] for row in selected)
+    if not selected_counts.get("attack") or not selected_counts.get("benign"):
+        raise RuntimeError("deterministic stratification failed to preserve both classes")
+    return selected
+
+
 def _parse_verdict(raw: Any) -> tuple[str, float]:
     try:
         value = json.loads(str(raw)) if not isinstance(raw, dict) else raw
@@ -82,34 +99,60 @@ def _parse_verdict(raw: Any) -> tuple[str, float]:
     else:
         verdict = "unknown"
     try:
-        confidence = max(0.0, min(1.0, float(value.get("confidence", 0.0))))
+        if value.get("attack_probability") is not None:
+            attack_probability = float(value["attack_probability"])
+        elif value.get("confidence") is not None:
+            # legacy 输出的 confidence 表示“对当前 verdict 的置信度”，
+            # Brier/PR-AUC/ECE 需要统一 P(attack)。
+            verdict_confidence = float(value["confidence"])
+            attack_probability = (1.0 - verdict_confidence
+                                  if verdict == "benign" else verdict_confidence)
+        else:
+            attack_probability = 0.5
+        attack_probability = max(0.0, min(1.0, attack_probability))
     except (TypeError, ValueError):
-        confidence = 0.0
-    return verdict, confidence
+        attack_probability = 0.5
+    return verdict, attack_probability
 
 
 def compute_scores(rows: list[dict]) -> dict:
     tp = sum(r["gold"] == "attack" and r["pred"] == "attack" for r in rows)
     fn = sum(r["gold"] == "attack" and r["pred"] != "attack" for r in rows)
     fp = sum(r["gold"] == "benign" and r["pred"] == "attack" for r in rows)
-    tn = sum(r["gold"] == "benign" and r["pred"] != "attack" for r in rows)
+    # unknown/parse failure 不能伪装成 benign 真阴性。
+    tn = sum(r["gold"] == "benign" and r["pred"] == "benign" for r in rows)
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1_attack = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    benign_precision = tn / (tn + fn) if tn + fn else 0.0
-    benign_recall = tn / (tn + fp) if tn + fp else 0.0
+    # unknown 是其 gold 类的 false negative，但不是另一类的 positive。
+    # 因此存在 parse failure 时不能使用纯二分类的 fn/fp 互换捷径。
+    benign_fp = sum(r["gold"] == "attack" and r["pred"] == "benign" for r in rows)
+    benign_fn = sum(r["gold"] == "benign" and r["pred"] != "benign" for r in rows)
+    benign_precision = tn / (tn + benign_fp) if tn + benign_fp else 0.0
+    benign_recall = tn / (tn + benign_fn) if tn + benign_fn else 0.0
     f1_benign = (2 * benign_precision * benign_recall /
                  (benign_precision + benign_recall)) if benign_precision + benign_recall else 0.0
     ranked = sorted(((float(r.get("confidence", 0.0)), r["gold"] == "attack")
-                     for r in rows), reverse=True)
+                     for r in rows), key=lambda item: item[0], reverse=True)
     positives = sum(label for _, label in ranked)
-    seen_tp = 0
+    seen_tp = seen = 0
     average_precision = 0.0
-    for rank, (_confidence, label) in enumerate(ranked, 1):
-        if label:
-            seen_tp += 1
-            average_precision += seen_tp / rank
-    pr_auc = average_precision / positives if positives else 0.0
+    previous_recall = 0.0
+    # 同 confidence 必须作为一个阈值组处理；逐项排序会让 tie 的原始顺序
+    # 人为抬高/降低 PR-AUC（全 0 confidence 时尤其明显）。
+    index = 0
+    while index < len(ranked):
+        confidence = ranked[index][0]
+        group = []
+        while index < len(ranked) and ranked[index][0] == confidence:
+            group.append(ranked[index]); index += 1
+        seen += len(group)
+        seen_tp += sum(label for _, label in group)
+        recall_at_threshold = seen_tp / positives if positives else 0.0
+        precision_at_threshold = seen_tp / seen if seen else 0.0
+        average_precision += (recall_at_threshold - previous_recall) * precision_at_threshold
+        previous_recall = recall_at_threshold
+    pr_auc = average_precision if positives else 0.0
     brier = statistics.fmean(
         (float(r.get("confidence", 0.0)) - (1.0 if r["gold"] == "attack" else 0.0)) ** 2
         for r in rows) if rows else 0.0
@@ -161,7 +204,7 @@ async def _run_agent(alert: dict, mode: str, llm: Any) -> tuple[str, dict]:
                            max_dispatches=3, max_role_steps=3)
     result = await (run_superagent if mode == "agent" else run_reference)(
         task=("Classify this SOC alert as attack or benign. Cite only observable evidence. "
-              "Complete with JSON {verdict, confidence}."),
+              "Complete with JSON {verdict, attack_probability}."),
         llm=wrapped, tools=tools, config=config,
         role_tools={"watcher": tools.keys(), "analyst": tools.keys(),
                     "hunter": tools.keys(), "responder": tools.keys()},
@@ -184,7 +227,7 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         raise BenchmarkAssetMissing(SUITE, "未识别出带 label 与 alert/text 的记录")
     count, size_decision = apply_size_policy(
         SUITE, profile, n, len(all_rows), files)
-    selected = stratified_sample(all_rows, count, seed, ("label", "alert_type", "enterprise"))
+    selected = select_representative_alerts(all_rows, count, seed)
     llm = llm or make_llm(timeout=LLM_TIMEOUT)
     sem = asyncio.Semaphore(max(1, concurrency))
     results: list[dict | None] = [None] * len(selected)
@@ -202,7 +245,8 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
                     raw = await meter(
                         "You are a SOC alert triage analyst. Return JSON only.",
                         json.dumps({"alert": alert["alert"],
-                                    "output": {"verdict": "attack|benign", "confidence": 0.0}},
+                                    "output": {"verdict": "attack|benign",
+                                               "attack_probability": 0.0}},
                                    ensure_ascii=False))
                 else:
                     raw, trace = await _run_agent(alert, mode, meter)
@@ -213,7 +257,8 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         results[index] = {
             "idx": index, "alert_id": alert["id"], "topic": alert["alert_type"],
             "difficulty": "unknown", "gold": alert["label"], "pred": pred,
-            "confidence": confidence, "raw": str(raw)[:4000],
+            "confidence": confidence, "probability_semantics": "P(attack)",
+            "raw": str(raw)[:4000],
             "agent_trace": trace.get("decision_trace", []),
             "tool_calls": trace.get("tool_calls", []),
             "role_events": trace.get("role_events", []),
@@ -270,5 +315,11 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         "asset_root": str(root),
         "size_policy_decision": size_decision,
         "representative_asset_decision": representative_decision,
+        "selection_manifest": {
+            "algorithm": "seeded_round_robin_stratified_v1",
+            "strata": ["label", "alert_type", "enterprise"],
+            "class_counts": dict(sorted(Counter(r["label"] for r in selected).items())),
+            "selected_ids": [r["id"] for r in selected],
+        },
     }
     return persist_run(run, log_dir)

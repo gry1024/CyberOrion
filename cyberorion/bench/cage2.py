@@ -45,17 +45,37 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
     allocations = [quotient + (1 if index < remainder else 0)
                    for index in range(len(matrix))]
     started_at = time.time()
-    from cyberorion.eval.benchmarks import run_cage2
+    from cyberorion.eval.benchmarks import run_cage2, run_cage2_async
 
     if mode != "base":
         llm = llm or make_llm(timeout=180.0)
-        loop = asyncio.get_running_loop()
-        history: list[dict] = []
         audit_traces: list[dict] = []
+        episode_resources: list[dict] = []
+        episode_states: dict[int, dict] = {}
+        current_condition = ""
 
-        async def choose(observation: Any) -> dict:
+        async def choose(observation: Any, *, episode: int = 1, step: int = 1) -> dict:
+            state = episode_states.setdefault(episode, {
+                "meter": MeteredLLM(llm), "tool_calls": 0,
+                "history": [], "started": time.perf_counter(),
+                "budget_exhausted_steps": 0,
+            })
+            meter: MeteredLLM = state["meter"]
+            remaining_llm = FAIR_ARM_BUDGET["max_llm_calls"] - meter.calls
+            remaining_tools = FAIR_ARM_BUDGET["max_tool_calls"] - state["tool_calls"]
+            if remaining_llm <= 0 or remaining_tools <= 0:
+                state["budget_exhausted_steps"] += 1
+                audit_traces.append({
+                    "condition": current_condition, "episode": episode, "step": step,
+                    "action": {"action": "sleep"}, "decision_trace": [],
+                    "tool_calls": [], "role_events": [], "trace_source": "runtime",
+                    "budget_exhausted": True,
+                    "episode_budget_used": {"llm_calls": meter.calls,
+                                            "tool_calls": state["tool_calls"],
+                                            "estimated_tokens": meter.estimated_tokens},
+                })
+                return {"action": "sleep"}
             selected: list[dict] = []
-            meter = MeteredLLM(llm)
 
             def select(action: str, hostname: str = "") -> str:
                 selected.append({"action": action, "hostname": hostname})
@@ -87,9 +107,11 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
             task = json.dumps({
                 "goal": "Choose exactly one defensive action, observe tool result, then complete.",
                 "observation": _safe_observation(observation),
-                "recent_actions": history[-8:],
+                "recent_actions": state["history"][-8:],
             }, ensure_ascii=False)
-            config = RuntimeConfig(max_steps=18, max_llm_calls=18, max_tool_calls=12,
+            config = RuntimeConfig(max_steps=max(1, remaining_llm),
+                                   max_llm_calls=max(1, remaining_llm),
+                                   max_tool_calls=max(1, remaining_tools),
                                    max_dispatches=3, max_role_steps=3)
             runtime = await (run_superagent if mode == "agent" else run_reference)(
                 task=task, llm=wrapped, tools=tools, config=config,
@@ -100,32 +122,35 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
                     "hunter": ("analyse", "remove", "sleep"),
                 })
             action = selected[-1] if selected else {"action": "sleep"}
-            history.append(action)
+            state["history"].append(action)
+            state["tool_calls"] += int(runtime["budget"].get("tool_calls", 0))
             audit_traces.append({
-                "step": len(audit_traces) + 1, "action": action,
+                "condition": current_condition, "episode": episode, "step": step,
+                "action": action,
                 "decision_trace": runtime["decision_trace"],
                 "tool_calls": runtime["tool_calls"],
                 "role_events": runtime["role_events"],
                 "budget": runtime["budget"], "trace_source": "runtime",
                 "estimated_tokens": meter.estimated_tokens,
+                "episode_budget_used": {"llm_calls": meter.calls,
+                                        "tool_calls": state["tool_calls"],
+                                        "estimated_tokens": meter.estimated_tokens},
             })
             return action
-
-        def policy(observation: Any) -> dict:
-            future = asyncio.run_coroutine_threadsafe(choose(observation), loop)
-            return future.result(timeout=200)
 
     all_episodes: list[dict] = []
     conditions: list[dict] = []
     for condition_index, (steps, red_agent) in enumerate(matrix):
-        args = (allocations[condition_index], steps, mode != "base",
-                policy if mode != "base" else None, None, red_agent,
-                seed + condition_index, True)
-        # base 没有异步 LLM 回调，直接同步调用可避免某些受限环境在
-        # asyncio 默认 executor 关闭阶段永久等待；agent 两臂必须在线程中
-        # 运行，才能把 policy 回调安全转回当前事件循环。
-        result = (run_cage2(*args) if mode == "base"
-                  else await asyncio.to_thread(run_cage2, *args))
+        if mode != "base":
+            current_condition = f"{red_agent}:{steps}"
+            episode_states.clear()
+        if mode == "base":
+            result = run_cage2(allocations[condition_index], steps, False, None,
+                               None, red_agent, seed + condition_index, True)
+        else:
+            result = await run_cage2_async(
+                allocations[condition_index], steps, choose, None,
+                red_agent, seed + condition_index, True)
         if result.get("error"):
             raise BenchmarkAssetMissing(SUITE, str(result["error"]))
         rows = result.get("episodes") or []
@@ -133,6 +158,18 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
             row["condition"] = f"{red_agent}:{steps}"
             row["condition_seed"] = seed + condition_index
         all_episodes.extend(rows)
+        if mode != "base":
+            for episode, state in sorted(episode_states.items()):
+                meter = state["meter"]
+                episode_resources.append({
+                    "condition": current_condition, "episode": episode,
+                    "limits": dict(FAIR_ARM_BUDGET),
+                    "used": {"llm_calls": meter.calls,
+                             "tool_calls": state["tool_calls"],
+                             "estimated_tokens": meter.estimated_tokens,
+                             "wall_clock_sec": round(time.perf_counter() - state["started"], 4)},
+                    "budget_exhausted_steps": state["budget_exhausted_steps"],
+                })
         rewards_for_condition = [float(row.get("reward", 0.0)) for row in rows]
         conditions.append({
             "red_agent": red_agent, "steps": steps, "episodes": len(rows),
@@ -189,4 +226,5 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
     }
     if mode != "base":
         run["agent_traces"] = audit_traces
+        run["episode_resource_usage"] = episode_resources
     return persist_run(run, log_dir)

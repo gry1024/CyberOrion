@@ -1,0 +1,340 @@
+{
+  "schema_version": 3,
+  "run_id": "20260824_054201_soc_contract_compare_n12",
+  "suite": "soc_contract",
+  "mode": "compare",
+  "arm": null,
+  "profile": "publication",
+  "n": 12,
+  "seed": 20260824,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787575321.6059027,
+  "finished_at": 1787575417.3217902,
+  "elapsed_sec": 95.72,
+  "scores": {
+    "n": 12,
+    "task_success": 0.3879,
+    "verdict_accuracy": 0.0,
+    "detection_f1": 0.0,
+    "attack_f1": 0.0,
+    "evidence_grounding": 0.0,
+    "unsupported_claim_rate": 0.0,
+    "response_completeness": 0.0,
+    "unsafe_action_rate": 0.0,
+    "tool_call_validity": 0.9125,
+    "useful_action_ratio": 0.9125,
+    "confidence_intervals": {
+      "task_success": [
+        0.3134,
+        0.436
+      ],
+      "verdict_accuracy": [
+        0.0,
+        0.0
+      ],
+      "detection_f1": [
+        0.0,
+        0.0
+      ],
+      "attack_f1": [
+        0.0,
+        0.0
+      ],
+      "evidence_grounding": [
+        0.0,
+        0.0
+      ],
+      "unsupported_claim_rate": [
+        0.0,
+        0.0
+      ],
+      "response_completeness": [
+        0.0,
+        0.0
+      ],
+      "unsafe_action_rate": [
+        0.0,
+        0.0
+      ],
+      "tool_call_validity": [
+        0.825,
+        0.9861
+      ],
+      "useful_action_ratio": [
+        0.8346,
+        0.9881
+      ]
+    },
+    "failure_taxonomy": {
+      "attack_mapping": 12,
+      "missing_evidence": 12,
+      "parse_failure": 1
+    },
+    "parse_fail": 1,
+    "llm_errors": 0,
+    "avg_latency_ms": 21191.0,
+    "estimated_tokens": 0,
+    "correct_mc_pct": 0.3879,
+    "avg_score": 0.3879,
+    "by_difficulty": {},
+    "by_topic": {}
+  },
+  "results": [],
+  "status": "done",
+  "llm_errors": 0,
+  "error": null,
+  "methodology_status": "engineering_only",
+  "benchmark_provenance": {
+    "name": "CyberOrion SOC contract set v2",
+    "origin": "internal",
+    "dataset_version": "v2-12-independent-cases",
+    "sample_scope": "full",
+    "sample_manifest": [
+      "SOC-008",
+      "SOC-006",
+      "SOC-001",
+      "SOC-007",
+      "SOC-002",
+      "SOC-004",
+      "SOC-009",
+      "SOC-010",
+      "SOC-012",
+      "SOC-011",
+      "SOC-003",
+      "SOC-005"
+    ],
+    "comparable_to_upstream": false
+  },
+  "comparison": {
+    "arms": [
+      {
+        "run_id": "20260824_054201_soc_contract_compare_n12_base",
+        "mode": "base",
+        "scores": {
+          "n": 12,
+          "task_success": 0.3095,
+          "verdict_accuracy": 0.1667,
+          "detection_f1": 0.0,
+          "attack_f1": 0.0,
+          "evidence_grounding": 0.0,
+          "unsupported_claim_rate": 0.0,
+          "response_completeness": 0.0,
+          "unsafe_action_rate": 0.0,
+          "tool_call_validity": 0.0,
+          "useful_action_ratio": 0.0,
+          "confidence_intervals": {
+            "task_success": [
+              0.2857,
+              0.3452
+            ],
+            "verdict_accuracy": [
+              0.0,
+              0.4167
+            ],
+            "detection_f1": [
+              0.0,
+              0.0
+            ],
+            "attack_f1": [
+              0.0,
+              0.0
+            ],
+            "evidence_grounding": [
+              0.0,
+              0.0
+            ],
+            "unsupported_claim_rate": [
+              0.0,
+              0.0
+            ],
+            "response_completeness": [
+              0.0,
+              0.0
+            ],
+            "unsafe_action_rate": [
+              0.0,
+              0.0
+            ],
+            "tool_call_validity": [
+              0.0,
+              0.0
+            ],
+            "useful_action_ratio": [
+              0.0,
+              0.0
+            ]
+          },
+          "failure_taxonomy": {
+            "attack_mapping": 12,
+            "missing_evidence": 12
+          },
+          "parse_fail": 0,
+          "llm_errors": 0,
+          "avg_latency_ms": 5112.4,
+          "estimated_tokens": 0,
+          "correct_mc_pct": 0.3095,
+          "avg_score": 0.3095,
+          "by_difficulty": {},
+          "by_topic": {}
+        }
+      },
+      {
+        "run_id": "20260824_054201_soc_contract_compare_n12_single",
+        "mode": "single",
+        "scores": {
+          "n": 12,
+          "task_success": 0.0929,
+          "verdict_accuracy": 0.0,
+          "detection_f1": 0.0,
+          "attack_f1": 0.0,
+          "evidence_grounding": 0.0,
+          "unsupported_claim_rate": 0.0,
+          "response_completeness": 0.0,
+          "unsafe_action_rate": 0.0,
+          "tool_call_validity": 0.7183,
+          "useful_action_ratio": 0.7183,
+          "confidence_intervals": {
+            "task_success": [
+              0.0,
+              0.1858
+            ],
+            "verdict_accuracy": [
+              0.0,
+              0.0
+            ],
+            "detection_f1": [
+              0.0,
+              0.0
+            ],
+            "attack_f1": [
+              0.0,
+              0.0
+            ],
+            "evidence_grounding": [
+              0.0,
+              0.0
+            ],
+            "unsupported_claim_rate": [
+              0.0,
+              0.0
+            ],
+            "response_completeness": [
+              0.0,
+              0.0
+            ],
+            "unsafe_action_rate": [
+              0.0,
+              0.0
+            ],
+            "tool_call_validity": [
+              0.5958,
+              0.8399
+            ],
+            "useful_action_ratio": [
+              0.5861,
+              0.8427
+            ]
+          },
+          "failure_taxonomy": {
+            "attack_mapping": 12,
+            "missing_evidence": 12,
+            "parse_failure": 9,
+            "wasted_tool_calls": 2
+          },
+          "parse_fail": 9,
+          "llm_errors": 0,
+          "avg_latency_ms": 27603.6,
+          "estimated_tokens": 0,
+          "correct_mc_pct": 0.0929,
+          "avg_score": 0.0929,
+          "by_difficulty": {},
+          "by_topic": {}
+        }
+      },
+      {
+        "run_id": "20260824_054201_soc_contract_compare_n12_agent",
+        "mode": "agent",
+        "scores": {
+          "n": 12,
+          "task_success": 0.3879,
+          "verdict_accuracy": 0.0,
+          "detection_f1": 0.0,
+          "attack_f1": 0.0,
+          "evidence_grounding": 0.0,
+          "unsupported_claim_rate": 0.0,
+          "response_completeness": 0.0,
+          "unsafe_action_rate": 0.0,
+          "tool_call_validity": 0.9125,
+          "useful_action_ratio": 0.9125,
+          "confidence_intervals": {
+            "task_success": [
+              0.3134,
+              0.436
+            ],
+            "verdict_accuracy": [
+              0.0,
+              0.0
+            ],
+            "detection_f1": [
+              0.0,
+              0.0
+            ],
+            "attack_f1": [
+              0.0,
+              0.0
+            ],
+            "evidence_grounding": [
+              0.0,
+              0.0
+            ],
+            "unsupported_claim_rate": [
+              0.0,
+              0.0
+            ],
+            "response_completeness": [
+              0.0,
+              0.0
+            ],
+            "unsafe_action_rate": [
+              0.0,
+              0.0
+            ],
+            "tool_call_validity": [
+              0.825,
+              0.9861
+            ],
+            "useful_action_ratio": [
+              0.8346,
+              0.9881
+            ]
+          },
+          "failure_taxonomy": {
+            "attack_mapping": 12,
+            "missing_evidence": 12,
+            "parse_failure": 1
+          },
+          "parse_fail": 1,
+          "llm_errors": 0,
+          "avg_latency_ms": 21191.0,
+          "estimated_tokens": 0,
+          "correct_mc_pct": 0.3879,
+          "avg_score": 0.3879,
+          "by_difficulty": {},
+          "by_topic": {}
+        }
+      }
+    ],
+    "primary_metric": "avg_score",
+    "agent_minus_reference": 0.295,
+    "paired_n": 12,
+    "paired_delta_ci": [
+      0.195825,
+      0.388775
+    ],
+    "shared": {
+      "n": 12,
+      "seed": 20260824,
+      "model": "deepseek-v4-flash"
+    }
+  }
+}

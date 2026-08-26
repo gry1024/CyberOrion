@@ -1,0 +1,10 @@
+{
+  "run_id": "20260824_075949_secalertbench_agent_n1",
+  "suite": "secalertbench",
+  "seed": 20260824,
+  "selection": "seeded_stratified",
+  "sample_ids": [
+    "sha256:0d1d0c354cefea92aceb"
+  ],
+  "sha256": "5687505a0395e4a1de6b128fac0d332e0bdb2e3287e7ba7a599944df3bf8276f"
+}

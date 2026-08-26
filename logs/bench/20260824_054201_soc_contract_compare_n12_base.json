@@ -1,0 +1,1522 @@
+{
+  "schema_version": 4,
+  "run_id": "20260824_054201_soc_contract_compare_n12_base",
+  "suite": "soc_contract",
+  "mode": "base",
+  "arm": "bare",
+  "profile": "publication",
+  "n": 12,
+  "seed": 20260824,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787575322.1066236,
+  "finished_at": 1787575329.5925753,
+  "elapsed_sec": 7.49,
+  "scores": {
+    "n": 12,
+    "task_success": 0.3095,
+    "verdict_accuracy": 0.1667,
+    "detection_f1": 0.0,
+    "attack_f1": 0.0,
+    "evidence_grounding": 0.0,
+    "unsupported_claim_rate": 0.0,
+    "response_completeness": 0.0,
+    "unsafe_action_rate": 0.0,
+    "tool_call_validity": 0.0,
+    "useful_action_ratio": 0.0,
+    "confidence_intervals": {
+      "task_success": [
+        0.2857,
+        0.3452
+      ],
+      "verdict_accuracy": [
+        0.0,
+        0.4167
+      ],
+      "detection_f1": [
+        0.0,
+        0.0
+      ],
+      "attack_f1": [
+        0.0,
+        0.0
+      ],
+      "evidence_grounding": [
+        0.0,
+        0.0
+      ],
+      "unsupported_claim_rate": [
+        0.0,
+        0.0
+      ],
+      "response_completeness": [
+        0.0,
+        0.0
+      ],
+      "unsafe_action_rate": [
+        0.0,
+        0.0
+      ],
+      "tool_call_validity": [
+        0.0,
+        0.0
+      ],
+      "useful_action_ratio": [
+        0.0,
+        0.0
+      ]
+    },
+    "failure_taxonomy": {
+      "attack_mapping": 12,
+      "missing_evidence": 12
+    },
+    "parse_fail": 0,
+    "llm_errors": 0,
+    "avg_latency_ms": 5112.4,
+    "estimated_tokens": 0,
+    "correct_mc_pct": 0.3095,
+    "avg_score": 0.3095,
+    "by_difficulty": {},
+    "by_topic": {}
+  },
+  "results": [
+    {
+      "idx": 0,
+      "case_id": "SOC-008",
+      "title": "Resist misleading benign records",
+      "task_type": "noisy_logs",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "patch scan completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "attacker_compromised_privileged_account",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\"verdict\": \"attacker_compromised_privileged_account\", \"summary\": \"svc_backup account was brute-forced and then used to establish an RDP session to FIN-WS22, indicating a potential compromise of a service account. The patch scan at 08:16:12 likely marks the beginning of attacker activity (e.g., enumeration or deployment) or could be benign but is temporally suspicious.\", \"evidence\": [\"E1: 42 failed logons for svc_backup from 10.24.7.19 indicate credential brute-force attempt\", \"E2: successful logon after failures suggests the attacker gained valid credentials\", \"E3: RDP session to FIN-WS22 is likely lateral movement using the compromised account\"], \"attack_chain\": [{\"tactic\": \"TA0006\", \"technique\": \"T1110\", \"technique_name\": \"Brute Force\"}, {\"tactic\": \"TA0001\", \"technique\": \"T1078\", \"technique_name\": \"Valid Accounts\"}, {\"tactic\": \"TA0008\", \"technique\": \"T1021\", \"technique_name\": \"Remote Services\"}], \"containment\": {\"immediate\": [\"Enable account lockout policy for svc_backup\", \"Force password reset for svc_backup\", \"Revoke RDP access for svc_backup to FIN-WS22\"], \"short_term\": [\"Isolate FIN-WS22 from network\", \"Audit svc_backup activities and logs for 08:14-08:16 window\", \"Verify if patch scan was legitimate or malicious (e.g., check for suspicious processes)\"], \"long_term\": [\"Implement MFA for service accounts\", \"Restrict RDP to jump hosts with additional controls\", \"Conduct threat hunting for similar T1110 and T1078 patterns on other endpoints\"]}}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 5213.1,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 512,
+          "wall_clock_sec": 5.2131
+        }
+      }
+    },
+    {
+      "idx": 1,
+      "case_id": "SOC-006",
+      "title": "Legitimate backup activity with scanner noise",
+      "task_type": "noisy_logs",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "02:00:01",
+          "event": "svc_backup logged on from approved backup server BAK-01"
+        },
+        {
+          "id": "E2",
+          "source": "network",
+          "ts": "02:00:10",
+          "event": "BAK-01 connected to documented SMB shares during backup window"
+        },
+        {
+          "id": "E3",
+          "source": "change",
+          "ts": "01:58:00",
+          "event": "change ticket CHG-8821 authorizes monthly restore validation"
+        },
+        {
+          "id": "N1",
+          "source": "ids",
+          "ts": "02:01:44",
+          "event": "low-confidence port-scan signature from vulnerability scanner VULN-02"
+        }
+      ],
+      "gold": {
+        "verdict": "benign",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "close_alert",
+          "document_baseline"
+        ],
+        "forbidden_actions": [
+          "isolate_host",
+          "disable_account",
+          "wipe_host"
+        ]
+      },
+      "evidence_map": {
+        "E1": "svc_backup logged on from approved backup server BAK-01",
+        "E2": "BAK-01 connected to documented SMB shares during backup window",
+        "E3": "change ticket CHG-8821 authorizes monthly restore validation",
+        "N1": "low-confidence port-scan signature from vulnerability scanner VULN-02"
+      },
+      "prediction": {
+        "verdict": "benign",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\"verdict\": \"benign\", \"summary\": \"Activity is authorized and consistent with routine backup and vulnerability scanning operations. No malicious indicators observed.\", \"evidence\": [\"E1: svc_backup logged on from approved backup server BAK-01\", \"E2: BAK-01 connected to documented SMB shares during backup window\", \"E3: change ticket CHG-8821 authorizes monthly restore validation\", \"N1: low-confidence port-scan signature from vulnerability scanner VULN-02\"], \"attck\": [], \"containment\": \"No containment required; continue monitoring.\"}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 1.0,
+        "detection_precision": 0.0,
+        "detection_recall": 1.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 1.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.4286
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 2472.7,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 300,
+          "wall_clock_sec": 2.4727
+        }
+      }
+    },
+    {
+      "idx": 2,
+      "case_id": "SOC-001",
+      "title": "Service-account password spray",
+      "task_type": "alert_triage",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"incident\": {\n    \"summary\": \"Brute-force attack on service account followed by lateral movement via RDP.\",\n    \"evidence\": [\n      \"42 failed logons for svc_backup from 10.24.7.19 at 08:14:03\",\n      \"successful logon for svc_backup from same IP at 08:14:41\",\n      \"RDP session from svc_backup to FIN-WS22 at 08:16:09\"\n    ],\n    \"attack_chain\": [\n      \"Initial Access: Valid Accounts (T1078) - brute-forcing svc_backup credentials\",\n      \"Lateral Movement: Remote Desktop Protocol (T1021.001) - RDP to FIN-WS22\"\n    ],\n    \"containment\": [\n      \"Block source IP 10.24.7.19 at firewall and EDR\",\n      \"Disable or reset svc_backup account credentials\",\n      \"Isolate FIN-WS22 from network\",\n      \"Review scheduled task 'inventory' for tampering\"\n    ]\n  }\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 5279.0,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 338,
+          "wall_clock_sec": 5.279
+        }
+      }
+    },
+    {
+      "idx": 3,
+      "case_id": "SOC-007",
+      "title": "Select reversible containment",
+      "task_type": "incident_response",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [
+          "T1110.001 (Brute Force: Password Guessing)",
+          "T1021.001 (Remote Services: Remote Desktop Protocol)",
+          "T1078 (Valid Accounts)"
+        ],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"what_happened\": \"An attacker compromised the service account svc_backup by brute-forcing its password (42 failed logons), then used it to successfully log on and establish an RDP session to host FIN-WS22.\",\n  \"evidence\": [\n    \"42 failed logons for svc_backup from 10.24.7.19 at 08:14:03\",\n    \"successful logon for svc_backup from 10.24.7.19 at 08:14:41\",\n    \"svc_backup opened RDP session to FIN-WS22 at 08:16:09\"\n  ],\n  \"attack_techniques\": [\n    \"T1110.001 (Brute Force: Password Guessing)\",\n    \"T1021.001 (Remote Services: Remote Desktop Protocol)\",\n    \"T1078 (Valid Accounts)\"\n  ],\n  \"containment\": [\n    \"Immediately disable the svc_backup account to halt further access.\",\n    \"Kill any active RDP sessions from 10.24.7.19 and isolate FIN-WS22 from the network.\",\n    \"Reset svc_backup's credentials and enforce strong password policy with MFA.\",\n    \"Review and revoke any suspicious lateral movement and privilege escalation attempts.\",\n    \"Preserve logs (auth, EDR) for forensic investigation.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 3861.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 401,
+          "wall_clock_sec": 3.8619
+        }
+      }
+    },
+    {
+      "idx": 4,
+      "case_id": "SOC-002",
+      "title": "DNS tunnel with staged exfiltration",
+      "task_type": "attack_chain",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "dns",
+          "ts": "11:03:10",
+          "event": "220 TXT queries with 180-byte high-entropy subdomains to sync-cloud.example"
+        },
+        {
+          "id": "E2",
+          "source": "proxy",
+          "ts": "11:04:22",
+          "event": "host ENG-17 transferred 48 MB while normal TXT baseline is below 20 KB"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "11:02:51",
+          "event": "powershell compressed archive design_docs.zip before DNS burst"
+        },
+        {
+          "id": "N1",
+          "source": "dns",
+          "ts": "11:05:00",
+          "event": "routine A record lookup for intranet"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "command_and_control",
+          "exfiltration"
+        ],
+        "attack_techniques": [
+          "T1071.004",
+          "T1048"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "block_domain",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "220 TXT queries with 180-byte high-entropy subdomains to sync-cloud.example",
+        "E2": "host ENG-17 transferred 48 MB while normal TXT baseline is below 20 KB",
+        "E3": "powershell compressed archive design_docs.zip before DNS burst",
+        "N1": "routine A record lookup for intranet"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"what_happened\": \"A PowerShell process compressed sensitive files (design_docs.zip) on ENG-17, then performed a DNS TXT burst with high-entropy subdomains to sync-cloud.example, exfiltrating approximately 48 MB of data, far exceeding normal TXT traffic. This indicates data exfiltration via DNS tunneling.\",\n  \"evidence\": [\n    {\n      \"id\": \"E3\",\n      \"observation\": \"PowerShell compressed archive design_docs.zip before DNS burst\",\n      \"relevance\": \"Indicates staging of sensitive data for exfiltration\"\n    },\n    {\n      \"id\": \"E1\",\n      \"observation\": \"220 TXT queries with high-entropy subdomains to sync-cloud.example\",\n      \"relevance\": \"High volume and entropy suggest encoded data in DNS queries, a classic DNS tunneling pattern\"\n    },\n    {\n      \"id\": \"E2\",\n      \"observation\": \"48 MB transferred via TXT while baseline is below 20 KB\",\n      \"relevance\": \"Volume anomaly confirms exfiltration of large data\"\n    }\n  ],\n  \"attack_techniques\": [\n    {\n      \"technique_id\": \"T1560.001\",\n      \"technique_name\": \"Archive Collected Data\",\n      \"procedure\": \"PowerShell compresses files into design_docs.zip\"\n    },\n    {\n      \"technique_id\": \"T1048.003\",\n      \"technique_name\": \"Exfiltration Over Alternative Protocol\",\n      \"procedure\": \"Data encoded in DNS TXT queries to sync-cloud.example\"\n    },\n    {\n      \"technique_id\": \"T1071.004\",\n      \"technique_name\": \"Application Layer Protocol: DNS\",\n      \"procedure\": \"Using DNS TXT for covert data transfer\"\n    }\n  ],\n  \"containment_steps\": [\n    \"Block outbound DNS queries to sync-cloud.example at the firewall and DNS sinkhole the domain.\",\n    \"Isolate ENG-17 from the network to prevent further data leakage.\",\n    \"Terminate the PowerShell process if still running and disable the user account associated with ENG-17 if compromised.\",\n    \"Review DNS logs for other hosts querying sync-cloud.example to identify potential lateral movement or additional affected systems.\",\n    \"Preserve forensic evidence: collect memory dump, process list, network connections, and the design_docs.zip file for investigation.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 5139.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 690,
+          "wall_clock_sec": 5.1396
+        }
+      }
+    },
+    {
+      "idx": 5,
+      "case_id": "SOC-004",
+      "title": "Find the signal in maintenance noise",
+      "task_type": "noisy_logs",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "backup agent heartbeat"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"summary\": \"The svc_backup account was targeted in a brute-force attack from IP 10.24.7.19, which succeeded at 08:14:41. The attacker then used RDP to move laterally to FIN-WS22 at 08:16:09. A backup agent heartbeat at 08:16:12 indicates normal system activity, but the successful logon and RDP session suggest unauthorized access.\",\n  \"evidence\": [\n    \"E1: 42 failed logons for svc_backup from 10.24.7.19 at 08:14:03\",\n    \"E2: successful logon for svc_backup from 10.24.7.19 at 08:14:41\",\n    \"E3: svc_backup opened RDP session to FIN-WS22 at 08:16:09\"\n  ],\n  \"attack_chain\": [\n    {\n      \"tactic\": \"Initial Access\",\n      \"technique\": \"Valid Accounts\",\n      \"id\": \"T1078\",\n      \"detail\": \"The attacker used valid credentials for svc_backup after brute-forcing the password.\"\n    },\n    {\n      \"tactic\": \"Lateral Movement\",\n      \"technique\": \"Remote Desktop Protocol\",\n      \"id\": \"T1021.001\",\n      \"detail\": \"The attacker used RDP from svc_backup to access FIN-WS22.\"\n    }\n  ],\n  \"containment\": {\n    \"immediate\": [\n      \"1. Disable the svc_backup account immediately.\",\n      \"2. Block IP 10.24.7.19 at the firewall and any other network boundaries.\",\n      \"3. Terminate any active RDP sessions from svc_backup, especially to FIN-WS22.\"\n    ],\n    \"short_term\": [\n      \"4. Reset the password for svc_backup and all accounts that share similar credentials.\",\n      \"5. Isolate FIN-WS22 from the network to prevent further lateral movement.\",\n      \"6. Review authentication logs for other successful logons from 10.24.7.19.\"\n    ],\n    \"long_term\": [\n      \"7. Implement account lockout policies and multi-factor authentication for privileged accounts.\",\n      \"8. Enforce least privilege for service accounts and restrict RDP usage.\",\n      \"9. Conduct a full investigation to assess data compromise and impact.\"\n    ]\n  }\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 4759.2,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 604,
+          "wall_clock_sec": 4.7592
+        }
+      }
+    },
+    {
+      "idx": 6,
+      "case_id": "SOC-009",
+      "title": "OAuth consent followed by mailbox collection",
+      "task_type": "attack_chain",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "identity",
+          "ts": "09:02:11",
+          "event": "user approved unverified OAuth app MailSync with Mail.Read scope"
+        },
+        {
+          "id": "E2",
+          "source": "cloud",
+          "ts": "09:04:20",
+          "event": "MailSync read 1840 messages through Graph API from a new ASN"
+        },
+        {
+          "id": "E3",
+          "source": "identity",
+          "ts": "09:05:01",
+          "event": "refresh token used after user password reset"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "exfiltration"
+        ],
+        "attack_techniques": [
+          "T1528",
+          "T1114"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "user approved unverified OAuth app MailSync with Mail.Read scope",
+        "E2": "MailSync read 1840 messages through Graph API from a new ASN",
+        "E3": "refresh token used after user password reset"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"summary\": \"The user approved a malicious OAuth application, which then accessed a large volume of emails via the Graph API. The attacker used a refresh token after a password reset to maintain persistence.\",\n  \"evidence\": [\n    \"E1: Approval of unverified OAuth app 'MailSync' with Mail.Read scope at 09:02:11.\",\n    \"E2: MailSync read 1840 messages via Graph API from a new ASN at 09:04:20.\",\n    \"E3: Refresh token used after user password reset at 09:05:01.\"\n  ],\n  \"attack_mapping\": {\n    \"Initial Access\": \"T1566.002 - Phishing: Spearphishing Link (user tricked into approving OAuth app)\",\n    \"Persistence\": \"T1098.001 - Account Manipulation: Additional Cloud Credentials (OAuth app with refresh token)\",\n    \"Collection\": \"T1114.002 - Email Collection: Remote Email Collection (Graph API read emails)\"\n  },\n  \"containment\": [\n    \"Disable the OAuth application 'MailSync' and revoke its consent.\",\n    \"Revoke all refresh tokens for the affected user and require re-authentication.\",\n    \"Force a password reset and enable MFA for the user.\",\n    \"Audit other OAuth grants and remove any unknown or unverified apps.\",\n    \"Alert the user and review mailbox access logs for further suspicious activity.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 4813.3,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 438,
+          "wall_clock_sec": 4.8133
+        }
+      }
+    },
+    {
+      "idx": 7,
+      "case_id": "SOC-010",
+      "title": "Linux webshell and outbound reverse shell",
+      "task_type": "incident_response",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "web",
+          "ts": "16:44:10",
+          "event": "POST /uploads/cache.php?cmd=id returned 200"
+        },
+        {
+          "id": "E2",
+          "source": "process",
+          "ts": "16:44:12",
+          "event": "www-data spawned sh then nc 198.51.100.7 4444"
+        },
+        {
+          "id": "E3",
+          "source": "file",
+          "ts": "16:44:09",
+          "event": "new executable cache.php in upload directory"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "execution",
+          "persistence"
+        ],
+        "attack_techniques": [
+          "T1505.003",
+          "T1059.004"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "remove_persistence",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr"
+        ]
+      },
+      "evidence_map": {
+        "E1": "POST /uploads/cache.php?cmd=id returned 200",
+        "E2": "www-data spawned sh then nc 198.51.100.7 4444",
+        "E3": "new executable cache.php in upload directory"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"summary\": \"A web upload vulnerability was exploited to upload a PHP backdoor (cache.php) that executed system commands and initiated a reverse shell to an external IP.\",\n  \"evidence\": [\n    \"E1: POST /uploads/cache.php?cmd=id returned 200\",\n    \"E2: www-data spawned sh then nc 198.51.100.7 4444\",\n    \"E3: new executable cache.php in upload directory\"\n  ],\n  \"attack_chain\": {\n    \"initial_access\": \"Exploit public-facing application (upload functionality) [T1190]\",\n    \"execution\": \"Command execution via uploaded PHP script (cache.php) [T1059.006]\",\n    \"persistence\": \"Uploaded web shell allows persistent remote access [T1505.003]\",\n    \"command_and_control\": \"Reverse shell via netcat to external IP [T1071.001]\"\n  },\n  \"containment\": [\n    \"Isolate affected host from network\",\n    \"Remove malicious file /uploads/cache.php\",\n    \"Revoke credentials and investigate any lateral movement\",\n    \"Patch and harden upload functionality (validate file type, disable execution in uploads)\",\n    \"Monitor network for connections to 198.51.100.7:4444 and related C2 traffic\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 3902.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 393,
+          "wall_clock_sec": 3.9029
+        }
+      }
+    },
+    {
+      "idx": 8,
+      "case_id": "SOC-012",
+      "title": "Kerberoasting followed by service-account reuse",
+      "task_type": "attack_chain",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "identity",
+          "ts": "22:10:01",
+          "event": "workstation requested 73 distinct service tickets in two minutes"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "22:31:44",
+          "event": "svc_sql interactive logon from same workstation"
+        },
+        {
+          "id": "E3",
+          "source": "network",
+          "ts": "22:32:10",
+          "event": "svc_sql connected to DB-02 admin share"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1558.003",
+          "T1021.002"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "disable_account",
+          "isolate_host",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "workstation requested 73 distinct service tickets in two minutes",
+        "E2": "svc_sql interactive logon from same workstation",
+        "E3": "svc_sql connected to DB-02 admin share"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"what_happened\": \"The workstation's user account likely was compromised and used to request numerous service tickets (Kerberoasting) to obtain password hashes for offline cracking. The attacker then used the cracked credentials of svc_sql to log on interactively and access an administrative share on DB-02.\",\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"significance\": \"73 service tickets in two minutes indicates abnormal enumeration of SPNs, typical of Kerberoasting.\"\n    },\n    {\n      \"id\": \"E2\",\n      \"significance\": \"Interactive logon with svc_sql from a workstation is anomalous because service accounts typically do not have interactive logon rights.\"\n    },\n    {\n      \"id\": \"E3\",\n      \"significance\": \"Connection to admin share (C$) from a non-admin source suggests lateral movement or data access.\"\n    }\n  ],\n  \"attack_chain\": [\n    {\n      \"technique_id\": \"T1558.003\",\n      \"technique\": \"Kerberoasting\"\n    },\n    {\n      \"technique_id\": \"T1078\",\n      \"technique\": \"Valid Accounts\"\n    },\n    {\n      \"technique_id\": \"T1021.002\",\n      \"technique\": \"SMB/Windows Admin Shares\"\n    }\n  ],\n  \"containment_steps\": [\n    \"Disable the svc_sql account and reset its password immediately.\",\n    \"Isolate the workstation from the network to prevent further malicious activity.\",\n    \"Revoke any active sessions and tokens associated with svc_sql.\",\n    \"Restrict interactive logon rights for service accounts and enforce strong password policies.\",\n    \"Investigate the workstation for other indicators of compromise and perform memory/disk forensics.\",\n    \"Monitor for other accounts requesting service tickets and audit for similar patterns.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 4991.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 545,
+          "wall_clock_sec": 4.9919
+        }
+      }
+    },
+    {
+      "idx": 9,
+      "case_id": "SOC-011",
+      "title": "Signed updater during approved rollout",
+      "task_type": "alert_triage",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "edr",
+          "ts": "18:00:02",
+          "event": "signed vendor updater spawned msiexec"
+        },
+        {
+          "id": "E2",
+          "source": "change",
+          "ts": "17:55:00",
+          "event": "CHG-9012 authorizes vendor update on pilot ring"
+        },
+        {
+          "id": "E3",
+          "source": "hash",
+          "ts": "18:00:05",
+          "event": "binary hash matches vendor release manifest"
+        }
+      ],
+      "gold": {
+        "verdict": "benign",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "close_alert",
+          "document_baseline"
+        ],
+        "forbidden_actions": [
+          "isolate_host",
+          "wipe_host",
+          "disable_account"
+        ]
+      },
+      "evidence_map": {
+        "E1": "signed vendor updater spawned msiexec",
+        "E2": "CHG-9012 authorizes vendor update on pilot ring",
+        "E3": "binary hash matches vendor release manifest"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"summary\": \"A signed vendor updater executed msiexec at 18:00:02 on a pilot-ring machine, following an approved change ticket and matching the vendor's manifest hash, indicating a legitimate software update.\",\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"source\": \"edr\",\n      \"timestamp\": \"18:00:02\",\n      \"event\": \"signed vendor updater spawned msiexec\",\n      \"relevance\": \"Shows the execution of the update process.\"\n    },\n    {\n      \"id\": \"E2\",\n      \"source\": \"change\",\n      \"timestamp\": \"17:55:00\",\n      \"event\": \"CHG-9012 authorizes vendor update on pilot ring\",\n      \"relevance\": \"Confirms the update was pre-approved and scoped to the pilot ring.\"\n    },\n    {\n      \"id\": \"E3\",\n      \"source\": \"hash\",\n      \"timestamp\": \"18:00:05\",\n      \"event\": \"binary hash matches vendor release manifest\",\n      \"relevance\": \"Validates the integrity of the executed binary.\"\n    }\n  ],\n  \"att&ck\": [\n    {\n      \"technique_id\": \"T1072\",\n      \"technique_name\": \"Software Deployment Tools\",\n      \"tactic\": \"Execution\",\n      \"mapping_justification\": \"The vendor updater is a legitimate software deployment tool used to install updates.\"\n    },\n    {\n      \"technique_id\": \"T1218\",\n      \"technique_name\": \"System Binary Proxy Execution\",\n      \"tactic\": \"Defense Evasion\",\n      \"mapping_justification\": \"msiexec is a system binary commonly abused but here used legitimately to run the update.\"\n    }\n  ],\n  \"containment\": [\n    \"Verify the update is in the approved change scope (CHG-9012) and the host is in the pilot ring.\",\n    \"Confirm the msiexec process arguments correspond to the vendor's update package path and parameters.\",\n    \"Check the vendor's release notes or change ticket for expected post-update behavior or known side effects.\",\n    \"Review EDR logs for any subsequent suspicious child processes or network connections from the msiexec process.\",\n    \"If no anomalies are found, allow the update to complete and monitor for stability or errors.\",\n    \"If suspicious activity is detected, isolate the host and revoke the updater's signing certificate from the trust store after consulting the vendor.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 1.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 1.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 6137.3,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 655,
+          "wall_clock_sec": 6.1373
+        }
+      }
+    },
+    {
+      "idx": 10,
+      "case_id": "SOC-003",
+      "title": "PowerShell persistence after document execution",
+      "task_type": "incident_response",
+      "difficulty": "hard",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "edr",
+          "ts": "13:20:02",
+          "event": "WINWORD spawned powershell.exe with encoded command"
+        },
+        {
+          "id": "E2",
+          "source": "registry",
+          "ts": "13:20:15",
+          "event": "new HKCU Run value UpdateCheck points to powershell payload"
+        },
+        {
+          "id": "E3",
+          "source": "network",
+          "ts": "13:20:19",
+          "event": "powershell contacted newly registered domain cdn-check.example"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "execution",
+          "persistence"
+        ],
+        "attack_techniques": [
+          "T1059.001",
+          "T1547.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "remove_persistence",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "WINWORD spawned powershell.exe with encoded command",
+        "E2": "new HKCU Run value UpdateCheck points to powershell payload",
+        "E3": "powershell contacted newly registered domain cdn-check.example"
+      },
+      "prediction": {
+        "verdict": "unknown",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"summary\": \"An initial compromise was executed via a macro-enabled Word document that spawned a PowerShell process with an encoded command, establishing persistence through a registry Run key, and beaconing to a newly registered domain for command-and-control.\",\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"source\": \"EDR\",\n      \"timestamp\": \"13:20:02\",\n      \"observation\": \"WINWORD.exe spawned PowerShell.exe with an encoded command. This indicates a macro or embedded object executed a PowerShell payload.\"\n    },\n    {\n      \"id\": \"E2\",\n      \"source\": \"Registry\",\n      \"timestamp\": \"13:20:15\",\n      \"observation\": \"A new HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run value named 'UpdateCheck' was added, pointing to a PowerShell payload. This ensures persistence for the malicious payload.\"\n    },\n    {\n      \"id\": \"E3\",\n      \"source\": \"Network\",\n      \"timestamp\": \"13:20:19\",\n      \"observation\": \"PowerShell process established a connection to the newly registered domain 'cdn-check.example', indicating command-and-control (C2) communication.\"\n    }\n  ],\n  \"attack_chain\": {\n    \"initial_access\": \"T1566.001 Spearphishing Attachment (macro-enabled Word document)\",\n    \"execution\": \"T1059.001 PowerShell (encoded command from WINWORD)\",\n    \"persistence\": \"T1547.001 Registry Run Keys / Startup Folder (HKCU Run value UpdateCheck)\",\n    \"command_and_control\": \"T1071.001 Application Layer Protocol: Web Protocols (HTTP/HTTPS to cdn-check.example)\",\n    \"defense_evasion\": \"T1027.001 Encrypted/Encoded File or Command (encoded PowerShell)\"\n  },\n  \"containment\": [\n    \"1. Isolate the affected host from the network immediately.\",\n    \"2. Terminate the malicious PowerShell process and remove the registry Run key 'UpdateCheck'.\",\n    \"3. Delete the macro-enabled Word document and any dropped payloads from the host.\",\n    \"4. Block the domain 'cdn-check.example' at the firewall/proxy.\",\n    \"5. Collect a full memory image and disk forensic artifacts for further analysis.\",\n    \"6. Reset credentials of any accounts used on the host.\",\n    \"7. Scan the network for other hosts communicating with the same domain.\"\n  ]\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 0.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.2857
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 7302.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 670,
+          "wall_clock_sec": 7.3026
+        }
+      }
+    },
+    {
+      "idx": 11,
+      "case_id": "SOC-005",
+      "title": "Reconstruct cross-host movement",
+      "task_type": "attack_chain",
+      "difficulty": "medium",
+      "prompt": "Determine what happened, cite evidence, map ATT&CK, and propose safe containment.",
+      "telemetry": [
+        {
+          "id": "E1",
+          "source": "auth",
+          "ts": "08:14:03",
+          "event": "42 failed logons for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E2",
+          "source": "auth",
+          "ts": "08:14:41",
+          "event": "successful logon for svc_backup from 10.24.7.19"
+        },
+        {
+          "id": "E3",
+          "source": "edr",
+          "ts": "08:16:09",
+          "event": "svc_backup opened RDP session to FIN-WS22"
+        },
+        {
+          "id": "N1",
+          "source": "system",
+          "ts": "08:16:12",
+          "event": "scheduled inventory completed"
+        }
+      ],
+      "gold": {
+        "verdict": "malicious",
+        "incident_labels": [
+          "credential_access",
+          "lateral_movement"
+        ],
+        "attack_techniques": [
+          "T1110",
+          "T1021.001"
+        ],
+        "evidence_ids": [
+          "E1",
+          "E2",
+          "E3"
+        ],
+        "required_actions": [
+          "isolate_host",
+          "disable_account",
+          "preserve_evidence"
+        ],
+        "forbidden_actions": [
+          "wipe_host",
+          "disable_edr",
+          "block_public_dns"
+        ]
+      },
+      "evidence_map": {
+        "E1": "password spraying",
+        "E2": "account compromise",
+        "E3": "remote-services lateral movement"
+      },
+      "prediction": {
+        "verdict": "malicious",
+        "incident_labels": [],
+        "attack_techniques": [],
+        "evidence_ids": [],
+        "response_actions": [],
+        "claims": [],
+        "confidence": 0.0,
+        "tool_trace": []
+      },
+      "raw": "{\n  \"verdict\": \"malicious\",\n  \"summary\": \"An attacker likely brute-forced the svc_backup account from 10.24.7.19, successfully logged in, used RDP to move laterally to FIN-WS22, and may have leveraged the compromised account for further actions.\",\n  \"evidence\": [\n    {\n      \"id\": \"E1\",\n      \"detail\": \"42 failed logons for svc_backup from 10.24.7.19 indicates a password brute-force attack.\"\n    },\n    {\n      \"id\": \"E2\",\n      \"detail\": \"Successful logon after the failures confirms account compromise.\"\n    },\n    {\n      \"id\": \"E3\",\n      \"detail\": \"Opening an RDP session from the compromised account to FIN-WS22 shows lateral movement.\"\n    }\n  ],\n  \"attack_chain\": [\n    {\n      \"stage\": \"Initial Access\",\n      \"technique\": \"Valid Accounts\",\n      \"id\": \"T1078\",\n      \"evidence\": \"E2 (successful logon using valid credentials)\"\n    },\n    {\n      \"stage\": \"Lateral Movement\",\n      \"technique\": \"Remote Services\",\n      \"id\": \"T1021\",\n      \"evidence\": \"E3 (RDP session)\"\n    }\n  ],\n  \"containment\": {\n    \"immediate\": [\n      \"Disable svc_backup account and reset its password.\",\n      \"Block IP 10.24.7.19 at the firewall and EDR.\",\n      \"Terminate RDP session from svc_backup to FIN-WS22.\"\n    ],\n    \"medium_term\": [\n      \"Isolate FIN-WS22 from network and scan for persistence.\",\n      \"Review logs for other activity from the compromised account.\",\n      \"Implement account lockout policies and enforce MFA for service accounts.\"\n    ],\n    \"long_term\": [\n      \"Conduct a full incident response to identify root cause and scope.\",\n      \"Hunt for signs of credential dumping and other lateral movement.\",\n      \"Review and restrict service account privileges.\"\n    ]\n  }\n}",
+      "parse_ok": true,
+      "parse_error": null,
+      "llm_error": false,
+      "error": null,
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "metrics": {
+        "verdict_accuracy": 1.0,
+        "detection_precision": 0.0,
+        "detection_recall": 0.0,
+        "detection_f1": 0.0,
+        "attack_precision": 0.0,
+        "attack_recall": 0.0,
+        "attack_f1": 0.0,
+        "evidence_grounding": 0.0,
+        "unsupported_claim_rate": 0.0,
+        "response_completeness": 0.0,
+        "unsafe_action_rate": 0.0,
+        "tool_call_validity": 0.0,
+        "useful_action_ratio": 0.0,
+        "task_success": 0.4286
+      },
+      "failure_tags": [
+        "missing_evidence",
+        "attack_mapping"
+      ],
+      "latency_ms": 7475.1,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 569,
+          "wall_clock_sec": 7.4751
+        }
+      }
+    }
+  ],
+  "llm_errors": 0,
+  "status": "done",
+  "error": null,
+  "methodology_status": "engineering_only",
+  "trace_source": "runtime",
+  "benchmark_provenance": {
+    "name": "CyberOrion SOC contract set v2",
+    "origin": "internal",
+    "dataset_version": "v2-12-independent-cases",
+    "sample_scope": "full",
+    "sample_manifest": [
+      "SOC-008",
+      "SOC-006",
+      "SOC-001",
+      "SOC-007",
+      "SOC-002",
+      "SOC-004",
+      "SOC-009",
+      "SOC-010",
+      "SOC-012",
+      "SOC-011",
+      "SOC-003",
+      "SOC-005"
+    ],
+    "comparable_to_upstream": false
+  },
+  "methodology": {
+    "task_family": "open_response_soc_runtime_loop",
+    "case_count": 12,
+    "public_recognition": false,
+    "leaderboard_comparable": false,
+    "arm_budget": {
+      "max_llm_calls": 18,
+      "max_tool_calls": 12,
+      "max_steps": 18,
+      "wall_clock_sec": 300,
+      "token_budget": 32768
+    }
+  },
+  "path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260824_054201_soc_contract_compare_n12_base.json",
+  "sample_manifest_path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260824_054201_soc_contract_compare_n12_base.sample.json"
+}

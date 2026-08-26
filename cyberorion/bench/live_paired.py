@@ -22,6 +22,12 @@ SUITE_DESC = "Internal paired live Docker arena protocol"
 MODES = ("paired",)
 METHODOLOGY_STATUS = "engineering_only"
 ARMS = ("base", "single", "agent")
+DECOMPOSED_METRICS = (
+    "detection", "attribution_correctness", "containment_success", "mttd_sec",
+    "time_to_containment_sec", "compromise_count", "blast_radius", "false_positives",
+    "unsafe_actions", "availability_penalty", "llm_calls", "tool_calls", "tokens",
+    "wall_clock_sec",
+)
 
 
 class LiveBenchmarkUnavailable(RuntimeError):
@@ -99,6 +105,14 @@ async def run_bench(n: int = 3, mode: str = "paired", seed: int = 42,
             if result.get("initial_snapshot_sha256") != snapshot_hash:
                 raise LiveBenchmarkUnavailable(
                     f"initial snapshot mismatch for arm={arm}, seed={trial_seed}")
+            metrics = result.get("metrics")
+            if not isinstance(metrics, dict):
+                raise LiveBenchmarkUnavailable(
+                    f"trial must persist decomposed metrics for arm={arm}, seed={trial_seed}")
+            missing_metrics = [name for name in DECOMPOSED_METRICS if name not in metrics]
+            if missing_metrics:
+                raise LiveBenchmarkUnavailable(
+                    f"trial missing decomposed metrics {missing_metrics} for arm={arm}, seed={trial_seed}")
             rows.append({"seed": trial_seed, "arm": arm,
                          "attack_sequence_sha256": plan_hash,
                          "initial_snapshot_sha256": snapshot_hash, **result})
@@ -114,6 +128,13 @@ async def run_bench(n: int = 3, mode: str = "paired", seed: int = 42,
             "n": len(values),
             "mean_score": round(statistics.fmean(values), 4) if values else None,
             "confidence_interval": bootstrap_ci(values, seed + ARMS.index(arm)),
+            "decomposed_metrics": {
+                name: (round(statistics.fmean(float(row["metrics"][name]) for row in arm_rows
+                                              if isinstance(row["metrics"].get(name), (int, float))), 4)
+                       if any(isinstance(row["metrics"].get(name), (int, float))
+                              for row in arm_rows) else None)
+                for name in DECOMPOSED_METRICS
+            },
         }
     paired_deltas = [
         float(next(r for r in rows if r["seed"] == item and r["arm"] == "agent")["score"])

@@ -1,0 +1,301 @@
+{
+  "schema_version": 3,
+  "run_id": "20260825_231656_excytin_compare_n8",
+  "suite": "excytin",
+  "mode": "compare",
+  "arm": null,
+  "profile": "daily",
+  "n": 8,
+  "seed": 42,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787725016.7507403,
+  "finished_at": 1787725122.1460154,
+  "elapsed_sec": 105.4,
+  "scores": {
+    "n": 8,
+    "official_reward": null,
+    "native_reward": 0.0,
+    "answer_accuracy": 0.0,
+    "correct_mc_pct": 0.0,
+    "avg_score": 0.0,
+    "parse_fail": 1,
+    "llm_errors": 0,
+    "avg_tool_calls": 2.5,
+    "avg_sql_queries": 0.875,
+    "avg_evidence_items": 0.0,
+    "query_cost": 7,
+    "evidence_cost": 0,
+    "by_difficulty": {},
+    "by_topic": {},
+    "confidence_intervals": {
+      "native_reward": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "results": [],
+  "status": "done",
+  "llm_errors": 0,
+  "error": null,
+  "methodology_status": "external_track",
+  "benchmark_provenance": {
+    "name": "ExCyTIn via ACESEvals",
+    "upstream_url": "https://github.com/microsoft/ACESEvals",
+    "dataset_version": "legacy_test_set-589",
+    "dataset_files": [
+      {
+        "name": "databases.compose.yml",
+        "sha256": "ef130e298041733c7a74e93c779b288c2cb1d171efd2e924bf6dacd4bd471348",
+        "hash_status": "computed",
+        "bytes": 2128
+      },
+      {
+        "name": "sandbox.compose.yml",
+        "sha256": "81665c817bd4cc48f100f3baf29bdedb87a961c20469d802a14f648662275e8d",
+        "hash_status": "computed",
+        "bytes": 1195
+      },
+      {
+        "name": "eval.yaml",
+        "sha256": "ad765adc34b8c774d40711f8079059a7d14a5d77c02cf74149935ca13540b84f",
+        "hash_status": "computed",
+        "bytes": 820
+      },
+      {
+        "name": "cti_realm_25.yaml",
+        "sha256": "93d929e9de371f48e33fdb967abedada623ddb6a51e688ce82c38751d251c8f0",
+        "hash_status": "computed",
+        "bytes": 68796
+      },
+      {
+        "name": "shared.yaml",
+        "sha256": "f09399be4ce1b883d0efdff77247a1fa4430254d80822de02a9addde21621b66",
+        "hash_status": "computed",
+        "bytes": 599
+      },
+      {
+        "name": "cti_realm_50.yaml",
+        "sha256": "5107d2b5f9f5374c228a689c5a11c2cabe81dbfae2101173b2fe25f91eae28d2",
+        "hash_status": "computed",
+        "bytes": 136433
+      },
+      {
+        "name": "shared.yaml",
+        "sha256": "6dc0b64b7e77176556d7751f26272e9aba29fdbe34a440255783b940f94b0d1b",
+        "hash_status": "computed",
+        "bytes": 598
+      },
+      {
+        "name": "global.yaml",
+        "sha256": "58eb6e83cc290437b523e8e4b4e830d1956b9b12d5eb83b0ef5f8c6a4e7422bb",
+        "hash_status": "computed",
+        "bytes": 716
+      },
+      {
+        "name": "labyrinth_linguist_sandbox.compose.yml",
+        "sha256": "06926473c1557bab92fea4b0d949e0700fb959331793fc9e18a62608e3f3e80e",
+        "hash_status": "computed",
+        "bytes": 1182
+      },
+      {
+        "name": "sandbox.compose.yml",
+        "sha256": "cff51bdcc1776e9e5f040cfec95a7deacab9fd5c53e60e360cebc53f78b50e13",
+        "hash_status": "computed",
+        "bytes": 699
+      },
+      {
+        "name": "compose.yaml",
+        "sha256": "d725720c492072a9aff1b1d4bb502f9586edbea3a906ce1fb4a54f7f27e93ff9",
+        "hash_status": "computed",
+        "bytes": 817
+      },
+      {
+        "name": "domain.yaml",
+        "sha256": "60aeb3b9efcb606632946c7dee0faae7bb46ed9f2b0f561ea2c3736bd198bbc8",
+        "hash_status": "computed",
+        "bytes": 1704
+      },
+      {
+        "name": "eval.yaml",
+        "sha256": "91ad45985a4256c08af447a8d9013fb7cbc3bffa04cc0d4a0b5ca09597db60e3",
+        "hash_status": "computed",
+        "bytes": 635
+      },
+      {
+        "name": "global.yaml",
+        "sha256": "8a86b8e41abd3e7ae2d880850d88cb94ed3905a945908016a44c21f5561d27e6",
+        "hash_status": "computed",
+        "bytes": 70
+      },
+      {
+        "name": "labyrinth_linguist_task.yaml",
+        "sha256": "be935202d520085de807951dcf777f0730a8d2e71c9d6d8df75f065007cec327",
+        "hash_status": "computed",
+        "bytes": 4036
+      },
+      {
+        "name": "all_incidents.compose.yml",
+        "sha256": "1c1020aacf12c00d1398f48ab7f6432cd859927db4b9ae296923c6472287fbc5",
+        "hash_status": "computed",
+        "bytes": 8089
+      },
+      {
+        "name": "all_incidents_insane.compose.yml",
+        "sha256": "403a5c3eb192fd2c26d10e6498c17b68bcf65e11480d0c5691ccbe8b6cee281e",
+        "hash_status": "computed",
+        "bytes": 8577
+      },
+      {
+        "name": "sandbox.compose.yml",
+        "sha256": "597bbe6ab8331c85de41285817bc18670069bc8ad4e16bc7bfca1cee2ea4cbfa",
+        "hash_status": "computed",
+        "bytes": 965
+      },
+      {
+        "name": "Dockerfile.db",
+        "sha256": "fb0df5d529e2d7c7ec7efd7100a9fb852cb73e60365f845082ceb79c016c58a4",
+        "hash_status": "computed",
+        "bytes": 331
+      },
+      {
+        "name": "eval.yaml",
+        "sha256": "09941a0e0e10c0b7b630f35d5e4c7482419d92984975009380c3c70bd5e47a11",
+        "hash_status": "computed",
+        "bytes": 1299
+      }
+    ],
+    "protocol": "ACESEvals YAML task schema; CyberOrion read-only SQLite adapter exact-match scorer",
+    "comparable_to_upstream": false,
+    "sample_scope": "subset",
+    "upstream_n": 3040,
+    "selected_n": 8,
+    "sample_manifest": [
+      "incident_134_legacy_test_set_task_2",
+      "incident_166_legacy_test_set_task_51",
+      "incident_322_legacy_train_set_task_21",
+      "incident_34_latest_test_set_task_65",
+      "incident_38_latest_train_set_task_4",
+      "incident_39_latest_train_set_task_63",
+      "incident_5_legacy_test_set_task_85",
+      "incident_55_latest_test_set_task_65"
+    ],
+    "sample_manifest_sha256": "5862e5c19e2b371775e9729936a88c54a6bc02be6dc3198ee2d5c3383c286a2f",
+    "selection": "seeded_stratified",
+    "size_policy": {
+      "single_asset_max_bytes": 1073741824,
+      "total_cache_max_bytes": 5368709120
+    }
+  },
+  "comparison": {
+    "arms": [
+      {
+        "run_id": "20260825_231656_excytin_compare_n8_base",
+        "mode": "base",
+        "scores": {
+          "n": 8,
+          "official_reward": null,
+          "native_reward": 0.0,
+          "answer_accuracy": 0.0,
+          "correct_mc_pct": 0.0,
+          "avg_score": 0.0,
+          "parse_fail": 0,
+          "llm_errors": 0,
+          "avg_tool_calls": 0.0,
+          "avg_sql_queries": 0.0,
+          "avg_evidence_items": 0.0,
+          "query_cost": 0,
+          "evidence_cost": 0,
+          "by_difficulty": {},
+          "by_topic": {},
+          "confidence_intervals": {
+            "native_reward": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      {
+        "run_id": "20260825_231656_excytin_compare_n8_single",
+        "mode": "single",
+        "scores": {
+          "n": 8,
+          "official_reward": null,
+          "native_reward": 0.0,
+          "answer_accuracy": 0.0,
+          "correct_mc_pct": 0.0,
+          "avg_score": 0.0,
+          "parse_fail": 5,
+          "llm_errors": 0,
+          "avg_tool_calls": 9.0,
+          "avg_sql_queries": 3.0,
+          "avg_evidence_items": 0.0,
+          "query_cost": 24,
+          "evidence_cost": 0,
+          "by_difficulty": {},
+          "by_topic": {},
+          "confidence_intervals": {
+            "native_reward": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      {
+        "run_id": "20260825_231656_excytin_compare_n8_agent",
+        "mode": "agent",
+        "scores": {
+          "n": 8,
+          "official_reward": null,
+          "native_reward": 0.0,
+          "answer_accuracy": 0.0,
+          "correct_mc_pct": 0.0,
+          "avg_score": 0.0,
+          "parse_fail": 1,
+          "llm_errors": 0,
+          "avg_tool_calls": 2.5,
+          "avg_sql_queries": 0.875,
+          "avg_evidence_items": 0.0,
+          "query_cost": 7,
+          "evidence_cost": 0,
+          "by_difficulty": {},
+          "by_topic": {},
+          "confidence_intervals": {
+            "native_reward": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      }
+    ],
+    "primary_metric": "avg_score",
+    "publication_valid": true,
+    "validation": {
+      "required_arms": true,
+      "dataset_version_identical": true,
+      "dataset_hash_identical": true,
+      "sample_ids_identical": true,
+      "model_identical": true,
+      "seed_identical": true,
+      "single_agent_budgets_identical": true
+    },
+    "invalid_reasons": [],
+    "agent_minus_reference": 0.0,
+    "paired_n": 8,
+    "paired_delta_ci": [
+      0.0,
+      0.0
+    ],
+    "wins": 0,
+    "ties": 8,
+    "losses": 0,
+    "shared": {
+      "n": 8,
+      "seed": 42,
+      "model": "deepseek-v4-flash"
+    }
+  }
+}

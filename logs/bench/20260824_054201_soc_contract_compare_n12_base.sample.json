@@ -1,0 +1,21 @@
+{
+  "run_id": "20260824_054201_soc_contract_compare_n12_base",
+  "suite": "soc_contract",
+  "seed": 20260824,
+  "selection": null,
+  "sample_ids": [
+    "SOC-008",
+    "SOC-006",
+    "SOC-001",
+    "SOC-007",
+    "SOC-002",
+    "SOC-004",
+    "SOC-009",
+    "SOC-010",
+    "SOC-012",
+    "SOC-011",
+    "SOC-003",
+    "SOC-005"
+  ],
+  "sha256": null
+}

@@ -343,8 +343,25 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         "benchmark_provenance": {
             "name": "CyberOrion ATT&CK KB retrieval smoke test",
             "origin": "internal_kb_derived", "comparable_to_upstream": False,
+            "dataset_version": "attack-kb-generated-mcq-v1",
+            "sample_manifest": [row["idx"] for row in results],
+        },
+        "methodology": {
+            "arm_budget": {"max_llm_calls_per_task": 1,
+                           "max_output_tokens_per_call": 4096,
+                           "max_tool_calls_per_task": 0},
+            "score_label": "internal engineering exact-match/Jaccard",
         },
     }
+
+    from .assets import sha256_file
+    from .external_common import git_commit_sha, model_metadata
+    kb_source = Path(__file__).resolve().parents[1] / "kb" / "data" / "attack_kb.jsonl"
+    run["benchmark_provenance"]["dataset_file"] = str(kb_source)
+    run["benchmark_provenance"]["dataset_sha256"] = (
+        sha256_file(kb_source) if kb_source.is_file() else None)
+    run["git_commit_sha"] = git_commit_sha()
+    run["model_settings"] = model_metadata(run.get("model"))
 
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)

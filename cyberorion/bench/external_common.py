@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import random
 import statistics
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,32 @@ class MeteredLLM:
         if self.estimated_tokens > int(self.limits["token_budget"]):
             raise LLMBudgetExceeded("estimated token budget exhausted after response")
         return result
+
+
+def git_commit_sha() -> str | None:
+    """返回当前代码提交；无法确认时返回 None，绝不伪造版本。"""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True,
+            text=True, timeout=5,
+        ).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def model_metadata(model: str | None = None) -> dict:
+    """持久化非敏感模型设置；不记录 API key 或完整私有端点。"""
+    configured = os.getenv("CAI_MODEL") or model or _model_name()
+    provider, sep, name = str(configured).partition("/")
+    return {
+        "provider": provider if sep else None,
+        "model": name if sep else str(configured),
+        "configured_model": str(configured),
+        "thinking": os.getenv("CO_BENCH_THINKING"),
+        "max_output_tokens": int(os.getenv("CO_BENCH_MAX_TOKENS", "4096")),
+        "temperature": None,
+        "usage_accounting": "provider_or_estimated_per_task",
+    }
 
 
 def read_records(paths: list[Path]) -> list[dict[str, Any]]:
@@ -220,6 +248,8 @@ def persist_run(run: dict, log_dir: str | Path = DEFAULT_LOG_DIR) -> dict:
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{run['run_id']}.json"
+    run.setdefault("git_commit_sha", git_commit_sha())
+    run.setdefault("model_settings", model_metadata(run.get("model")))
     run["path"] = str(path)
     provenance_data = run.get("benchmark_provenance") or {}
     sample_ids = provenance_data.get("sample_manifest")
@@ -246,4 +276,5 @@ __all__ = [
     "stratified_sample", "apply_size_policy", "bootstrap_ci",
     "FAIR_ARM_BUDGET", "resource_usage", "resolve_representative_files",
     "LLMBudgetExceeded", "MeteredLLM",
+    "git_commit_sha", "model_metadata",
 ]

@@ -1,0 +1,10 @@
+{
+  "run_id": "20260824_075650_excytin_base_n1",
+  "suite": "excytin",
+  "seed": 20260824,
+  "selection": "seeded_stratified",
+  "sample_ids": [
+    "incident_134_latest_test_set_task_41"
+  ],
+  "sha256": "f70689d673c220b302c49d5003269b42ede66864d16411bc1d8828f5815322e9"
+}

@@ -1,0 +1,25 @@
+{
+  "run_id": "20260824_070751_secalertbench_base_n16",
+  "suite": "secalertbench",
+  "seed": 20260824,
+  "selection": "seeded_stratified",
+  "sample_ids": [
+    "sha256:0d1d0c354cefea92aceb",
+    "sha256:4fb4d790b88312e01117",
+    "sha256:405479137e758bebcbd7",
+    "sha256:3e62a40f575eb00769bf",
+    "sha256:8483ac41c9a69a7fa91f",
+    "sha256:e3e0d91384496d38d9d6",
+    "sha256:f3b71771dd7453d69b1f",
+    "sha256:2379ae51a618dcad1f7e",
+    "sha256:909c194e9cea84731583",
+    "sha256:3e635b22fa3fc1669f2f",
+    "sha256:0cdb76575e8b6310dbf7",
+    "sha256:cb820a8f32741ccec8ea",
+    "sha256:7a825cf8483adec276ca",
+    "sha256:7297ba42f896f42f3368",
+    "sha256:0f3e1ff6525fe2b9431a",
+    "sha256:72aea2329b99ba33c799"
+  ],
+  "sha256": "b16f477642c6b8dbdd26042f32f300576537e06a21d2c5e16b3e7374aec64c5b"
+}

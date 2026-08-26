@@ -110,3 +110,62 @@ GET  /api/bench/questions    固定 seed 的题目/任务预览
 正式发布前执行 `~/cai_env/bin/python -m pytest tests/ -q` 和
 `cd web && npm run build`。外部套件的引用及许可证以运行产物中的
 `benchmark_provenance` 和上游仓库为准。
+
+## 6. 论文/演示结果导出
+
+发布图表不读取 Markdown 报告，也不触碰 benchmark 资产、网络、Docker 或
+LLM。先从 `logs/bench/*.json` 生成归一化事实层，再从该层绘图：
+
+```bash
+~/cai_env/bin/python scripts/export_benchmark_results.py
+~/cai_env/bin/python scripts/plot_benchmarks.py
+```
+
+输出为 `results/manifest.json`、`benchmark_summary.{json,csv}`、
+`per_task/*.jsonl` 和 `figures/figure{1..6}_*.png`。manifest 记录导出代码 SHA
+和每个生成文件的 SHA256。旧 raw run 未持久化的 git SHA、模型设置、资源消耗
+等字段保持 `null` 并进入 `completeness.missing_fields`，不会用当前环境猜测回填。
+
+三臂 compare 只有同时满足以下条件才写 publication paired delta：dataset version
+与 hash 相同、sample IDs 完全同序、模型相同、seed 相同、single/agent 公平预算
+完全相等。否则 `publication_valid=false`，paired delta/CI/W-T-L 全部为 null。
+配对 bootstrap 固定 seed；SecAlertBench 每次重采样后重新计算 macro-F1，其余支持
+逐任务原生 reward 的套件计算逐任务差值。
+
+## 7. 当前实验矩阵与安全门
+
+```bash
+# SecAlertBench：先 smoke，通过后才运行 final
+~/cai_env/bin/python scripts/run_bench.py --suite secalertbench --mode compare --n 30 --seed 42
+~/cai_env/bin/python scripts/run_bench.py --suite secalertbench --mode compare --n 600 --seed 42
+
+# ExCyTIn adapter/native exact-match（非官方）；官方 Inspect 不可用时保持 external_track
+~/cai_env/bin/python scripts/run_bench.py --suite excytin --mode compare --n 8 --seed 42
+~/cai_env/bin/python scripts/run_bench.py --suite excytin --mode compare --n 64 --seed 42
+
+# CAGE-2：LLM/工具预算按 episode 全局共享；不自动运行 270/900
+~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 9 --seed 42
+~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 45 --seed 42
+~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 90 --seed 42
+```
+
+SecAlertBench 代表集使用 `label × alert_type × enterprise` 固定种子轮询分层，
+源数据或选中集缺任一 attack/benign 类即 fail closed；run 同时保存 class counts
+和精确 selected IDs。ExCyTIn run 保存 `official_harness_status` 和
+`score_methodology_label`；当前 CyberOrion SQLite adapter 的 `native_reward` 是
+非官方 exact-match，`official_reward` 保持 null。
+
+Live paired 只允许显式本地 runner 和注入的审计 harness：
+
+```bash
+~/cai_env/bin/python scripts/run_live_bench.py \
+  --local-only-confirmed \
+  --harness-factory your_package:build_audited_harness \
+  --attack-plan benchmarks/live/plans/credential_lateral_movement.json \
+  --attack-plan-sha256 <人工核验的SHA256> \
+  --seeds 42,43,44,45,46,47,48,49,50,51
+```
+
+runner 不包含通用 Docker reset；环境必须返回 `ok=true, isolated=true`，每臂 reset
+必须复现相同 snapshot SHA，trial 必须回报相同 attack-plan SHA，并持久化检测、归因、
+遏制、MTTD、处置时间、失陷/爆炸半径、误报、不安全动作、可用性与资源分解指标。

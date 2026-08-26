@@ -102,7 +102,7 @@ def test_secalertbench_accepts_explicit_runtime_text_verdict() -> None:
     verdict, confidence = secalertbench._parse_verdict(
         "Investigation complete. verdict: attack; confidence high.")
     assert verdict == "attack"
-    assert confidence == 0.0
+    assert confidence == 0.5  # 未给可解析概率时保持中性，不伪造确定性。
 
 
 def test_compare_parent_keeps_three_arms_under_one_run(tmp_path: Path,
@@ -111,6 +111,7 @@ def test_compare_parent_keeps_three_arms_under_one_run(tmp_path: Path,
     data_dir.mkdir()
     (data_dir / "alerts.json").write_text(json.dumps([
         {"id": "a1", "alert": "malware", "label": "Attack", "alert_type": "edr"},
+        {"id": "a2", "alert": "backup", "label": "Non-Attack", "alert_type": "backup"},
     ]), encoding="utf-8")
     monkeypatch.setenv("CYBERORION_SECALERTBENCH_DIR", str(data_dir))
 
@@ -118,7 +119,7 @@ def test_compare_parent_keeps_three_arms_under_one_run(tmp_path: Path,
         return json.dumps({"verdict": "attack", "confidence": 1.0})
 
     run = asyncio.run(cybersoceval.run_bench(
-        n=1, mode="compare", suite="secalertbench", llm=llm,
+        n=2, mode="compare", suite="secalertbench", llm=llm,
         log_dir=tmp_path / "logs", run_id="parent"))
     assert [a["mode"] for a in run["comparison"]["arms"]] == [
         "base", "single", "agent"]
@@ -214,7 +215,16 @@ def test_live_paired_requires_verified_same_plan_and_snapshot(tmp_path: Path) ->
         def run_trial(self, *, arm, attack_plan, seed, snapshot, budget):
             return {"status": "done", "score": {"base": .2, "single": .4, "agent": .7}[arm],
                     "attack_sequence_sha256": plan_hash,
-                    "initial_snapshot_sha256": snapshot["sha256"], "budget": budget}
+                    "initial_snapshot_sha256": snapshot["sha256"], "budget": budget,
+                    "metrics": {
+                        "detection": 1.0, "attribution_correctness": 1.0,
+                        "containment_success": 1.0, "mttd_sec": 1.0,
+                        "time_to_containment_sec": 2.0, "compromise_count": 0,
+                        "blast_radius": 0, "false_positives": 0,
+                        "unsafe_actions": 0, "availability_penalty": 0.0,
+                        "llm_calls": 1, "tool_calls": 1, "tokens": 10,
+                        "wall_clock_sec": 1.0,
+                    }}
 
     run = asyncio.run(live_paired.run_bench(
         n=2, harness=Harness(), attack_plan_path=plan_path, log_dir=tmp_path / "logs"))

@@ -5,6 +5,6 @@ CybORG 可用时才会进入基准流程。未安装时返回带安装提示的 
 绝不抛 ImportError。
 """
 
-from .cyborg_adapter import run_cage2
+from .cyborg_adapter import run_cage2, run_cage2_async
 
-__all__ = ["run_cage2"]
+__all__ = ["run_cage2", "run_cage2_async"]

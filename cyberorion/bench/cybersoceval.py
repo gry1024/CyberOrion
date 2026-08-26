@@ -918,12 +918,18 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                 if on_progress:
                     on_progress(_offset * total + done,
                                 len(arm_modes) * total, errors)
-            arms.append(await run_bench(
+            arm_run = await run_bench(
                 n=n, mode=arm_mode, seed=seed, questions_path=questions_path,
                 log_dir=log_dir, concurrency=concurrency, llm=llm, kb=kb,
                 on_progress=arm_progress, run_id=f"{parent_id}_{arm_mode}",
                 sc_k=sc_k, sc_temperature=sc_temperature, suite=suite,
-                profile=profile, dataset_version=dataset_version))
+                profile=profile, dataset_version=dataset_version)
+            arms.append(arm_run)
+            # 端点/配额全失败时不继续烧后续臂；父 run 仍持久化并明确
+            # publication_valid=false，不能把错误输出当成零分比较。
+            if (arm_run.get("status") == "error"
+                    and int(arm_run.get("llm_errors") or 0) >= int(arm_run.get("n") or 0)):
+                break
         primary = arms[-1].get("scores") or {}
         arm_scores = {arm["mode"]: arm.get("scores") for arm in arms}
         single_score = (arm_scores.get("single") or arm_scores.get("base") or {}).get(
@@ -944,9 +950,13 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         reference = (next((a for a in arms if a["mode"] == "single"), None)
                      or next((a for a in arms if a["mode"] == "base"), arms[0]))
         agent_arm = next((a for a in arms if a["mode"] in ("agent", "rag")), arms[-1])
-        paired = [row_score(a) - row_score(b) for b, a in zip(
-            reference.get("results") or [], agent_arm.get("results") or [])]
-        from .external_common import bootstrap_ci
+        from .result_export import validate_persisted_compare_runs
+        comparison_audit = (validate_persisted_compare_runs(arms, seed)
+                            if {a.get("mode") for a in arms} >= {"base", "single", "agent"}
+                            else {"publication_valid": False,
+                                  "invalid_reasons": ["three_arm_validation_not_applicable"],
+                                  "checks": {}, "paired_statistics": None})
+        paired_stats = comparison_audit.get("paired_statistics") or {}
         parent = {
             "schema_version": 3, "run_id": parent_id, "suite": suite,
             "mode": "compare", "arm": None, "profile": profile,
@@ -963,10 +973,21 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             "comparison": {
                 "arms": [{"run_id": a["run_id"], "mode": a["mode"],
                           "scores": a.get("scores")} for a in arms],
-                "primary_metric": "avg_score",
-                "agent_minus_reference": round(agent_score - single_score, 4),
-                "paired_n": len(paired),
-                "paired_delta_ci": bootstrap_ci(paired, seed + 100),
+                "primary_metric": {
+                    "secalertbench": "macro_f1",
+                    "excytin": "official_reward_or_native_reward",
+                    "cage2": "mean_reward",
+                }.get(suite, "avg_score"),
+                # 只有全部公平性条件通过才发布 paired delta；旧的数组 zip
+                # 不再用于不同样本/预算运行。
+                "publication_valid": comparison_audit["publication_valid"],
+                "validation": comparison_audit["checks"],
+                "invalid_reasons": comparison_audit["invalid_reasons"],
+                "agent_minus_reference": paired_stats.get("agent_minus_single"),
+                "paired_n": paired_stats.get("paired_n"),
+                "paired_delta_ci": paired_stats.get("bootstrap_95_ci"),
+                "wins": paired_stats.get("wins"), "ties": paired_stats.get("ties"),
+                "losses": paired_stats.get("losses"),
                 "shared": {"n": n, "seed": seed, "model": arms[-1].get("model")},
             },
         }
@@ -987,7 +1008,8 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
         return await threat_intel.run_bench(
             n=n, mode=mode, seed=seed, log_dir=log_dir,
             concurrency=concurrency, llm=llm, kb=kb,
-            on_progress=on_progress, run_id=run_id)
+            on_progress=on_progress, run_id=run_id,
+            dataset_version=dataset_version)
     if suite == "soc_evidence":
         from . import soc_evidence
         return await soc_evidence.run_bench(
@@ -1164,6 +1186,11 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                 "one upstream row with empty correct_options is excluded as unscorable",
                 "not directly comparable to the official leaderboard",
             ],
+            "arm_budget": {
+                "max_llm_calls_per_task": sc_k if is_sc else 1,
+                "max_output_tokens_per_call": _MAX_TOKENS,
+                "max_tool_calls_per_task": 0,
+            },
         },
         "benchmark_provenance": {
             "name": "CyberSOCEval malware_analysis",
@@ -1185,6 +1212,10 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
     if is_sc:
         run["sc_k"] = sc_k
         run["sc_temperature"] = sc_temperature
+
+    from .external_common import git_commit_sha, model_metadata
+    run["git_commit_sha"] = git_commit_sha()
+    run["model_settings"] = model_metadata(run.get("model"))
 
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)

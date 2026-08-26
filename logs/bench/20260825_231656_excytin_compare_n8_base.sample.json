@@ -1,0 +1,17 @@
+{
+  "run_id": "20260825_231656_excytin_compare_n8_base",
+  "suite": "excytin",
+  "seed": 42,
+  "selection": "seeded_stratified",
+  "sample_ids": [
+    "incident_134_legacy_test_set_task_2",
+    "incident_166_legacy_test_set_task_51",
+    "incident_322_legacy_train_set_task_21",
+    "incident_34_latest_test_set_task_65",
+    "incident_38_latest_train_set_task_4",
+    "incident_39_latest_train_set_task_63",
+    "incident_5_legacy_test_set_task_85",
+    "incident_55_latest_test_set_task_65"
+  ],
+  "sha256": "5862e5c19e2b371775e9729936a88c54a6bc02be6dc3198ee2d5c3383c286a2f"
+}

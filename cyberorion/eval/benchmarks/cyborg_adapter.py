@@ -16,9 +16,10 @@ baseline，不追求高分。llm_driven=True（接入我们的蓝队 agent 决�
 from __future__ import annotations
 
 import os
+import inspect
 import random
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 # 未安装 CybORG 时返回的安装提示（已核实 PyPI 有 CybORG 0.2）。
 _INSTALL_HINT = (
@@ -189,7 +190,21 @@ def run_cage2(episodes: int = 3, steps: int = 100,
         restore_actions = illegal_actions = 0
         actions: list[dict] = []
         for _ in range(int(steps)):
-            spec = policy(obs) if llm_driven and policy is not None else None
+            if llm_driven and policy is not None:
+                # 新 harness 通过 episode/step 边界让上层把 LLM/工具预算按整局
+                # 共享；旧的一参数策略保持兼容。不要用 TypeError 回退，因为
+                # 那会吞掉策略内部真实的 TypeError。
+                try:
+                    params = inspect.signature(policy).parameters
+                except (TypeError, ValueError):
+                    params = {}
+                accepts_kwargs = any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+                spec = (policy(obs, episode=ep + 1, step=len(actions) + 1)
+                        if accepts_kwargs or {"episode", "step"}.issubset(params)
+                        else policy(obs))
+            else:
+                spec = None
             if llm_driven:
                 action, valid, invalid_reason = _mapped_action(spec)
             else:
@@ -239,3 +254,83 @@ def run_cage2(episodes: int = 3, steps: int = 100,
         "red_agent": red_agent, "seed": int(seed),
         "wrapper": "ChallengeWrapper" if official_wrapper else "raw",
     }
+
+
+async def run_cage2_async(episodes: int = 3, steps: int = 100,
+                          policy: "Callable[..., Awaitable[dict]] | None" = None,
+                          scenario_path: "str | None" = None,
+                          red_agent: str = "B_lineAgent", seed: int = 153,
+                          official_wrapper: bool = True) -> dict:
+    """异步策略版 CAGE-2 loop，避免同步环境线程反向调用事件循环死锁。"""
+    if policy is None:
+        return {"error": "async policy is required"}
+    try:
+        from CybORG import CybORG as CybORGEnv
+        from CybORG.Agents import B_lineAgent, SleepAgent
+        from CybORG.Agents.SimpleAgents.Meander import RedMeanderAgent
+        from CybORG.Agents.Wrappers import ChallengeWrapper
+    except ImportError as exc:
+        return {"error": f"CybORG import incomplete: {exc}", "install": _INSTALL_HINT}
+    configured = scenario_path or os.getenv("CYBERORION_CAGE2_SCENARIO")
+    if configured:
+        scenario = Path(configured)
+    else:
+        default_root = Path(__file__).resolve().parents[3] / "benchmarks" / "external" / "cage2"
+        root = Path(os.getenv("CYBERORION_CAGE2_DIR", str(default_root))).expanduser()
+        candidates = list(root.rglob("Scenario2.yaml")) if root.exists() else []
+        scenario = candidates[0] if candidates else root / "CybORG" / "CybORG" / "Shared" / "Scenarios" / "Scenario2.yaml"
+    if not scenario.is_file():
+        return {"error": f"CAGE-2 scenario not found: {scenario}", "install": _INSTALL_HINT}
+    red_agents = {"B_lineAgent": B_lineAgent, "RedMeanderAgent": RedMeanderAgent,
+                  "SleepAgent": SleepAgent}
+    if red_agent not in red_agents:
+        return {"error": f"unsupported red agent: {red_agent}"}
+    random.seed(int(seed))
+    try:
+        import numpy as np
+        np.random.seed(int(seed))
+    except ImportError:
+        pass
+    rewards = []
+    for ep in range(int(episodes)):
+        env = CybORGEnv(str(scenario), "sim", agents={"Red": red_agents[red_agent]})
+        wrapped = ChallengeWrapper(env=env, agent_name="Blue") if official_wrapper else env
+        obs = wrapped.reset() if official_wrapper else env.reset().observation
+        total = 0.0
+        restore_actions = illegal_actions = 0
+        actions = []
+        for step_index in range(int(steps)):
+            spec = await policy(obs, episode=ep + 1, step=step_index + 1)
+            action, valid, invalid_reason = _mapped_action(spec)
+            if official_wrapper:
+                action_index = _challenge_action_index(wrapped, action)
+                if action_index is None:
+                    valid = False
+                    invalid_reason = invalid_reason or "action not present in ChallengeWrapper action space"
+                    action_index = 0
+            restore_actions += int(action.__class__.__name__.lower() == "restore")
+            illegal_actions += int(not valid)
+            if official_wrapper:
+                obs, reward, done, info = wrapped.step(action_index)
+            else:
+                result = env.step(agent="Blue", action=action)
+                obs, reward, done, info = (result.observation, result.reward,
+                                           result.done, getattr(result, "info", {}))
+            total += float(reward or 0.0)
+            actions.append({"blue": str(action), "red": str(env.get_last_action("Red")),
+                            "valid": valid, "invalid_reason": invalid_reason,
+                            "reward": float(reward or 0.0)})
+            if done:
+                break
+        rewards.append({
+            "episode": ep + 1, "reward": round(total, 3), "red_agent": red_agent,
+            "steps": len(actions), "actions": actions, "illegal_actions": illegal_actions,
+            "restore_actions": restore_actions, "availability_penalty": -float(restore_actions),
+            "host_compromise_events": None,
+            "host_compromise_metric_status": "not_exposed_by_official_wrapper",
+        })
+    return {"episodes": rewards,
+            "mean_reward": round(sum(r["reward"] for r in rewards) / len(rewards), 3)
+            if rewards else 0.0,
+            "llm_driven": True, "steps": int(steps), "red_agent": red_agent,
+            "seed": int(seed), "wrapper": "ChallengeWrapper" if official_wrapper else "raw"}

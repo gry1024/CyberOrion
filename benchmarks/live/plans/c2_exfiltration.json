@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "c2-exfiltration-emulation",
+  "scenario": "web_plus",
+  "safety": "No public destination; injected harness must map sink to an isolated local collector.",
+  "actions": [
+    {"id": "c2-beacon", "intent": "emit a deterministic local-only beacon", "target": "validated_local_sink"},
+    {"id": "staged-artifact", "intent": "stage a fixed non-sensitive canary", "target": "validated_target"},
+    {"id": "exfil-canary", "intent": "send only the fixed canary to the local sink", "target": "validated_local_sink"}
+  ]
+}

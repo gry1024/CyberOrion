@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import re
+import shutil
+import subprocess
 import sqlite3
 import statistics
 import time
@@ -29,6 +32,34 @@ MODES = ("base", "single", "agent")
 ARM_OF_MODE = {"base": "bare", "single": "single", "agent": "framework"}
 METHODOLOGY_STATUS = "external_track"
 _READ_ONLY = re.compile(r"^\s*(select|with|pragma\s+table_info)\b", re.I)
+
+
+def official_harness_status(root: Path) -> dict:
+    """只读探测官方 Inspect/Docker/scorer 组件，不尝试安装或替代。"""
+    task_module = root / "domains" / "excytin" / "excytin.py"
+    scorer_files = [p for p in root.rglob("*.py")
+                    if "scor" in p.name.lower() or "scoring" in p.parts]
+    inspect_available = importlib.util.find_spec("inspect_ai") is not None
+    docker_cli = shutil.which("docker") is not None
+    try:
+        docker_daemon = bool(docker_cli and subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, text=True, timeout=10, check=True).stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        docker_daemon = False
+    components_present = task_module.is_file() and bool(scorer_files)
+    # CyberOrion 的三臂 runner 尚未通过 Inspect Task 执行，所以即使依赖均
+    # 安装也不能把 adapter exact-match 标成 official score。
+    return {
+        "inspect_ai_installed": inspect_available,
+        "docker_cli_available": docker_cli,
+        "docker_daemon_verified": docker_daemon,
+        "official_task_module_present": task_module.is_file(),
+        "official_scorer_files_present": bool(scorer_files),
+        "components_present": components_present,
+        "official_execution_selected": False,
+        "status": "adapter_selected_non_official",
+    }
 
 
 def _normalise(row: dict, index: int) -> dict | None:
@@ -186,6 +217,7 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
     if mode not in MODES:
         raise ValueError(f"excytin mode 必须是 {'/'.join(MODES)}")
     root, files = require_asset(SUITE)
+    harness_status = official_harness_status(root)
     data_files, representative_decision = resolve_representative_files(SUITE, files)
     questions = load_questions(data_files)
     databases = [p for p in data_files if p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}]
@@ -291,5 +323,7 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         "asset_root": str(root),
         "size_policy_decision": size_decision,
         "representative_asset_decision": representative_decision,
+        "official_harness_status": harness_status,
+        "score_methodology_label": "adapter_native_exact_match_non_official",
     }
     return persist_run(run, log_dir)

@@ -1,0 +1,1298 @@
+{
+  "schema_version": 3,
+  "run_id": "20260825_231425_secalertbench_compare_n30_base",
+  "suite": "secalertbench",
+  "mode": "base",
+  "arm": "bare",
+  "profile": "daily",
+  "n": 30,
+  "seed": 42,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787724866.3846953,
+  "finished_at": 1787724870.6327376,
+  "elapsed_sec": 4.25,
+  "scores": {
+    "n": 30,
+    "macro_f1": 0.775,
+    "attack_recall": 0.8095,
+    "false_positive_rate": 0.2222,
+    "tp": 17,
+    "fp": 2,
+    "fn": 4,
+    "tn": 7,
+    "pr_auc": 0.8976,
+    "brier_score": 0.1584,
+    "expected_calibration_error_10bin": 0.1477,
+    "triage_cost": 22,
+    "triage_cost_per_alert": 0.7333,
+    "cost_model": {
+      "false_negative": 5.0,
+      "false_positive": 1.0
+    },
+    "correct_mc_pct": 0.8,
+    "avg_score": 0.775,
+    "parse_fail": 1,
+    "llm_errors": 0,
+    "by_difficulty": {},
+    "by_topic": {},
+    "confidence_intervals": {
+      "accuracy": [
+        0.633333,
+        0.933333
+      ],
+      "attack_recall": [
+        0.619048,
+        0.952381
+      ]
+    }
+  },
+  "results": [
+    {
+      "idx": 0,
+      "alert_id": "sha256:60bcad669578fe2d5b6e",
+      "topic": "SQL注入",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.98,
+      "probability_semantics": "P(attack)",
+      "raw": "{\n  \"verdict\": \"attack\",\n  \"attack_probability\": 0.98\n}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2227.8,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 282,
+          "wall_clock_sec": 2.2278
+        }
+      }
+    },
+    {
+      "idx": 1,
+      "alert_id": "sha256:f9b580a931d924873da0",
+      "topic": "URL跳转",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "benign",
+      "confidence": 0.2,
+      "probability_semantics": "P(attack)",
+      "raw": "{\n  \"verdict\": \"benign\",\n  \"attack_probability\": 0.2\n}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1801.8,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 393,
+          "wall_clock_sec": 1.8019
+        }
+      }
+    },
+    {
+      "idx": 2,
+      "alert_id": "sha256:42085e478035717fac88",
+      "topic": "webshell上传",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1768.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 376,
+          "wall_clock_sec": 1.7689
+        }
+      }
+    },
+    {
+      "idx": 3,
+      "alert_id": "sha256:1c38034e76ba44833ad2",
+      "topic": "代码执行",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 1.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\n  \"verdict\": \"attack\",\n  \"attack_probability\": 1.0\n}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1974.4,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 419,
+          "wall_clock_sec": 1.9744
+        }
+      }
+    },
+    {
+      "idx": 4,
+      "alert_id": "sha256:49d8db99186818daaf0a",
+      "topic": "信息泄露",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.9,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.9}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1558.4,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 221,
+          "wall_clock_sec": 1.5584
+        }
+      }
+    },
+    {
+      "idx": 5,
+      "alert_id": "sha256:f38a288a60d5b7e96304",
+      "topic": "其他",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.9,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.9}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1709.8,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 416,
+          "wall_clock_sec": 1.7099
+        }
+      }
+    },
+    {
+      "idx": 6,
+      "alert_id": "sha256:807d0eaa21d1b087b3b5",
+      "topic": "命令执行",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "unknown",
+      "confidence": 0.5,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"output\": {\"verdict\": \"attack\", \"attack_probability\": 0.95}}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2221.7,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 340,
+          "wall_clock_sec": 2.2217
+        }
+      }
+    },
+    {
+      "idx": 7,
+      "alert_id": "sha256:1aaf95c81be8885a6055",
+      "topic": "弱口令",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1853.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 362,
+          "wall_clock_sec": 1.8536
+        }
+      }
+    },
+    {
+      "idx": 8,
+      "alert_id": "sha256:2dc9fbbd9ee09a18fb20",
+      "topic": "敏感信息/重要文件泄漏",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1650.4,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 284,
+          "wall_clock_sec": 1.6504
+        }
+      }
+    },
+    {
+      "idx": 9,
+      "alert_id": "sha256:89977d1f2a40086134b0",
+      "topic": "文件上传",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 1368.4,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 410,
+          "wall_clock_sec": 1.3684
+        }
+      }
+    },
+    {
+      "idx": 10,
+      "alert_id": "sha256:a350fe25bbef99e0606f",
+      "topic": "文件下载",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2212.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 330,
+          "wall_clock_sec": 2.213
+        }
+      }
+    },
+    {
+      "idx": 11,
+      "alert_id": "sha256:cb820a8f32741ccec8ea",
+      "topic": "文件包含",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2324.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 275,
+          "wall_clock_sec": 2.3247
+        }
+      }
+    },
+    {
+      "idx": 12,
+      "alert_id": "sha256:a0f297e8fc306b38d448",
+      "topic": "文件读取",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 1.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 1.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2725.0,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 230,
+          "wall_clock_sec": 2.725
+        }
+      }
+    },
+    {
+      "idx": 13,
+      "alert_id": "sha256:7297ba42f896f42f3368",
+      "topic": "权限许可和访问控制",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 1.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 1.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2782.8,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 350,
+          "wall_clock_sec": 2.7828
+        }
+      }
+    },
+    {
+      "idx": 14,
+      "alert_id": "sha256:b2829d5d979f3056e903",
+      "topic": "目录遍历",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 1.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 1.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2638.2,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 310,
+          "wall_clock_sec": 2.6382
+        }
+      }
+    },
+    {
+      "idx": 15,
+      "alert_id": "sha256:3eac73ecbcccf97ba83a",
+      "topic": "系统/服务配置不当",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3213.4,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 507,
+          "wall_clock_sec": 3.2134
+        }
+      }
+    },
+    {
+      "idx": 16,
+      "alert_id": "sha256:05f56b4b09b6654cd1c5",
+      "topic": "跨站脚本攻击（XSS）",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2828.5,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 386,
+          "wall_clock_sec": 2.8285
+        }
+      }
+    },
+    {
+      "idx": 17,
+      "alert_id": "sha256:e9065f0c021ad7ac4903",
+      "topic": "逻辑/设计错误",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 1.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 1.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 2821.8,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 336,
+          "wall_clock_sec": 2.8219
+        }
+      }
+    },
+    {
+      "idx": 18,
+      "alert_id": "sha256:8a9e707c668cac7f4f47",
+      "topic": "非授权访问/权限绕过",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3388.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 504,
+          "wall_clock_sec": 3.3889
+        }
+      }
+    },
+    {
+      "idx": 19,
+      "alert_id": "sha256:4a43f56c62cfeef6a41c",
+      "topic": "黑市工具",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.9,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.9}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3199.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 141,
+          "wall_clock_sec": 3.1999
+        }
+      }
+    },
+    {
+      "idx": 20,
+      "alert_id": "sha256:5884bfd172daf6ead98f",
+      "topic": "默认配置不当",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "attack",
+      "confidence": 0.9,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.9}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3377.3,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 222,
+          "wall_clock_sec": 3.3773
+        }
+      }
+    },
+    {
+      "idx": 21,
+      "alert_id": "sha256:6defb3074c0f9ba18e7c",
+      "topic": "SQL注入",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3711.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 1211,
+          "wall_clock_sec": 3.7116
+        }
+      }
+    },
+    {
+      "idx": 22,
+      "alert_id": "sha256:c7037dc3a6a2e3eb8112",
+      "topic": "URL跳转",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3806.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 284,
+          "wall_clock_sec": 3.8066
+        }
+      }
+    },
+    {
+      "idx": 23,
+      "alert_id": "sha256:f81b711ec1662b46ecf6",
+      "topic": "代码执行",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3764.9,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 391,
+          "wall_clock_sec": 3.7649
+        }
+      }
+    },
+    {
+      "idx": 24,
+      "alert_id": "sha256:46c8208fc920c8ab39d0",
+      "topic": "信息泄露",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3871.3,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 423,
+          "wall_clock_sec": 3.8713
+        }
+      }
+    },
+    {
+      "idx": 25,
+      "alert_id": "sha256:f3e5b9ba2167bd9a67fa",
+      "topic": "其他",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3647.6,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 221,
+          "wall_clock_sec": 3.6476
+        }
+      }
+    },
+    {
+      "idx": 26,
+      "alert_id": "sha256:ebe3a17e8bde67890654",
+      "topic": "命令执行",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "attack",
+      "confidence": 0.95,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"attack\", \"attack_probability\": 0.95}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3621.1,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 714,
+          "wall_clock_sec": 3.6212
+        }
+      }
+    },
+    {
+      "idx": 27,
+      "alert_id": "sha256:ed659317d8fc6f12f4ea",
+      "topic": "弱口令",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 4000.5,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 289,
+          "wall_clock_sec": 4.0005
+        }
+      }
+    },
+    {
+      "idx": 28,
+      "alert_id": "sha256:ad0f2da991546c0a1160",
+      "topic": "敏感信息/重要文件泄漏",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 3933.5,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 435,
+          "wall_clock_sec": 3.9335
+        }
+      }
+    },
+    {
+      "idx": 29,
+      "alert_id": "sha256:307d2e0125e33de7fce3",
+      "topic": "文件上传",
+      "difficulty": "unknown",
+      "gold": "benign",
+      "pred": "benign",
+      "confidence": 0.0,
+      "probability_semantics": "P(attack)",
+      "raw": "{\"verdict\": \"benign\", \"attack_probability\": 0.0}",
+      "agent_trace": [],
+      "tool_calls": [],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 4237.7,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 1,
+          "tool_calls": 0,
+          "estimated_tokens": 739,
+          "wall_clock_sec": 4.2378
+        }
+      }
+    }
+  ],
+  "llm_errors": 0,
+  "status": "done",
+  "error": null,
+  "methodology_status": "external_track",
+  "methodology": {
+    "official_alignment": "RQ1 binary labels and core confusion metrics",
+    "differences": [
+      "CyberOrion JSON prompt/runner replaces upstream RQ1 prompt and retry code",
+      "confidence, PR-AUC, calibration, cost and agent tools are CyberOrion extensions",
+      "not directly comparable to the official leaderboard"
+    ],
+    "arm_budget": {
+      "max_llm_calls": 18,
+      "max_tool_calls": 12,
+      "max_steps": 18,
+      "wall_clock_sec": 300,
+      "token_budget": 32768
+    }
+  },
+  "benchmark_provenance": {
+    "name": "SecAlertBench",
+    "upstream_url": "https://github.com/Dxsssu/SecAlertBench",
+    "dataset_version": "upstream-pinned",
+    "dataset_files": [
+      {
+        "name": "enterprise_a_examples.json",
+        "sha256": "87c81af210d4cdbc4ffaf971c1f096afdccee3306af6179e0524a2805a4e3ccb",
+        "hash_status": "computed",
+        "bytes": 11193
+      },
+      {
+        "name": "enterprise_b_examples.json",
+        "sha256": "79147b6f8a04062a6616a44561601ddbda2283bb0175b61154e1ceac1fdb0e28",
+        "hash_status": "computed",
+        "bytes": 4467
+      },
+      {
+        "name": "enterprise_c_examples.json",
+        "sha256": "6dd662386c3ef4d456961c6248ae372a332f83d55bf9109bea300c2584206ae9",
+        "hash_status": "computed",
+        "bytes": 4816
+      },
+      {
+        "name": "secalertbench.json",
+        "sha256": "33f95305d1c42f8e615e4f94066119570859dee7eb086dff7c2273536c932ea3",
+        "hash_status": "computed",
+        "bytes": 21719558
+      },
+      {
+        "name": "secalertbench_attack.json",
+        "sha256": "4ce14a3439746d53f2634f90bff176ec904d91c3c7f5de5b9edcc53043eaab61",
+        "hash_status": "computed",
+        "bytes": 3877335
+      },
+      {
+        "name": "secalertbench_non_attack.json",
+        "sha256": "8fc6301c1915524d0c1eaa0f84e49cc600daf413edfe0ea0c61897d71496da27",
+        "hash_status": "computed",
+        "bytes": 17842225
+      },
+      {
+        "name": "Foundation-Sec-8B-Instruct.json",
+        "sha256": "515494c1a5de9f102b029d835d7edc309df9754d59358f2be1b1781a6f315cfb",
+        "hash_status": "computed",
+        "bytes": 5418296
+      },
+      {
+        "name": "SecGPT-14B.json",
+        "sha256": "e2d716d376d1f2542a7952bb2c461bde6df7b0a5e8319c8981904b1e9a01eb66",
+        "hash_status": "computed",
+        "bytes": 5410656
+      },
+      {
+        "name": "SecGPT-7B.json",
+        "sha256": "65a9cc94b26e9bb33e074f8abbc52835196126097f504f558a9a41cd880cf093",
+        "hash_status": "computed",
+        "bytes": 5445699
+      },
+      {
+        "name": "claude-sonnet-4-5-20250929.json",
+        "sha256": "f39bd587b2510d19a5e30b8562c9d1c08fbee397fb1c9170c8a9a8d3d1edc209",
+        "hash_status": "computed",
+        "bytes": 5468635
+      },
+      {
+        "name": "deepseek-v3.1.json",
+        "sha256": "6c4c363c0540ef8f558619b8553763fe5b9798cf85da75132b894b1bb1789f79",
+        "hash_status": "computed",
+        "bytes": 5585284
+      },
+      {
+        "name": "gemini-3-flash-preview.json",
+        "sha256": "4aae603a7f3f1b62dd991274aa2f7f9bcb326a3573016bfcd31f0aa3fc881c56",
+        "hash_status": "computed",
+        "bytes": 5544345
+      },
+      {
+        "name": "glm-4.7.json",
+        "sha256": "d10637bbebd883f44f17985d9bfef2e8463528c13b2b42d079ececa58e5d71eb",
+        "hash_status": "computed",
+        "bytes": 5480740
+      },
+      {
+        "name": "gpt-5.1-chat.json",
+        "sha256": "31d2743a8ff931359da1cdbc9fd4552cf297ce6865c6cadc903e0cb215da1468",
+        "hash_status": "computed",
+        "bytes": 5531927
+      },
+      {
+        "name": "kimi-k2-instruct-0905.json",
+        "sha256": "17afc98884479a419ce76c4debd0d1c13e20d47dbc673d9ed48a92a5598fa80d",
+        "hash_status": "computed",
+        "bytes": 5473747
+      },
+      {
+        "name": "llama-3.1-405b-instruct.json",
+        "sha256": "53f9e36e91c38000ca610d50612352d7dc0ac5e1063fa00525d927d676712db4",
+        "hash_status": "computed",
+        "bytes": 5591725
+      },
+      {
+        "name": "llama-3.1-70b-instruct.json",
+        "sha256": "a03533c269422a7dd6f9d6f9c28f963d974bbdafa4f9b6719f2c0a004e1c9434",
+        "hash_status": "computed",
+        "bytes": 5501719
+      },
+      {
+        "name": "llama-3.1-8b-instruct.json",
+        "sha256": "c116ca693a865d8f7b24ec3fa46e9b9e75e3a87dcd741b5edda526744067dddb",
+        "hash_status": "computed",
+        "bytes": 5609277
+      },
+      {
+        "name": "qwen3-14b.json",
+        "sha256": "51e4fa33828cafcc4ae27637db7e7e8df48532b78aa57485b8f0782a7e6d2610",
+        "hash_status": "computed",
+        "bytes": 5488763
+      },
+      {
+        "name": "qwen3-235b-a22b-instruct-2507.json",
+        "sha256": "0627ecfd93bb986c1c998135f2054ac4a50a78538022b33e524489e79cbb24d0",
+        "hash_status": "computed",
+        "bytes": 5461925
+      }
+    ],
+    "protocol": "binary_soc_alert_triage",
+    "comparable_to_upstream": false,
+    "sample_scope": "subset",
+    "upstream_n": 8322,
+    "selected_n": 30,
+    "sample_manifest": [
+      "sha256:60bcad669578fe2d5b6e",
+      "sha256:f9b580a931d924873da0",
+      "sha256:42085e478035717fac88",
+      "sha256:1c38034e76ba44833ad2",
+      "sha256:49d8db99186818daaf0a",
+      "sha256:f38a288a60d5b7e96304",
+      "sha256:807d0eaa21d1b087b3b5",
+      "sha256:1aaf95c81be8885a6055",
+      "sha256:2dc9fbbd9ee09a18fb20",
+      "sha256:89977d1f2a40086134b0",
+      "sha256:a350fe25bbef99e0606f",
+      "sha256:cb820a8f32741ccec8ea",
+      "sha256:a0f297e8fc306b38d448",
+      "sha256:7297ba42f896f42f3368",
+      "sha256:b2829d5d979f3056e903",
+      "sha256:3eac73ecbcccf97ba83a",
+      "sha256:05f56b4b09b6654cd1c5",
+      "sha256:e9065f0c021ad7ac4903",
+      "sha256:8a9e707c668cac7f4f47",
+      "sha256:4a43f56c62cfeef6a41c",
+      "sha256:5884bfd172daf6ead98f",
+      "sha256:6defb3074c0f9ba18e7c",
+      "sha256:c7037dc3a6a2e3eb8112",
+      "sha256:f81b711ec1662b46ecf6",
+      "sha256:46c8208fc920c8ab39d0",
+      "sha256:f3e5b9ba2167bd9a67fa",
+      "sha256:ebe3a17e8bde67890654",
+      "sha256:ed659317d8fc6f12f4ea",
+      "sha256:ad0f2da991546c0a1160",
+      "sha256:307d2e0125e33de7fce3"
+    ],
+    "sample_manifest_sha256": "573954278bfd32b224b50da91037a89d0b4cd0230e5419bf6931376254949f64",
+    "selection": "seeded_stratified",
+    "size_policy": {
+      "single_asset_max_bytes": 1073741824,
+      "total_cache_max_bytes": 5368709120
+    }
+  },
+  "asset_root": "/home/cjy/cyberagent/cyberorion/benchmarks/external/secalertbench",
+  "size_policy_decision": {
+    "forced_subset": false,
+    "reason": null,
+    "requested_profile": "daily",
+    "effective_profile": "daily",
+    "observed_bytes": 245620832
+  },
+  "representative_asset_decision": {
+    "forced_subset": false,
+    "source": "official_assets"
+  },
+  "selection_manifest": {
+    "algorithm": "seeded_round_robin_stratified_v1",
+    "strata": [
+      "label",
+      "alert_type",
+      "enterprise"
+    ],
+    "class_counts": {
+      "attack": 21,
+      "benign": 9
+    },
+    "selected_ids": [
+      "sha256:60bcad669578fe2d5b6e",
+      "sha256:f9b580a931d924873da0",
+      "sha256:42085e478035717fac88",
+      "sha256:1c38034e76ba44833ad2",
+      "sha256:49d8db99186818daaf0a",
+      "sha256:f38a288a60d5b7e96304",
+      "sha256:807d0eaa21d1b087b3b5",
+      "sha256:1aaf95c81be8885a6055",
+      "sha256:2dc9fbbd9ee09a18fb20",
+      "sha256:89977d1f2a40086134b0",
+      "sha256:a350fe25bbef99e0606f",
+      "sha256:cb820a8f32741ccec8ea",
+      "sha256:a0f297e8fc306b38d448",
+      "sha256:7297ba42f896f42f3368",
+      "sha256:b2829d5d979f3056e903",
+      "sha256:3eac73ecbcccf97ba83a",
+      "sha256:05f56b4b09b6654cd1c5",
+      "sha256:e9065f0c021ad7ac4903",
+      "sha256:8a9e707c668cac7f4f47",
+      "sha256:4a43f56c62cfeef6a41c",
+      "sha256:5884bfd172daf6ead98f",
+      "sha256:6defb3074c0f9ba18e7c",
+      "sha256:c7037dc3a6a2e3eb8112",
+      "sha256:f81b711ec1662b46ecf6",
+      "sha256:46c8208fc920c8ab39d0",
+      "sha256:f3e5b9ba2167bd9a67fa",
+      "sha256:ebe3a17e8bde67890654",
+      "sha256:ed659317d8fc6f12f4ea",
+      "sha256:ad0f2da991546c0a1160",
+      "sha256:307d2e0125e33de7fce3"
+    ]
+  },
+  "git_commit_sha": "61027258e95de6964b8e5e8af8a809822eba3b12",
+  "model_settings": {
+    "provider": "openai",
+    "model": "deepseek-v4-flash",
+    "configured_model": "openai/deepseek-v4-flash",
+    "thinking": "disabled",
+    "max_output_tokens": 4096,
+    "temperature": null,
+    "usage_accounting": "provider_or_estimated_per_task"
+  },
+  "path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260825_231425_secalertbench_compare_n30_base.json",
+  "sample_manifest_path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260825_231425_secalertbench_compare_n30_base.sample.json"
+}

@@ -135,7 +135,8 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
                     concurrency: int = CONCURRENCY,
                     llm=None, kb=None,
                     on_progress=None,
-                    run_id: "str | None" = None) -> dict:
+                    run_id: "str | None" = None,
+                    dataset_version: "str | None" = None) -> dict:
     """跑一次 threat_intel 基准并持久化结果，返回 run dict。
 
     Args:
@@ -230,9 +231,23 @@ async def run_bench(n: int = 100, mode: str = "base", seed: int = 42,
             "protocol": "complete_answer_set_exact_match_and_jaccard",
             "comparable_to_upstream": False,
             "sample_scope": "full" if len(questions) == len(load_questions()) else "subset",
+            "dataset_version": dataset_version or "local-PurpleLlama-checkout",
+            "dataset_file": str(DEFAULT_QUESTIONS),
+            "sample_manifest": [row["idx"] for row in rows if row],
+        },
+        "methodology": {
+            "arm_budget": {"max_llm_calls_per_task": 1,
+                           "max_output_tokens_per_call": 4096,
+                           "max_tool_calls_per_task": 0},
+            "score_label": "CyberOrion exact-match/Jaccard external track",
         },
         "log_dir": str(log_dir),
     }
+    from .assets import sha256_file
+    from .external_common import git_commit_sha, model_metadata
+    run["benchmark_provenance"]["dataset_sha256"] = sha256_file(DEFAULT_QUESTIONS)
+    run["git_commit_sha"] = git_commit_sha()
+    run["model_settings"] = model_metadata(run.get("model"))
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     json_path = log_dir / f"{run_id}.json"

@@ -1,0 +1,298 @@
+{
+  "schema_version": 3,
+  "run_id": "20260824_075831_secalertbench_agent_n1",
+  "suite": "secalertbench",
+  "mode": "agent",
+  "arm": "framework",
+  "profile": "daily",
+  "n": 1,
+  "seed": 20260824,
+  "model": "deepseek-v4-flash",
+  "started_at": 1787583501.3989735,
+  "finished_at": 1787583511.6445246,
+  "elapsed_sec": 10.25,
+  "scores": {
+    "n": 1,
+    "macro_f1": 0.0,
+    "attack_recall": 0.0,
+    "false_positive_rate": 0.0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 1,
+    "tn": 0,
+    "pr_auc": 1.0,
+    "brier_score": 1.0,
+    "expected_calibration_error_10bin": 1.0,
+    "triage_cost": 5,
+    "triage_cost_per_alert": 5.0,
+    "cost_model": {
+      "false_negative": 5.0,
+      "false_positive": 1.0
+    },
+    "correct_mc_pct": 0.0,
+    "avg_score": 0.0,
+    "parse_fail": 1,
+    "llm_errors": 0,
+    "by_difficulty": {},
+    "by_topic": {},
+    "confidence_intervals": {
+      "accuracy": [
+        0.0,
+        0.0
+      ],
+      "attack_recall": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "results": [
+    {
+      "idx": 0,
+      "alert_id": "sha256:0d1d0c354cefea92aceb",
+      "topic": "SQL注入",
+      "difficulty": "unknown",
+      "gold": "attack",
+      "pred": "unknown",
+      "confidence": 0.0,
+      "raw": "Attack (attempt) with low impact. The alert shows a POST to /graphql with a UNION SELECT SQL injection payload targeting Apache SkyWalking (CVE-2020-9483). The request body contains 'UNION SELECT 1,CONCAT...' as the metric ID, indicating an exploit attempt. However, the server responded 404 Not Found, meaning the /graphql endpoint is unavailable and the attack failed. Therefore, verdict: attack (attempted), confidence high that it's an attack, but impact is minimal due to 404.",
+      "agent_trace": [
+        {
+          "seq": 1,
+          "role": "orchestrator",
+          "event": "tool",
+          "hypothesis": "Need to inspect the SOC alert before classifying.",
+          "evidence_ids": [],
+          "action": {
+            "type": "tool",
+            "tool": "get_alert",
+            "arguments": {}
+          },
+          "observation": "{\"Label\": \"Attack\", \"attack_type\": \"SQL注入\", \"dip\": \"189.73.165.213\", \"dport\": 8088, \"host\": \"10.131.244.16:8088\", \"kill_chain_all\": \"入侵:0x02000000|漏洞利用:0x02020000\", \"method\": \"POST\", \"parameter\": \"{\\\"query\\\":\\\"query SQLi($d: Duration!){globalP99:getLinearIntValues(metric: {name:\\\"all_p99\\\",id:\\\"') UNION SELECT 1,CONCAT('~','9999999999','~')-- \\\",}, duration: $d){values{value}}}\\\",\\\"variables\\\":{\\\"d\\\":{\\\"start\\\":\\\"2023-11-11\\\",\\\"end\\\":\\\"2023-11-12\\\",\\\"step\\\":\\\"DAY\\\"}}}\\n\", \"proto\": \"http\", \"req_body\": \"{\\\"query\\\":\\\"query SQLi($d: Duration!){globalP99:getLinearIntValues(metric: {name:\\\"all_p99\\\",id:\\\"') UNION SELECT 1,CONCAT('~','9999999999','~')-- \\\",}, duration: $d){values{value}}}\\\",\\\"variables\\\":{\\\"d\\\":{\\\"start\\\":\\\"2023-11-11\\\",\\\"end\\\":\\\"2023-11-12\\\",\\\"step\\\":\\\"DAY\\\"}}}\\n\", \"req_header\": \"POST /graphql HTTP/1.1\\r\\nHost: 10.131.244.16:8088\\r\\nConnection: keep-alive\\r\\nAccept-Encoding: gzip, deflate\\r\\nAccept: */*\\r\\nUser-Agent: python-requests/2.12.4\\r\\nContent-Type: application/json\\r\\nContent-Length: 271\\r\\n\\r\\n\", \"rsp_body\": \"<!DOCTYPE HTML PUBLIC \\\"-//IETF//DTD HTML 2.0//EN\\\">\\n<html><head>\\n<title>404 Not Found</title>\\n</head><body>\\n<h1>Not Found</h1>\\n<p>The requested URL /graphql was not found on this server.</p>\\n</body></html>\\n\", \"rsp_header\": \"HTTP/1.1 404 Not Found\\r\\nDate: Fri, 09 Jan 2026 16:19:27 GMT\\r\\nServer: Apache/2.4.6 (CentOS) mod_wsgi/4.6.4 Python/2.7\\r\\nContent-Length: 205\\r\\nKeep-Alive: timeout=5, max=100\\r\\nConnection: Keep-Alive\\r\\nContent-Type: text/html; charset=iso-8859-1\\r\\n\\r\\n\", \"rsp_status\": 404, \"rule_name\": \"Apache SkyWalking SQL注入漏洞(CVE-2020-9483)\", \"sip\": \"232.43.228.4\", \"sport\": 55452, \"uri\": \"/graphql\", \"xff\": \"\"}",
+          "replan_reason": "No alert data is available yet; must retrieve it first."
+        },
+        {
+          "seq": 2,
+          "role": "orchestrator",
+          "event": "complete",
+          "hypothesis": "The SOC alert is an SQL injection attack attempt against Apache SkyWalking (CVE-2020-9483). The request contains a UNION SELECT payload in the GraphQL query parameter, consistent with the exploit. However, the server returned HTTP 404, indicating the /graphql endpoint is not present, so the attack likely failed and had no impact.",
+          "evidence_ids": [
+            "req_body_union_select",
+            "rsp_status_404",
+            "rule_name_cve"
+          ],
+          "action": {
+            "type": "complete",
+            "summary": "Attack (attempt) with low impact. The alert shows a POST to /graphql with a UNION SELECT SQL injection payload targeting Apache SkyWalking (CVE-2020-9483). The request body contains 'UNION SELECT 1,CONCAT...' as the metric ID, indicating an exploit attempt. However, the server responded 404 Not Found, meaning the /graphql endpoint is unavailable and the attack failed. Therefore, verdict: attack (attempted), confidence high that it's an attack, but impact is minimal due to 404."
+          },
+          "observation": "Attack (attempt) with low impact. The alert shows a POST to /graphql with a UNION SELECT SQL injection payload targeting Apache SkyWalking (CVE-2020-9483). The request body contains 'UNION SELECT 1,CONCAT...' as the metric ID, indicating an exploit attempt. However, the server responded 404 Not Found, meaning the /graphql endpoint is unavailable and the attack failed. Therefore, verdict: attack (attempted), confidence high that it's an attack, but impact is minimal due to 404.",
+          "replan_reason": "The alert evidence clearly shows an SQL injection payload and the relevant rule/CVE. The 404 response indicates no successful exploitation. No further investigation needed; final classification submitted."
+        }
+      ],
+      "tool_calls": [
+        {
+          "seq": 1,
+          "role": "orchestrator",
+          "tool": "get_alert",
+          "arguments": {},
+          "status": "ok",
+          "output": "{\"Label\": \"Attack\", \"attack_type\": \"SQL注入\", \"dip\": \"189.73.165.213\", \"dport\": 8088, \"host\": \"10.131.244.16:8088\", \"kill_chain_all\": \"入侵:0x02000000|漏洞利用:0x02020000\", \"method\": \"POST\", \"parameter\": \"{\\\"query\\\":\\\"query SQLi($d: Duration!){globalP99:getLinearIntValues(metric: {name:\\\"all_p99\\\",id:\\\"') UNION SELECT 1,CONCAT('~','9999999999','~')-- \\\",}, duration: $d){values{value}}}\\\",\\\"variables\\\":{\\\"d\\\":{\\\"start\\\":\\\"2023-11-11\\\",\\\"end\\\":\\\"2023-11-12\\\",\\\"step\\\":\\\"DAY\\\"}}}\\n\", \"proto\": \"http\", \"req_body\": \"{\\\"query\\\":\\\"query SQLi($d: Duration!){globalP99:getLinearIntValues(metric: {name:\\\"all_p99\\\",id:\\\"') UNION SELECT 1,CONCAT('~','9999999999','~')-- \\\",}, duration: $d){values{value}}}\\\",\\\"variables\\\":{\\\"d\\\":{\\\"start\\\":\\\"2023-11-11\\\",\\\"end\\\":\\\"2023-11-12\\\",\\\"step\\\":\\\"DAY\\\"}}}\\n\", \"req_header\": \"POST /graphql HTTP/1.1\\r\\nHost: 10.131.244.16:8088\\r\\nConnection: keep-alive\\r\\nAccept-Encoding: gzip, deflate\\r\\nAccept: */*\\r\\nUser-Agent: python-requests/2.12.4\\r\\nContent-Type: application/json\\r\\nContent-Length: 271\\r\\n\\r\\n\", \"rsp_body\": \"<!DOCTYPE HTML PUBLIC \\\"-//IETF//DTD HTML 2.0//EN\\\">\\n<html><head>\\n<title>404 Not Found</title>\\n</head><body>\\n<h1>Not Found</h1>\\n<p>The requested URL /graphql was not found on this server.</p>\\n</body></html>\\n\", \"rsp_header\": \"HTTP/1.1 404 Not Found\\r\\nDate: Fri, 09 Jan 2026 16:19:27 GMT\\r\\nServer: Apache/2.4.6 (CentOS) mod_wsgi/4.6.4 Python/2.7\\r\\nContent-Length: 205\\r\\nKeep-Alive: timeout=5, max=100\\r\\nConnection: Keep-Alive\\r\\nContent-Type: text/html; charset=iso-8859-1\\r\\n\\r\\n\", \"rsp_status\": 404, \"rule_name\": \"Apache SkyWalking SQL注入漏洞(CVE-2020-9483)\", \"sip\": \"232.43.228.4\", \"sport\": 55452, \"uri\": \"/graphql\", \"xff\": \"\"}"
+        }
+      ],
+      "role_events": [],
+      "trace_source": "runtime",
+      "llm_error": false,
+      "error": null,
+      "latency_ms": 10140.3,
+      "resource_usage": {
+        "limits": {
+          "max_llm_calls": 18,
+          "max_tool_calls": 12,
+          "max_steps": 18,
+          "wall_clock_sec": 300,
+          "token_budget": 32768
+        },
+        "used": {
+          "llm_calls": 2,
+          "tool_calls": 1,
+          "estimated_tokens": 1710,
+          "wall_clock_sec": 10.1403
+        }
+      }
+    }
+  ],
+  "llm_errors": 0,
+  "status": "done",
+  "error": null,
+  "methodology_status": "external_track",
+  "methodology": {
+    "official_alignment": "RQ1 binary labels and core confusion metrics",
+    "differences": [
+      "CyberOrion JSON prompt/runner replaces upstream RQ1 prompt and retry code",
+      "confidence, PR-AUC, calibration, cost and agent tools are CyberOrion extensions",
+      "not directly comparable to the official leaderboard"
+    ],
+    "arm_budget": {
+      "max_llm_calls": 18,
+      "max_tool_calls": 12,
+      "max_steps": 18,
+      "wall_clock_sec": 300,
+      "token_budget": 32768
+    }
+  },
+  "benchmark_provenance": {
+    "name": "SecAlertBench",
+    "upstream_url": "https://github.com/Dxsssu/SecAlertBench",
+    "dataset_version": "upstream-pinned",
+    "dataset_files": [
+      {
+        "name": "enterprise_a_examples.json",
+        "sha256": "87c81af210d4cdbc4ffaf971c1f096afdccee3306af6179e0524a2805a4e3ccb",
+        "hash_status": "computed",
+        "bytes": 11193
+      },
+      {
+        "name": "enterprise_b_examples.json",
+        "sha256": "79147b6f8a04062a6616a44561601ddbda2283bb0175b61154e1ceac1fdb0e28",
+        "hash_status": "computed",
+        "bytes": 4467
+      },
+      {
+        "name": "enterprise_c_examples.json",
+        "sha256": "6dd662386c3ef4d456961c6248ae372a332f83d55bf9109bea300c2584206ae9",
+        "hash_status": "computed",
+        "bytes": 4816
+      },
+      {
+        "name": "secalertbench.json",
+        "sha256": "33f95305d1c42f8e615e4f94066119570859dee7eb086dff7c2273536c932ea3",
+        "hash_status": "computed",
+        "bytes": 21719558
+      },
+      {
+        "name": "secalertbench_attack.json",
+        "sha256": "4ce14a3439746d53f2634f90bff176ec904d91c3c7f5de5b9edcc53043eaab61",
+        "hash_status": "computed",
+        "bytes": 3877335
+      },
+      {
+        "name": "secalertbench_non_attack.json",
+        "sha256": "8fc6301c1915524d0c1eaa0f84e49cc600daf413edfe0ea0c61897d71496da27",
+        "hash_status": "computed",
+        "bytes": 17842225
+      },
+      {
+        "name": "Foundation-Sec-8B-Instruct.json",
+        "sha256": "515494c1a5de9f102b029d835d7edc309df9754d59358f2be1b1781a6f315cfb",
+        "hash_status": "computed",
+        "bytes": 5418296
+      },
+      {
+        "name": "SecGPT-14B.json",
+        "sha256": "e2d716d376d1f2542a7952bb2c461bde6df7b0a5e8319c8981904b1e9a01eb66",
+        "hash_status": "computed",
+        "bytes": 5410656
+      },
+      {
+        "name": "SecGPT-7B.json",
+        "sha256": "65a9cc94b26e9bb33e074f8abbc52835196126097f504f558a9a41cd880cf093",
+        "hash_status": "computed",
+        "bytes": 5445699
+      },
+      {
+        "name": "claude-sonnet-4-5-20250929.json",
+        "sha256": "f39bd587b2510d19a5e30b8562c9d1c08fbee397fb1c9170c8a9a8d3d1edc209",
+        "hash_status": "computed",
+        "bytes": 5468635
+      },
+      {
+        "name": "deepseek-v3.1.json",
+        "sha256": "6c4c363c0540ef8f558619b8553763fe5b9798cf85da75132b894b1bb1789f79",
+        "hash_status": "computed",
+        "bytes": 5585284
+      },
+      {
+        "name": "gemini-3-flash-preview.json",
+        "sha256": "4aae603a7f3f1b62dd991274aa2f7f9bcb326a3573016bfcd31f0aa3fc881c56",
+        "hash_status": "computed",
+        "bytes": 5544345
+      },
+      {
+        "name": "glm-4.7.json",
+        "sha256": "d10637bbebd883f44f17985d9bfef2e8463528c13b2b42d079ececa58e5d71eb",
+        "hash_status": "computed",
+        "bytes": 5480740
+      },
+      {
+        "name": "gpt-5.1-chat.json",
+        "sha256": "31d2743a8ff931359da1cdbc9fd4552cf297ce6865c6cadc903e0cb215da1468",
+        "hash_status": "computed",
+        "bytes": 5531927
+      },
+      {
+        "name": "kimi-k2-instruct-0905.json",
+        "sha256": "17afc98884479a419ce76c4debd0d1c13e20d47dbc673d9ed48a92a5598fa80d",
+        "hash_status": "computed",
+        "bytes": 5473747
+      },
+      {
+        "name": "llama-3.1-405b-instruct.json",
+        "sha256": "53f9e36e91c38000ca610d50612352d7dc0ac5e1063fa00525d927d676712db4",
+        "hash_status": "computed",
+        "bytes": 5591725
+      },
+      {
+        "name": "llama-3.1-70b-instruct.json",
+        "sha256": "a03533c269422a7dd6f9d6f9c28f963d974bbdafa4f9b6719f2c0a004e1c9434",
+        "hash_status": "computed",
+        "bytes": 5501719
+      },
+      {
+        "name": "llama-3.1-8b-instruct.json",
+        "sha256": "c116ca693a865d8f7b24ec3fa46e9b9e75e3a87dcd741b5edda526744067dddb",
+        "hash_status": "computed",
+        "bytes": 5609277
+      },
+      {
+        "name": "qwen3-14b.json",
+        "sha256": "51e4fa33828cafcc4ae27637db7e7e8df48532b78aa57485b8f0782a7e6d2610",
+        "hash_status": "computed",
+        "bytes": 5488763
+      },
+      {
+        "name": "qwen3-235b-a22b-instruct-2507.json",
+        "sha256": "0627ecfd93bb986c1c998135f2054ac4a50a78538022b33e524489e79cbb24d0",
+        "hash_status": "computed",
+        "bytes": 5461925
+      }
+    ],
+    "protocol": "binary_soc_alert_triage",
+    "comparable_to_upstream": false,
+    "sample_scope": "subset",
+    "upstream_n": 8322,
+    "selected_n": 1,
+    "sample_manifest": [
+      "sha256:0d1d0c354cefea92aceb"
+    ],
+    "sample_manifest_sha256": "5687505a0395e4a1de6b128fac0d332e0bdb2e3287e7ba7a599944df3bf8276f",
+    "selection": "seeded_stratified",
+    "size_policy": {
+      "single_asset_max_bytes": 1073741824,
+      "total_cache_max_bytes": 5368709120
+    }
+  },
+  "asset_root": "/home/cjy/cyberagent/cyberorion/benchmarks/external/secalertbench",
+  "size_policy_decision": {
+    "forced_subset": false,
+    "reason": null,
+    "requested_profile": "daily",
+    "effective_profile": "daily",
+    "observed_bytes": 245620832
+  },
+  "representative_asset_decision": {
+    "forced_subset": false,
+    "source": "official_assets"
+  },
+  "path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260824_075831_secalertbench_agent_n1.json",
+  "sample_manifest_path": "/home/cjy/cyberagent/cyberorion/logs/bench/20260824_075831_secalertbench_agent_n1.sample.json"
+}
