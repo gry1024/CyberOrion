@@ -1,0 +1,30 @@
+name: blue_ir_loose
+version: 1
+description: |
+  蓝队 IR 宽松 SOP：按阶段给出建议 Worker 与必做检查，
+  但 LLM 可根据现场判断调整顺序或跳过可选步骤。
+phases:
+  - id: 1
+    name: alert_triage
+    name_zh: 告警分诊
+    suggested_workers: [alert_triage]
+    expected_tools: [host_isolation, block_ip]
+    kb_query: "windows security event log triage"
+    min_steps: 2
+    strict: false
+  - id: 2
+    name: threat_hunt
+    name_zh: 威胁狩猎
+    suggested_workers: [threat_hunter]
+    expected_tools: [harden_service]
+    kb_query: "ATT&CK lateral movement detection"
+    min_steps: 3
+    strict: false
+  - id: 3
+    name: incident_response
+    name_zh: 应急响应
+    suggested_workers: [incident_responder]
+    expected_tools: [host_isolation, password_reset, krbtgt_rotate]
+    kb_query: "AD incident response checklist"
+    min_steps: 5
+    strict: true

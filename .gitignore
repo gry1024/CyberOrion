@@ -1,0 +1,86 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*credentials*
+*secret*
+
+# Python environments and generated files
+cai_env/
+.venv/
+venv/
+env/
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage*
+**/htmlcov/
+
+# JavaScript dependencies and build output
+**/node_modules/
+**/dist/
+**/.vite/
+**/.next/
+
+# Runtime output and temporary workspaces
+logs/
+**/logs/
+tmp/
+**/tmp/
+workspaces/
+**/workspaces/
+task_environments/
+**/task_environments/
+report/
+.tmp_read/
+tmpread/
+range/
+
+# Large generated datasets and downloaded assets
+benchmarks/
+benchmarks/**/data/
+benchmarks/**/datasets/
+benchmarks/**/outputs/
+benchmarks/**/external/
+benchmarks/**/venv/
+benchmarks/**/.venv/
+**/*.csv
+**/*.parquet
+**/*.npz
+**/*.pkl
+**/*.pt
+**/*.bin
+
+# Local caches and editor files
+.claude/
+.codex/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Nested repository metadata; the root repository owns the combined tree
+**/.git/
+
+# One-off diagnostics and generated scratch files
+_*.py
+_*.sh
+diag*.sh
+fix*.py
+inj*.py
+patch*.py
+remote_diag_local.sh
+restart*
+retry_ssh.sh
+verify_scenario.py
+*_test.txt
+zzz_*
+nohup.out

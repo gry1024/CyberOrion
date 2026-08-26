@@ -1,0 +1,122 @@
+# CyberOrion arena targets.
+# Self-contained: 3 vulnerable targets on an isolated bridge network.
+# Start:  docker compose up -d                      (web_basic 3 targets)
+# Start heavy set:  docker compose --profile web_plus up -d
+# Stop:   docker compose down
+#
+# The dvwa/weak_ssh/log4j services carry no `profiles:` key, so they
+# always start (default = web_basic). Heavier targets are opt-in via
+# compose profiles.
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    container_name: cyberorion_dvwa
+    ports:
+      - "28080:80"
+    environment:
+      - SECURITY_LEVEL=low
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.10
+    restart: unless-stopped
+
+  log4j:
+    image: vulhub/solr:8.11.0
+    container_name: cyberorion_log4j
+    ports:
+      - "8983:8983"
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.20
+    restart: unless-stopped
+
+  weak_ssh:
+    build: ./weak_ssh
+    container_name: cyberorion_weak_ssh
+    ports:
+      - "22222:22"
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.12
+    restart: unless-stopped
+
+  # --- profile: web_plus (opt-in heavier targets) -------------------------
+
+  webgoat:
+    image: webgoat/webgoat:latest
+    container_name: cyberorion_webgoat
+    profiles: [web_plus]
+    ports:
+      - "28081:8080"
+    volumes:
+      - ./scenarios/flags/webgoat_flag.txt:/opt/flag.txt:ro
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.13
+    restart: unless-stopped
+
+  vampi:
+    image: erev0s/vampi:latest
+    container_name: cyberorion_vampi
+    profiles: [web_plus]
+    environment:
+      - vulnerable=1
+    ports:
+      - "25000:5000"
+    volumes:
+      - ./scenarios/flags/vampi_flag.txt:/opt/flag.txt:ro
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.14
+    restart: unless-stopped
+
+  # --- Samba4 AD 域控靶场（红队 AD 渗透演练）------------------------------
+  # 提供 AD 域环境，含 AS-REP/Kerberoasting/ADCS/ACL滥用/GPP/委派等漏洞。
+  # 首次启动会自动 provision 域 CONTOSO (realm contoso.local) 并配置漏洞。
+
+  cyberorion_samba_ad:
+    build: ./docker/samba-ad
+    container_name: cyberorion_samba_ad
+    hostname: dc01
+    networks:
+      cyberorion_net:
+        ipv4_address: 172.29.0.30
+    ports:
+      - "25389:389"   # LDAP
+      - "25445:445"   # SMB
+      - "2588:88"     # Kerberos
+      - "25135:135"   # RPC
+    environment:
+      - SAMBA_DOMAIN=CONTOSO
+      - SAMBA_REALM=contoso.local
+      - SAMBA_ADMIN_PASSWORD=P@ssw0rd2024!
+    volumes:
+      - samba_ad_data:/var/lib/samba
+    restart: always
+
+  # --- future: crAPI (profile: api_heavy) ---------------------------------
+  # OWASP crAPI (https://github.com/OWASP/crAPI) is a full microservices
+  # stack (mongodb, postgres, mailhog, gateway, ...); too heavy for the
+  # default arena. When needed, vendor its compose file and attach the
+  # services to cyberorion_net under a dedicated profile, e.g.:
+  #
+  #   crapi_gateway:
+  #     image: crapi/crapi-gateway:latest
+  #     container_name: cyberorion_crapi
+  #     profiles: [api_heavy]
+  #     ports:
+  #       - "28888:80"
+  #     networks:
+  #       cyberorion_net:
+  #         ipv4_address: 172.29.0.15
+
+networks:
+  cyberorion_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+volumes:
+  samba_ad_data:

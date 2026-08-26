@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Environment / secrets (NEVER commit)
+.env
+.env.local
+*.key
+
+# CAI framework tracing logs (auto-generated, large, not needed for repro)
+logs/cai_*.jsonl
+logs/*.log
+
+# Workspaces (agent-generated debug scripts, not part of the product)
+workspaces/
+
+# Logs: keep benchmark JSON/Markdown results for GitHub auditability;
+# ignore only timestamped temp sessions.
+logs/session_2026*/
+logs/test_runs/
+
+# Benchmark workspace safety: track curated fixtures/results, not copied venvs or nested clones.
+benchmarks/venv/
+benchmarks/**/.venv/
+benchmarks/**/.git/
+benchmarks/**/__pycache__/
+benchmarks/external/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Temporary fix scripts
+_fix_bug.py
+_tmp_*.py
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Sync test artifact
+_sync_test.txt
+
+# KB generated data (rebuild: python -m cyberorion.kb.build_kb --with-malpedia)
+cyberorion/kb/data/enterprise-attack.json
+cyberorion/kb/data/attack_kb.jsonl
+cyberorion/kb/data/attack_kb_vecs.npz
+cyberorion/kb/data/malpedia_families.json
+
+# Session artifacts & samples (large transcripts)
+samples/
+state.txt
+
+# CICIDS2017 dataset (844MB, public) — download separately, see docs/REPRODUCE.md
+cyberorion/traffic/data/cicids2017/*.csv

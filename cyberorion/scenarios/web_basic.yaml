@@ -1,0 +1,65 @@
+name: web_basic
+description: >
+  Default 3-target arena: DVWA web app, weak-password SSH box, and a
+  Log4Shell-vulnerable Solr instance on an isolated bridge network.
+  Mirrors docker-compose.yml at the repo root.
+network:
+  subnet: 172.29.0.0/24
+  compose_profiles: [web_basic]
+
+targets:
+  dvwa:
+    container: cyberorion_dvwa
+    ip: 172.29.0.10
+    services:
+      http:
+        container_port: 80
+        host_port: 28080
+        proto: http
+        base_url: "http://localhost:28080"
+    logs:
+      web_access: /var/log/apache2/access.log
+      web_error: /var/log/apache2/error.log
+    ground_truth:
+      creds:
+        dvwa_admin: "admin:password"
+      users: []
+      flags: []
+      vulns: [sqli, cmdi, upload, brute_force]
+
+  weak_ssh:
+    container: cyberorion_weak_ssh
+    ip: 172.29.0.12
+    services:
+      ssh:
+        container_port: 22
+        host_port: 22222
+        proto: ssh
+    logs:
+      auth: /var/log/auth.log
+    ground_truth:
+      # From weak_ssh/Dockerfile (chpasswd).
+      creds:
+        user: "user:user"
+        admin: "admin:admin123"
+        ctf: "ctf:ctf"
+      users: [root, user, admin, ctf]
+      flags: [/home/ctf/flag.txt]
+      vulns: [weak_password, password_auth, root_login]
+
+  log4j:
+    container: cyberorion_log4j
+    ip: 172.29.0.20
+    services:
+      http:
+        container_port: 8983
+        host_port: 8983
+        proto: http
+        base_url: "http://localhost:8983"
+    logs:
+      solr: /var/solr/logs/solr.log
+    ground_truth:
+      creds: {}
+      users: []
+      flags: []
+      vulns: [log4shell]  # CVE-2021-44228, vulhub/solr:8.11.0

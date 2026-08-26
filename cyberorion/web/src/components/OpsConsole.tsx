@@ -1,0 +1,70 @@
+// OpsConsole — 作战台控制条（Cursor 式：平铺一行按钮，无圆角卡）
+// 会话生命周期 + 红蓝启停 + 巡逻 + 靶机信息入口。
+// 场景选择由 ArenaView 顶部的 RangeCards 承担,此处不重复。
+import { useState } from 'react'
+import { useArena } from '../arena'
+import { api } from '../api'
+import { pushToast } from '../toasts'
+import { ScenarioInfoModal } from './ScenarioInfoModal'
+
+async function call(fn: () => Promise<unknown>, label: string) {
+  try {
+    await fn()
+  } catch (e) {
+    pushToast(`${label}失败：${e instanceof Error ? e.message : String(e)}`, { title: '作战台' })
+  }
+}
+
+export function OpsConsole() {
+  const { status, connected } = useArena()
+  const [busy, setBusy] = useState(false)
+  const [patrol, setPatrol] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
+  const active = status.session_active
+  const starting = Boolean(status.session_starting)
+  const redRun = status.red_running
+  const blueRun = status.blue_running
+  const pending = new Set(status.pending_agent_starts ?? [])
+
+  const wrap = (fn: () => Promise<unknown>, label: string) => {
+    setBusy(true)
+    void call(fn, label).finally(() => setBusy(false))
+  }
+
+  const togglePatrol = () => {
+    const next = !patrol
+    setPatrol(next)
+    void call(next ? api.bluePatrolStart : api.bluePatrolStop, next ? '开启巡逻' : '关闭巡逻')
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {!active ? (
+        <span className="font-mono text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
+          {starting ? '靶场启动中…' : '在作战舱顶部选择靶场后启动'}
+        </span>
+      ) : (
+        <button className="btn btn-danger" disabled={busy} onClick={() => wrap(api.sessionStop, '停止会话')}>停止</button>
+      )}
+      {active && (
+        <>
+          <button className="btn" disabled={busy || redRun || pending.has('red')} onClick={() => wrap(api.redStart, '红方')}>红方 ▶</button>
+          <button className="btn" disabled={busy || !redRun} onClick={() => wrap(api.redStop, '红方')}>红方 ■</button>
+          <button className="btn" disabled={busy || blueRun || pending.has('blue')} onClick={() => wrap(api.blueStart, '蓝方')}>蓝方 ▶</button>
+          <button className="btn" disabled={busy || !blueRun} onClick={() => wrap(api.blueStop, '蓝方')}>蓝方 ■</button>
+        </>
+      )}
+      <button className={`btn ${patrol ? '' : 'btn-ghost'}`} disabled={busy} onClick={togglePatrol}>
+        {patrol ? '巡逻中' : '巡逻'}
+      </button>
+      <button className="btn btn-ghost" onClick={() => setInfoOpen(true)} title="靶机信息（靶机 / 红蓝期望）">靶机信息</button>
+      <span className="ml-auto flex items-center gap-2 font-mono text-[10.5px]" style={{ color: 'var(--color-fg-4)' }}>
+        <span className="dot" style={{ background: connected ? 'var(--color-green)' : 'var(--color-red)' }} />
+        {connected ? '在线' : '离线'}
+        {starting && <span>启动中</span>}
+        {active && <span>回合 #{status.round ?? 0}</span>}
+      </span>
+      {infoOpen && <ScenarioInfoModal onClose={() => setInfoOpen(false)} />}
+    </div>
+  )
+}

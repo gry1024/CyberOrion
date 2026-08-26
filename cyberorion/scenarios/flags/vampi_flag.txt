@@ -1,0 +1,1 @@
+flag{vampi_token_forge_2026}

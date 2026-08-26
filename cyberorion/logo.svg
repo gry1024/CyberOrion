@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="shield" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1D1D1F"/>
+      <stop offset="100%" stop-color="#0A0A0B"/>
+    </linearGradient>
+  </defs>
+  <!-- Shield outline -->
+  <path d="M100 20 L170 50 L170 110 C170 150 140 175 100 185 C60 175 30 150 30 110 L30 50 Z"
+        fill="url(#shield)" stroke="#86868B" stroke-width="1.5" opacity="0.95"/>
+  <!-- Orion's belt (3 stars) -->
+  <circle cx="100" cy="85" r="4" fill="#F5F5F7"/>
+  <circle cx="80" cy="105" r="4" fill="#F5F5F7"/>
+  <circle cx="120" cy="105" r="4" fill="#F5F5F7"/>
+  <!-- Connecting lines -->
+  <line x1="100" y1="85" x2="80" y2="105" stroke="#86868B" stroke-width="0.8" opacity="0.5"/>
+  <line x1="100" y1="85" x2="120" y2="105" stroke="#86868B" stroke-width="0.8" opacity="0.5"/>
+  <line x1="80" y1="105" x2="120" y2="105" stroke="#86868B" stroke-width="0.8" opacity="0.5"/>
+  <!-- Red dot (attacker) top-left -->
+  <circle cx="60" cy="60" r="3" fill="#FF3B30" opacity="0.8"/>
+  <!-- Blue dot (defender) top-right -->
+  <circle cx="140" cy="60" r="3" fill="#0A84FF" opacity="0.8"/>
+  <!-- Scan line -->
+  <line x1="50" y1="130" x2="150" y2="130" stroke="#0A84FF" stroke-width="0.5" opacity="0.3"/>
+  <line x1="55" y1="140" x2="145" y2="140" stroke="#0A84FF" stroke-width="0.5" opacity="0.2"/>
+  <line x1="60" y1="150" x2="140" y2="150" stroke="#0A84FF" stroke-width="0.5" opacity="0.1"/>
+</svg>

@@ -1,0 +1,146 @@
+{
+    "qwen3.7-max": {
+        "stat_per_model": {
+            "avg_score": 0.6169655741084311,
+            "total_score": 47.50634920634919,
+            "correct_mc_count": 26,
+            "incorrect_mc_count": 51,
+            "response_parsing_error_count": 0,
+            "correct_mc_pct": 0.33766233766233766
+        },
+        "stat_per_model_per_topic": {
+            "Risk Assessment": {
+                "avg_score": 0.6087301587301588,
+                "total_score": 5.478571428571429,
+                "correct_mc_count": 2,
+                "incorrect_mc_count": 7,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.2222222222222222
+            },
+            "Evasion Techniques": {
+                "avg_score": 0.5844444444444444,
+                "total_score": 5.844444444444444,
+                "correct_mc_count": 1,
+                "incorrect_mc_count": 9,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.1
+            },
+            "Behavioral Analysis": {
+                "avg_score": 0.8749999999999999,
+                "total_score": 13.999999999999998,
+                "correct_mc_count": 13,
+                "incorrect_mc_count": 3,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.8125
+            },
+            "File Operations": {
+                "avg_score": 0.5858974358974358,
+                "total_score": 7.616666666666666,
+                "correct_mc_count": 1,
+                "incorrect_mc_count": 12,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.07692307692307693
+            },
+            "System Interactions": {
+                "avg_score": 0.575925925925926,
+                "total_score": 5.183333333333334,
+                "correct_mc_count": 2,
+                "incorrect_mc_count": 7,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.2222222222222222
+            },
+            "MITRE ATT&CK Framework Mapping": {
+                "avg_score": 0.5530303030303031,
+                "total_score": 6.083333333333334,
+                "correct_mc_count": 5,
+                "incorrect_mc_count": 6,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.45454545454545453
+            },
+            "Privilege Escalation": {
+                "avg_score": 0.3333333333333333,
+                "total_score": 1.0,
+                "correct_mc_count": 1,
+                "incorrect_mc_count": 2,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.3333333333333333
+            },
+            "Persistence Techniques": {
+                "avg_score": 0.3833333333333333,
+                "total_score": 2.3,
+                "correct_mc_count": 1,
+                "incorrect_mc_count": 5,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.16666666666666666
+            }
+        },
+        "stat_per_model_per_difficulty": {
+            "medium": {
+                "avg_score": 0.5011640211640211,
+                "total_score": 7.517460317460317,
+                "correct_mc_count": 3,
+                "incorrect_mc_count": 12,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.2
+            },
+            "easy": {
+                "avg_score": 0.6472693032015068,
+                "total_score": 38.1888888888889,
+                "correct_mc_count": 22,
+                "incorrect_mc_count": 37,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.3728813559322034
+            },
+            "hard": {
+                "avg_score": 0.6,
+                "total_score": 1.7999999999999998,
+                "correct_mc_count": 1,
+                "incorrect_mc_count": 2,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.3333333333333333
+            }
+        },
+        "stat_per_model_per_attack": {
+            "infostealers": {
+                "avg_score": 0.5576719576719577,
+                "total_score": 11.71111111111111,
+                "correct_mc_count": 8,
+                "incorrect_mc_count": 13,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.38095238095238093
+            },
+            "um_unhooking": {
+                "avg_score": 0.6121212121212122,
+                "total_score": 6.733333333333333,
+                "correct_mc_count": 4,
+                "incorrect_mc_count": 7,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.36363636363636365
+            },
+            "ransomware": {
+                "avg_score": 0.5944444444444444,
+                "total_score": 10.7,
+                "correct_mc_count": 5,
+                "incorrect_mc_count": 13,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.2777777777777778
+            },
+            "killers": {
+                "avg_score": 0.6389610389610391,
+                "total_score": 7.028571428571429,
+                "correct_mc_count": 2,
+                "incorrect_mc_count": 9,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.18181818181818182
+            },
+            "remcos": {
+                "avg_score": 0.7083333333333333,
+                "total_score": 11.333333333333332,
+                "correct_mc_count": 7,
+                "incorrect_mc_count": 9,
+                "response_parsing_error_count": 0,
+                "correct_mc_pct": 0.4375
+            }
+        }
+    }
+}

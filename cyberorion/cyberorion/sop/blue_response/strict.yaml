@@ -1,0 +1,30 @@
+name: blue_ir_strict
+version: 1
+description: |
+  蓝队 IR 严格 SOP：每个阶段必须按顺序执行，不可跳过。
+  适合关键事件处置或审计场景。
+phases:
+  - id: 1
+    name: alert_triage
+    name_zh: 告警分诊（强制）
+    suggested_workers: [alert_triage]
+    expected_tools: [host_isolation, block_ip]
+    kb_query: "windows security event log triage"
+    min_steps: 3
+    strict: true
+  - id: 2
+    name: threat_hunt
+    name_zh: 威胁狩猎（强制）
+    suggested_workers: [threat_hunter]
+    expected_tools: [harden_service]
+    kb_query: "ATT&CK lateral movement detection"
+    min_steps: 5
+    strict: true
+  - id: 3
+    name: incident_response
+    name_zh: 应急响应（强制）
+    suggested_workers: [incident_responder]
+    expected_tools: [host_isolation, password_reset, krbtgt_rotate, revoke_rbcd]
+    kb_query: "AD incident response checklist"
+    min_steps: 6
+    strict: true

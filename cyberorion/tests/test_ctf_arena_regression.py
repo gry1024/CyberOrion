@@ -1,0 +1,306 @@
+﻿"""Regression tests for the production CTF arena path.
+
+The public /api/session|red|blue routes must run the web/SSH CTF arena
+controller, not the AD-only ControllerV2 demo loop. ControllerV2 remains
+available only under /api/v2/* compatibility endpoints.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+from cyberorion.core.event_bus import EventBus
+from cyberorion.core.session_state import SessionState
+from cyberorion.telemetry.binding import get_store
+
+
+def test_server_main_routes_use_ctf_controller() -> None:
+    import server
+
+    assert server.controller.__class__.__module__ == "cyberorion.core.controller"
+    assert server.controller.__class__.__name__ == "Controller"
+
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    main_api_region = source.split("# V2 API 端点", 1)[0]
+    assert "controller = ControllerV2" not in main_api_region
+    assert "controller_v2.start_red" not in main_api_region
+    assert "controller_v2.start_blue" not in main_api_region
+    assert "dispatch_recon" not in server._red_manual_prompt()
+    assert "Domain Admin" not in server._red_manual_prompt()
+
+
+def test_ctf_controller_binds_telemetry_store_for_blue_tools(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from cyberorion import arena_reset
+    from cyberorion.agents import blue_team
+    from cyberorion.core.controller import Controller
+    from cyberorion.telemetry.collectors import TelemetryCollector
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(arena_reset, "reset_all", lambda _scenario: {"status": "ok"})
+    monkeypatch.setattr(TelemetryCollector, "start", lambda _self: None)
+
+    async def stop_collector(_self) -> None:
+        return None
+
+    monkeypatch.setattr(TelemetryCollector, "stop", stop_collector)
+
+    def fake_red_agent():
+        return SimpleNamespace(name="fake-red")
+
+    def fake_blue_team(_scenario):
+        return SimpleNamespace(name="fake-blue")
+
+    monkeypatch.setattr("cyberorion.agent.build_red_agent", fake_red_agent)
+    monkeypatch.setattr(blue_team, "build_blue_team", fake_blue_team)
+    monkeypatch.setattr(blue_team, "set_event_bus", lambda _bus: None)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        await controller.start_session("web_basic")
+        try:
+            assert controller.get_status()["session_active"] is True
+            assert controller.store is get_store()
+            assert controller._red_agent.name == "fake-red"
+            assert controller._blue_agent.name == "fake-blue"
+        finally:
+            await controller.stop_session()
+            assert get_store() is None
+            assert controller.get_status()["session_active"] is False
+
+    asyncio.run(run())
+
+
+def test_ctf_controller_persists_full_runtime_events(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from cyberorion import arena_reset
+    from cyberorion.core.controller import Controller
+    from cyberorion.core.event_bus import Event
+    from cyberorion.telemetry.collectors import TelemetryCollector
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(arena_reset, "reset_all", lambda _scenario: {"status": "ok"})
+    monkeypatch.setattr(TelemetryCollector, "start", lambda _self: None)
+    monkeypatch.setattr(TelemetryCollector, "stop", lambda _self: asyncio.sleep(0))
+
+    async def run() -> None:
+        bus = EventBus()
+        controller = Controller(bus, SessionState(), build_agents_on_start=False)
+        await controller.start_session("web_basic")
+        assert controller.store is not None
+        session_dir = Path(controller.store.path).parent
+
+        full_output = "FULL-TOOL-OUTPUT:" + "x" * 6000
+        await bus.publish(Event(
+            type="tool_output",
+            side="red",
+            data={"tool": "long_tool", "output": "short", "raw_output": full_output},
+        ))
+        await controller.stop_session()
+
+        runtime_log = session_dir / "runtime_events.jsonl"
+        timeline_log = session_dir / "timeline.jsonl"
+        llm_log = session_dir / "llm_trace.jsonl"
+        manifest = session_dir / "log_manifest.json"
+
+        assert runtime_log.is_file()
+        assert timeline_log.is_file()
+        assert llm_log.is_file()
+        assert manifest.is_file()
+        assert full_output in runtime_log.read_text(encoding="utf-8")
+        assert full_output in timeline_log.read_text(encoding="utf-8")
+        assert full_output in llm_log.read_text(encoding="utf-8")
+
+    asyncio.run(run())
+
+
+def test_public_control_routes_delegate_to_ctf_controller(monkeypatch) -> None:
+    """Catches regressions where public controls return hard-coded V2 errors."""
+    import server
+
+    calls: list[str] = []
+
+    async def red_pause() -> None:
+        calls.append("red_pause")
+
+    async def red_resume() -> None:
+        calls.append("red_resume")
+
+    async def blue_pause() -> None:
+        calls.append("blue_pause")
+
+    async def blue_resume() -> None:
+        calls.append("blue_resume")
+
+    async def blue_patrol_start(interval: float = 30.0) -> None:
+        calls.append(f"blue_patrol_start:{interval:g}")
+
+    async def blue_patrol_stop() -> None:
+        calls.append("blue_patrol_stop")
+
+    async def status() -> dict:
+        return {"session_active": True}
+
+    monkeypatch.setattr(server.controller, "pause_red", red_pause)
+    monkeypatch.setattr(server.controller, "resume_red", red_resume)
+    monkeypatch.setattr(server.controller, "pause_blue", blue_pause)
+    monkeypatch.setattr(server.controller, "resume_blue", blue_resume)
+    monkeypatch.setattr(server.controller, "start_blue_patrol", blue_patrol_start)
+    monkeypatch.setattr(server.controller, "stop_blue_patrol", blue_patrol_stop)
+    monkeypatch.setattr(server, "get_status", status)
+
+    async def run() -> None:
+        responses = [
+            await server.red_pause(),
+            await server.red_resume(),
+            await server.blue_pause(),
+            await server.blue_resume(),
+            await server.blue_patrol_start(interval=12.0),
+            await server.blue_patrol_stop(),
+        ]
+        assert all(response["ok"] is True for response in responses)
+        assert calls == [
+            "red_pause",
+            "red_resume",
+            "blue_pause",
+            "blue_resume",
+            "blue_patrol_start:12",
+            "blue_patrol_stop",
+        ]
+
+    asyncio.run(run())
+
+
+def test_red_start_returns_immediately_while_session_bootstraps(monkeypatch) -> None:
+    """Clicking start must not hold the HTTP request on slow arena bootstrap."""
+    import server
+
+    calls: list[str] = []
+
+    class SlowController:
+        def get_status(self) -> dict:
+            return {"session_active": False}
+
+        async def start_session(self) -> None:
+            calls.append("start_session")
+            await asyncio.sleep(0.2)
+            calls.append("session_ready")
+
+        async def start_red(self, prompt: str = "") -> None:
+            calls.append("start_red")
+
+    async def status() -> dict:
+        return {"session_active": False, "session_starting": True}
+
+    monkeypatch.setattr(server, "controller", SlowController())
+    monkeypatch.setattr(server, "get_status", status)
+
+    async def run() -> None:
+        started = time.monotonic()
+        response = await server.red_start()
+        elapsed = time.monotonic() - started
+        await asyncio.sleep(0.25)
+
+        assert response["ok"] is True
+        assert elapsed < 0.05
+        assert calls == ["start_session", "session_ready", "start_red"]
+
+    asyncio.run(run())
+
+
+def test_agent_runner_blocking_work_does_not_freeze_controller(monkeypatch) -> None:
+    from cyberorion.core import controller as controller_mod
+    from cyberorion.core.controller import Controller
+
+    async def blocking_run(*_args, **_kwargs) -> dict:
+        time.sleep(0.2)
+        return {"output": "done", "tool_calls": [], "trace_items": []}
+
+    monkeypatch.setattr(controller_mod.AgentRunner, "run", blocking_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        agent = SimpleNamespace(name="fake-red")
+        await controller.start_red(agent=agent, prompt="test")
+
+        started = time.monotonic()
+        await asyncio.sleep(0.01)
+        elapsed = time.monotonic() - started
+        await controller.stop_red()
+
+        assert elapsed < 0.05
+
+    asyncio.run(run())
+
+
+def test_stopping_blocked_agent_returns_promptly(monkeypatch) -> None:
+    from cyberorion.core import controller as controller_mod
+    from cyberorion.core.controller import Controller
+
+    async def blocking_run(*_args, **_kwargs) -> dict:
+        time.sleep(1.0)
+        return {"output": "done", "tool_calls": [], "trace_items": []}
+
+    monkeypatch.setattr(controller_mod.AgentRunner, "run", blocking_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        agent = SimpleNamespace(name="fake-red")
+        await controller.start_red(agent=agent, prompt="test")
+
+        started = time.monotonic()
+        await controller.stop_red()
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 0.3
+
+    asyncio.run(run())
+
+
+def test_scripted_red_workflow_verifies_weak_ssh(monkeypatch, tmp_path: Path) -> None:
+    from cyberorion import arena_reset
+    from cyberorion.agents import blue_team
+    from cyberorion.core.controller import Controller
+    from cyberorion.telemetry.collectors import TelemetryCollector
+    from cyberorion.tools import _common
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(arena_reset, "reset_all", lambda _scenario: {"status": "ok"})
+    monkeypatch.setattr(TelemetryCollector, "start", lambda _self: None)
+    monkeypatch.setattr(TelemetryCollector, "stop", lambda _self: asyncio.sleep(0))
+    monkeypatch.setattr("cyberorion.agent.build_red_agent", lambda: SimpleNamespace(name="fake-red"))
+    monkeypatch.setattr(blue_team, "build_blue_team", lambda _scenario: SimpleNamespace(name="fake-blue"))
+    monkeypatch.setattr(blue_team, "set_event_bus", lambda _bus: None)
+
+    def fake_run(cmd, timeout=60):
+        text = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if "/dev/tcp" in text:
+            return 0, "OPEN PORTS: 22222/open/ssh", ""
+        if "-l user" in text:
+            return 0, "uid=1000(user) gid=1000(user)", ""
+        return 255, "", "Permission denied"
+
+    monkeypatch.setattr(_common, "_run", fake_run)
+
+    async def run() -> None:
+        controller = Controller(EventBus(), SessionState())
+        await controller.start_session("web_basic")
+        try:
+            task = await controller.start_red()
+            await asyncio.wait_for(task, timeout=2)
+            assert controller.get_status()["red_history_count"] == 1
+            assert "SSH 弱口令" in controller._red_history[-1]
+            attacks = controller.store.query_attacks(limit=10)
+            assert any(
+                row["action"] == "ssh_bruteforce" and row["success"]
+                for row in attacks
+            )
+        finally:
+            await controller.stop_session()
+
+    asyncio.run(run())
