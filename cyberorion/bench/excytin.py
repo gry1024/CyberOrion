@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -19,19 +20,21 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .assets import ASSETS, BenchmarkAssetMissing, require_asset
+from .assets import ASSETS, BenchmarkAssetMissing, require_asset, sha256_file
 from .external_common import (
     DEFAULT_LOG_DIR, LLM_TIMEOUT, _model_name, make_llm, new_run_id,
     FAIR_ARM_BUDGET, MeteredLLM, apply_size_policy, bootstrap_ci, persist_run, provenance,
     read_records, resolve_representative_files, resource_usage, stratified_sample,
 )
-from .superagent_runtime import RuntimeConfig, run_reference, run_superagent
+from .superagent_runtime import RuntimeConfig, ToolSpec, run_reference, run_superagent
 
 SUITE = "excytin"
 MODES = ("base", "single", "agent")
 ARM_OF_MODE = {"base": "bare", "single": "single", "agent": "framework"}
 METHODOLOGY_STATUS = "external_track"
 _READ_ONLY = re.compile(r"^\s*(select|with|pragma\s+table_info)\b", re.I)
+_SQLITE_HEADER = b"SQLite format 3\x00"
+_SQLITE_ENV = "CYBERORION_EXCYTIN_SQLITE_PATH"
 
 
 def official_harness_status(root: Path) -> dict:
@@ -58,8 +61,72 @@ def official_harness_status(root: Path) -> dict:
         "official_scorer_files_present": bool(scorer_files),
         "components_present": components_present,
         "official_execution_selected": False,
+        "official_telemetry_backend": "MySQL containers via Inspect/SABER Docker harness",
+        "sqlite_projection_is_official": False,
         "status": "adapter_selected_non_official",
     }
+
+
+def validate_sqlite_asset(path: Path) -> dict:
+    """在任何 LLM 调用前验证显式 SQLite telemetry 投影。"""
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise BenchmarkAssetMissing(SUITE, f"SQLite telemetry 不存在: {resolved}")
+    try:
+        header = resolved.read_bytes()[:16]
+    except OSError as exc:
+        raise BenchmarkAssetMissing(
+            SUITE, f"无法读取 SQLite telemetry {resolved}: {exc}") from exc
+    if header != _SQLITE_HEADER:
+        raise BenchmarkAssetMissing(
+            SUITE,
+            f"拒绝非 SQLite telemetry: {resolved} (header={header.hex() or 'empty'})")
+    try:
+        with sqlite3.connect(f"file:{resolved}?mode=ro", uri=True) as conn:
+            sqlite_version = str(conn.execute("SELECT sqlite_version()").fetchone()[0])
+            tables = [str(row[0]) for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+    except sqlite3.Error as exc:
+        raise BenchmarkAssetMissing(
+            SUITE, f"SQLite telemetry 查询验证失败 {resolved}: {exc}") from exc
+    if not tables:
+        raise BenchmarkAssetMissing(SUITE, f"SQLite telemetry 没有表: {resolved}")
+    digest = sha256_file(resolved)
+    return {
+        "path": str(resolved), "format": "sqlite3", "header_verified": True,
+        "sqlite_version": sqlite_version, "table_count": len(tables),
+        "sha256": digest, "selection": "explicit_env" if os.getenv(_SQLITE_ENV)
+        else "single_validated_candidate",
+        "methodology": "CyberOrion SQLite projection (non-official)",
+    }
+
+
+def select_telemetry_database(files: list[Path]) -> tuple[Path, dict]:
+    """只接受显式路径或唯一且通过格式验证的 SQLite，绝不取列表首项。"""
+    configured = os.getenv(_SQLITE_ENV)
+    if configured:
+        path = Path(configured)
+        return path.expanduser().resolve(), validate_sqlite_asset(path)
+    candidates = sorted({p.resolve() for p in files if p.is_file()
+                         and p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}})
+    valid: list[tuple[Path, dict]] = []
+    rejected: list[str] = []
+    for candidate in candidates:
+        try:
+            valid.append((candidate, validate_sqlite_asset(candidate)))
+        except BenchmarkAssetMissing:
+            rejected.append(str(candidate))
+    if not valid:
+        detail = ("; rejected non-SQLite candidates: " + ", ".join(rejected)) if rejected else ""
+        raise BenchmarkAssetMissing(
+            SUITE,
+            "官方 ACESEvals telemetry 是 Inspect/SABER 管理的 MySQL Docker 环境；"
+            f"当前 adapter 需要通过 {_SQLITE_ENV} 指定经过验证的非官方 SQLite 投影"
+            + detail)
+    if len(valid) != 1:
+        raise BenchmarkAssetMissing(
+            SUITE, f"发现 {len(valid)} 个有效 SQLite；必须用 {_SQLITE_ENV} 明确选择")
+    return valid[0]
 
 
 def _normalise(row: dict, index: int) -> dict | None:
@@ -193,11 +260,7 @@ async def _tool_arm(question: dict, mode: str, llm: Any,
             return {"action": {"type": "complete", "summary": parsed}}
         return parsed
 
-    tools = {
-        "list_tables": sql_tools.list_tables,
-        "describe_table": sql_tools.describe_table,
-        "run_query": sql_tools.run_query,
-    }
+    tools = sql_tool_specs(sql_tools)
     config = RuntimeConfig(max_steps=18, max_llm_calls=18, max_tool_calls=12,
                            max_dispatches=5, max_role_steps=5)
     result = await (run_superagent if mode == "agent" else run_reference)(
@@ -207,6 +270,23 @@ async def _tool_arm(question: dict, mode: str, llm: Any,
         role_tools={role: tools.keys() for role in ("watcher", "analyst", "hunter", "responder")},
     )
     return result["output"], result
+
+
+def sql_tool_specs(sql_tools: ReadOnlySQLTools) -> dict[str, ToolSpec]:
+    """返回显式、可审计的 SQLite 工具 schema。"""
+    return {
+        "list_tables": ToolSpec(
+            "list_tables", sql_tools.list_tables, "List available telemetry tables.",
+            {"type": "object", "properties": {}, "additionalProperties": False}),
+        "describe_table": ToolSpec(
+            "describe_table", sql_tools.describe_table, "Describe one telemetry table.",
+            {"type": "object", "properties": {"table": {"type": "string"}},
+             "required": ["table"], "additionalProperties": False}),
+        "run_query": ToolSpec(
+            "run_query", sql_tools.run_query, "Run one read-only SQL SELECT/WITH query.",
+            {"type": "object", "properties": {"sql": {"type": "string"}},
+             "required": ["sql"], "additionalProperties": False}),
+    }
 
 
 async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
@@ -219,17 +299,15 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
     root, files = require_asset(SUITE)
     harness_status = official_harness_status(root)
     data_files, representative_decision = resolve_representative_files(SUITE, files)
+    # Validate before question sampling, LLM construction, or any model call.
+    database, database_validation = select_telemetry_database(data_files)
     questions = load_questions(data_files)
-    databases = [p for p in data_files if p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}]
     if not questions:
         raise BenchmarkAssetMissing(SUITE, "未识别 ACESEvals YAML/JSON 题目与可评分目标")
-    if mode != "base" and not databases:
-        raise BenchmarkAssetMissing(
-            SUITE, "工具臂需要 SQLite 遥测投影；官方 ACESEvals 模式应使用其 Docker/Inspect harness")
     count, size_decision = apply_size_policy(
         SUITE, profile, n, len(questions), files)
     selected = stratified_sample(questions, count, seed, ("incident", "hop_length"))
-    sql_tools = ReadOnlySQLTools(databases[0]) if databases else None
+    sql_tools = ReadOnlySQLTools(database)
     llm = llm or make_llm(timeout=LLM_TIMEOUT)
     sem = asyncio.Semaphore(max(1, concurrency))
     output: list[dict | None] = [None] * len(selected)
@@ -324,6 +402,7 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         "size_policy_decision": size_decision,
         "representative_asset_decision": representative_decision,
         "official_harness_status": harness_status,
+        "telemetry_database_validation": database_validation,
         "score_methodology_label": "adapter_native_exact_match_non_official",
     }
     return persist_run(run, log_dir)

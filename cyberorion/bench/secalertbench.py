@@ -26,9 +26,41 @@ MODES = ("base", "single", "agent")
 ARM_OF_MODE = {"base": "bare", "single": "single", "agent": "framework"}
 METHODOLOGY_STATUS = "external_track"
 
+# SecAlertBench's pinned upstream schema has exactly one evaluation-only
+# field (``Label``).  The adapter also accepts common alternate schemas, so
+# all aliases used to derive gold are denied recursively before any payload
+# reaches a model.  Additional conventional target keys are denied to keep
+# nested ``alert``/``event`` wrappers fail-closed.
+EVALUATION_ONLY_KEYS = frozenset({
+    "label", "groundtruth", "verdict", "class", "gold", "target",
+    "expected", "expectedlabel", "truelabel", "y", "isattack",
+})
+UPSTREAM_MODEL_VISIBLE_FIELDS = frozenset({
+    "attack_type", "dip", "dport", "host", "kill_chain_all", "method",
+    "parameter", "proto", "req_body", "req_header", "rsp_body",
+    "rsp_header", "rsp_status", "rule_name", "sip", "sport", "uri", "xff",
+})
+
 
 def _first(row: dict, names: tuple[str, ...], default: Any = "") -> Any:
     return next((row[name] for name in names if row.get(name) is not None), default)
+
+
+def _evaluation_key(name: Any) -> bool:
+    canonical = re.sub(r"[^a-z0-9]", "", str(name).lower())
+    return canonical in EVALUATION_ONLY_KEYS
+
+
+def model_visible_payload(value: Any) -> Any:
+    """递归删除 gold/target 字段；此函数是所有模型可见告警的唯一出口。"""
+    if isinstance(value, dict):
+        return {str(key): model_visible_payload(item)
+                for key, item in value.items() if not _evaluation_key(key)}
+    if isinstance(value, list):
+        return [model_visible_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [model_visible_payload(item) for item in value]
+    return value
 
 
 def _normalise(row: dict, index: int) -> dict | None:
@@ -39,7 +71,8 @@ def _normalise(row: dict, index: int) -> dict | None:
         label = "benign"
     else:
         return None
-    payload = _first(row, ("alert", "event", "text", "description", "raw"), row)
+    payload = model_visible_payload(
+        _first(row, ("alert", "event", "text", "description", "raw"), row))
     stable = hashlib.sha256(json.dumps(row, ensure_ascii=False, sort_keys=True,
                                        default=str).encode("utf-8")).hexdigest()[:20]
     return {
@@ -315,6 +348,12 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         "asset_root": str(root),
         "size_policy_decision": size_decision,
         "representative_asset_decision": representative_decision,
+        "model_visible_schema_audit": {
+            "upstream_fields": sorted({"Label", *UPSTREAM_MODEL_VISIBLE_FIELDS}),
+            "evaluation_only_upstream_fields": ["Label"],
+            "model_visible_upstream_fields": sorted(UPSTREAM_MODEL_VISIBLE_FIELDS),
+            "recursive_denied_key_canonical_forms": sorted(EVALUATION_ONLY_KEYS),
+        },
         "selection_manifest": {
             "algorithm": "seeded_round_robin_stratified_v1",
             "strata": ["label", "alert_type", "enterprise"],

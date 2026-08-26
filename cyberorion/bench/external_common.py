@@ -72,6 +72,37 @@ def git_commit_sha() -> str | None:
         return None
 
 
+def git_provenance() -> dict[str, Any]:
+    """捕获提交树与工作树状态；任一 Git 查询失败都保持不完整。"""
+    def run(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], check=True, capture_output=True, text=True,
+            timeout=10,
+        ).stdout
+
+    try:
+        head = run("rev-parse", "HEAD").strip() or None
+        tree = run("rev-parse", "HEAD^{tree}").strip() or None
+        status = run("status", "--porcelain=v1", "--untracked-files=all")
+        dirty = bool(status.strip())
+        diff_sha = None
+        if dirty:
+            # Status includes untracked paths; the binary diff covers staged and
+            # unstaged tracked content.  Hash the combined audit material without
+            # persisting file contents or secrets in the run JSON.
+            diff = run("diff", "--binary", "HEAD")
+            diff_sha = hashlib.sha256((status + "\x00" + diff).encode("utf-8")).hexdigest()
+        return {
+            "git_head_sha": head, "git_tree_sha": tree,
+            "git_dirty": dirty, "git_diff_sha256": diff_sha,
+        }
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "git_head_sha": None, "git_tree_sha": None,
+            "git_dirty": None, "git_diff_sha256": None,
+        }
+
+
 def model_metadata(model: str | None = None) -> dict:
     """持久化非敏感模型设置；不记录 API key 或完整私有端点。"""
     configured = os.getenv("CAI_MODEL") or model or _model_name()
@@ -80,7 +111,8 @@ def model_metadata(model: str | None = None) -> dict:
         "provider": provider if sep else None,
         "model": name if sep else str(configured),
         "configured_model": str(configured),
-        "thinking": os.getenv("CO_BENCH_THINKING"),
+        "thinking": ("enabled" if os.getenv("CO_BENCH_THINKING") == "enabled"
+                     else "disabled"),
         "max_output_tokens": int(os.getenv("CO_BENCH_MAX_TOKENS", "4096")),
         "temperature": None,
         "usage_accounting": "provider_or_estimated_per_task",
@@ -248,7 +280,12 @@ def persist_run(run: dict, log_dir: str | Path = DEFAULT_LOG_DIR) -> dict:
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{run['run_id']}.json"
-    run.setdefault("git_commit_sha", git_commit_sha())
+    revision = git_provenance()
+    for key, value in revision.items():
+        run.setdefault(key, value)
+    # Retain the legacy name for old readers, but publication validation uses
+    # the complete four-field provenance contract above.
+    run.setdefault("git_commit_sha", run.get("git_head_sha"))
     run.setdefault("model_settings", model_metadata(run.get("model")))
     run["path"] = str(path)
     provenance_data = run.get("benchmark_provenance") or {}
@@ -276,5 +313,5 @@ __all__ = [
     "stratified_sample", "apply_size_policy", "bootstrap_ci",
     "FAIR_ARM_BUDGET", "resource_usage", "resolve_representative_files",
     "LLMBudgetExceeded", "MeteredLLM",
-    "git_commit_sha", "model_metadata",
+    "git_commit_sha", "git_provenance", "model_metadata",
 ]

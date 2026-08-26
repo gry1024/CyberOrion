@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import inspect
 import random
+import json
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -26,6 +27,8 @@ _INSTALL_HINT = (
     "pip install CybORG  # PyPI 0.2；CAGE-2 完整环境推荐 "
     "pip install git+https://github.com/cage-challenge/cage-challenge-2.git"
 )
+
+_SAFE_BLUE_ACTION_TYPES = frozenset({"Sleep", "Monitor", "Analyse", "Remove", "Restore"})
 
 
 def _heuristic_policy(observation: Any) -> Any:
@@ -111,6 +114,74 @@ def _challenge_action_index(wrapper: Any, action: Any) -> int | None:
     return None
 
 
+def _enum_actions(wrapper: Any) -> list[Any]:
+    """读取 ChallengeWrapper 内 EnumActionWrapper 的真实离散动作表。"""
+    current = getattr(wrapper, "env", None)
+    while current is not None:
+        choices = getattr(current, "possible_actions", None)
+        if isinstance(choices, list):
+            return choices
+        current = getattr(current, "env", None)
+    return []
+
+
+def canonical_safe_blue_actions(wrapper: Any) -> list[dict[str, Any]]:
+    """返回本步可直接交给 ``ChallengeWrapper.step`` 的安全 action IDs。"""
+    # Refresh the wrapper's current action space before reading the enum map.
+    wrapper.get_action_space("Blue")
+    rows = []
+    for action_id, action in enumerate(_enum_actions(wrapper)):
+        action_type = type(action).__name__
+        if action_type not in _SAFE_BLUE_ACTION_TYPES:
+            continue
+        rows.append({
+            "action_id": action_id,
+            "action_type": action_type,
+            "hostname": getattr(action, "hostname", None),
+            "agent": getattr(action, "agent", None),
+            "display": str(action),
+        })
+    if not any(row["action_type"] == "Sleep" for row in rows):
+        raise RuntimeError("ChallengeWrapper safe action space does not contain Sleep")
+    return rows
+
+
+def _json_safe(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _selected_action(spec: Any, available: list[dict[str, Any]]) -> tuple[int, dict, bool, str | None]:
+    """校验策略请求并返回精确 action id；非法请求显式降级到真实 Sleep。"""
+    by_id = {int(row["action_id"]): row for row in available}
+    sleep = next(row for row in available if row["action_type"] == "Sleep")
+    requested = spec.get("action_id") if isinstance(spec, dict) else None
+    try:
+        requested_id = int(requested)
+    except (TypeError, ValueError):
+        return int(sleep["action_id"]), sleep, False, "action_id is required and must be an integer"
+    selected = by_id.get(requested_id)
+    if selected is None:
+        return int(sleep["action_id"]), sleep, False, "action_id is not in current safe action space"
+    return requested_id, selected, True, None
+
+
+async def _invoke_async_policy(policy: Callable[..., Awaitable[dict]], observation: Any,
+                               available: list[dict[str, Any]], episode: int,
+                               step: int) -> Any:
+    try:
+        params = inspect.signature(policy).parameters
+    except (TypeError, ValueError):
+        params = {}
+    accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    kwargs = {"episode": episode, "step": step, "available_actions": available}
+    selected = kwargs if accepts_kwargs else {key: value for key, value in kwargs.items()
+                                               if key in params}
+    return await policy(observation, **selected)
+
+
 def run_cage2(episodes: int = 3, steps: int = 100,
               llm_driven: bool = False,
               policy: "Callable[[Any], dict] | None" = None,
@@ -190,6 +261,8 @@ def run_cage2(episodes: int = 3, steps: int = 100,
         restore_actions = illegal_actions = 0
         actions: list[dict] = []
         for _ in range(int(steps)):
+            requested_spec = None
+            executed_blue_action = None
             if llm_driven and policy is not None:
                 # 新 harness 通过 episode/step 边界让上层把 LLM/工具预算按整局
                 # 共享；旧的一参数策略保持兼容。不要用 TypeError 回退，因为
@@ -200,23 +273,38 @@ def run_cage2(episodes: int = 3, steps: int = 100,
                     params = {}
                 accepts_kwargs = any(
                     p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
-                spec = (policy(obs, episode=ep + 1, step=len(actions) + 1)
-                        if accepts_kwargs or {"episode", "step"}.issubset(params)
-                        else policy(obs))
+                available = canonical_safe_blue_actions(wrapped) if official_wrapper else []
+                policy_kwargs = {"episode": ep + 1, "step": len(actions) + 1,
+                                 "available_actions": available}
+                selected_kwargs = (policy_kwargs if accepts_kwargs else
+                                   {key: value for key, value in policy_kwargs.items()
+                                    if key in params})
+                requested_spec = policy(obs, **selected_kwargs)
             else:
-                spec = None
-            if llm_driven:
-                action, valid, invalid_reason = _mapped_action(spec)
+                requested_spec = None
+            if llm_driven and official_wrapper:
+                action_index, executed_blue_action, valid, invalid_reason = _selected_action(
+                    requested_spec, available)
+                action = _enum_actions(wrapped)[action_index]
+            elif llm_driven:
+                action, valid, invalid_reason = _mapped_action(requested_spec)
+                action_index = None
             else:
                 action, valid, invalid_reason = _heuristic_policy(obs), True, None
-            if official_wrapper:
-                action_index = _challenge_action_index(wrapped, action)
+                action_index = _challenge_action_index(wrapped, action) if official_wrapper else None
+            if official_wrapper and not llm_driven:
                 if action_index is None:
                     valid = False
                     invalid_reason = invalid_reason or "action not present in ChallengeWrapper action space"
-                    # Sleep 是官方离散表的第一个动作；此回退不会将无效动作
-                    # 伪装成有效处置，且 illegal_actions 仍被计入。
-                    action_index = 0
+                    available = canonical_safe_blue_actions(wrapped)
+                    sleep = next(row for row in available if row["action_type"] == "Sleep")
+                    action_index = int(sleep["action_id"])
+                    action = _enum_actions(wrapped)[action_index]
+                executed_blue_action = next(
+                    (row for row in canonical_safe_blue_actions(wrapped)
+                     if row["action_id"] == action_index),
+                    {"action_id": action_index, "action_type": type(action).__name__,
+                     "display": str(action)})
             restore_actions += int(action.__class__.__name__.lower() == "restore")
             illegal_actions += int(not valid)
             if official_wrapper:
@@ -227,6 +315,8 @@ def run_cage2(episodes: int = 3, steps: int = 100,
                                            result.done, getattr(result, "info", {}))
             total += float(reward or 0.0)
             actions.append({"blue": str(action),
+                            "requested_blue_action": _json_safe(requested_spec),
+                            "executed_blue_action": _json_safe(executed_blue_action),
                             "red": str(env.get_last_action("Red")),
                             "valid": valid, "invalid_reason": invalid_reason,
                             "reward": float(reward or 0.0)})
@@ -300,14 +390,22 @@ async def run_cage2_async(episodes: int = 3, steps: int = 100,
         restore_actions = illegal_actions = 0
         actions = []
         for step_index in range(int(steps)):
-            spec = await policy(obs, episode=ep + 1, step=step_index + 1)
-            action, valid, invalid_reason = _mapped_action(spec)
+            available = canonical_safe_blue_actions(wrapped) if official_wrapper else []
+            spec = await _invoke_async_policy(
+                policy, obs, available, ep + 1, step_index + 1)
             if official_wrapper:
-                action_index = _challenge_action_index(wrapped, action)
-                if action_index is None:
-                    valid = False
-                    invalid_reason = invalid_reason or "action not present in ChallengeWrapper action space"
-                    action_index = 0
+                action_index, executed_blue_action, valid, invalid_reason = _selected_action(
+                    spec, available)
+                # Execute the exact index selected from the same current enum
+                # table.  No action object reconstruction or approximate search.
+                action = _enum_actions(wrapped)[action_index]
+            else:
+                action, valid, invalid_reason = _mapped_action(spec)
+                action_index = None
+                executed_blue_action = {
+                    "action_id": None, "action_type": type(action).__name__,
+                    "display": str(action),
+                }
             restore_actions += int(action.__class__.__name__.lower() == "restore")
             illegal_actions += int(not valid)
             if official_wrapper:
@@ -317,7 +415,10 @@ async def run_cage2_async(episodes: int = 3, steps: int = 100,
                 obs, reward, done, info = (result.observation, result.reward,
                                            result.done, getattr(result, "info", {}))
             total += float(reward or 0.0)
-            actions.append({"blue": str(action), "red": str(env.get_last_action("Red")),
+            actions.append({"blue": str(action),
+                            "requested_blue_action": _json_safe(spec),
+                            "executed_blue_action": _json_safe(executed_blue_action),
+                            "red": str(env.get_last_action("Red")),
                             "valid": valid, "invalid_reason": invalid_reason,
                             "reward": float(reward or 0.0)})
             if done:

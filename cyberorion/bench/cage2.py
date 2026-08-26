@@ -14,7 +14,7 @@ from .external_common import (
     DEFAULT_LOG_DIR, FAIR_ARM_BUDGET, MeteredLLM, _model_name, bootstrap_ci, make_llm,
     new_run_id, persist_run, provenance,
 )
-from .superagent_runtime import RuntimeConfig, run_reference, run_superagent
+from .superagent_runtime import RuntimeConfig, ToolSpec, run_reference, run_superagent
 
 SUITE = "cage2"
 MODES = ("base", "single", "agent")
@@ -54,7 +54,8 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
         episode_states: dict[int, dict] = {}
         current_condition = ""
 
-        async def choose(observation: Any, *, episode: int = 1, step: int = 1) -> dict:
+        async def choose(observation: Any, *, episode: int = 1, step: int = 1,
+                         available_actions: list[dict] | None = None) -> dict:
             state = episode_states.setdefault(episode, {
                 "meter": MeteredLLM(llm), "tool_calls": 0,
                 "history": [], "started": time.perf_counter(),
@@ -67,25 +68,36 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
                 state["budget_exhausted_steps"] += 1
                 audit_traces.append({
                     "condition": current_condition, "episode": episode, "step": step,
-                    "action": {"action": "sleep"}, "decision_trace": [],
+                    "requested_blue_action": None,
+                    "action": {"action_id": next(
+                        (row["action_id"] for row in (available_actions or [])
+                         if row.get("action_type") == "Sleep"), -1)},
+                    "decision_trace": [],
                     "tool_calls": [], "role_events": [], "trace_source": "runtime",
                     "budget_exhausted": True,
                     "episode_budget_used": {"llm_calls": meter.calls,
                                             "tool_calls": state["tool_calls"],
                                             "estimated_tokens": meter.estimated_tokens},
                 })
-                return {"action": "sleep"}
+                return {"action_id": next(
+                    (row["action_id"] for row in (available_actions or [])
+                     if row.get("action_type") == "Sleep"), -1)}
             selected: list[dict] = []
 
-            def select(action: str, hostname: str = "") -> str:
-                selected.append({"action": action, "hostname": hostname})
-                return f"selected {action} {hostname}".strip()
+            safe_actions = list(available_actions or [])
+            safe_ids = [int(row["action_id"]) for row in safe_actions]
+
+            def select_blue_action(action_id: int) -> str:
+                selected.append({"action_id": int(action_id)})
+                return f"selected canonical Blue action_id={int(action_id)}"
 
             tools = {
-                "analyse": lambda hostname: select("analyse", hostname),
-                "remove": lambda hostname: select("remove", hostname),
-                "restore": lambda hostname: select("restore", hostname),
-                "sleep": lambda: select("sleep"),
+                "select_blue_action": ToolSpec(
+                    "select_blue_action", select_blue_action,
+                    "Select exactly one currently valid safe ChallengeWrapper Blue action ID.",
+                    {"type": "object",
+                     "properties": {"action_id": {"type": "integer", "enum": safe_ids}},
+                     "required": ["action_id"], "additionalProperties": False}),
             }
 
             async def wrapped(system: str, user: str) -> Any:
@@ -94,19 +106,16 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
                     parsed = json.loads(str(raw))
                 except (ValueError, TypeError, json.JSONDecodeError):
                     return raw
-                # 兼容直接高层动作输出，同时让 runtime 记录真实工具调用。
-                if isinstance(parsed, dict) and isinstance(parsed.get("action"), str):
-                    action = parsed["action"].lower()
-                    if action in tools:
-                        args = ({"hostname": parsed.get("hostname") or parsed.get("host") or ""}
-                                if action != "sleep" else {})
-                        return {"action": {"type": "tool", "tool": action,
-                                           "arguments": args}}
+                # Preserve direct JSON selection as a normal audited tool call.
+                if isinstance(parsed, dict) and parsed.get("action_id") is not None:
+                    return {"action": {"type": "tool", "tool": "select_blue_action",
+                                       "arguments": {"action_id": parsed["action_id"]}}}
                 return parsed
 
             task = json.dumps({
                 "goal": "Choose exactly one defensive action, observe tool result, then complete.",
                 "observation": _safe_observation(observation),
+                "canonical_safe_blue_actions": safe_actions,
                 "recent_actions": state["history"][-8:],
             }, ensure_ascii=False)
             config = RuntimeConfig(max_steps=max(1, remaining_llm),
@@ -116,17 +125,19 @@ async def run_bench(n: int | None = None, mode: str = "base", seed: int = 42,
             runtime = await (run_superagent if mode == "agent" else run_reference)(
                 task=task, llm=wrapped, tools=tools, config=config,
                 role_tools={
-                    "watcher": ("analyse", "sleep"),
-                    "analyst": ("analyse", "sleep"),
-                    "responder": ("remove", "restore", "sleep"),
-                    "hunter": ("analyse", "remove", "sleep"),
+                    "watcher": ("select_blue_action",),
+                    "analyst": ("select_blue_action",),
+                    "responder": ("select_blue_action",),
+                    "hunter": ("select_blue_action",),
                 })
-            action = selected[-1] if selected else {"action": "sleep"}
+            action = selected[-1] if selected else {"action_id": next(
+                (row["action_id"] for row in safe_actions
+                 if row.get("action_type") == "Sleep"), -1)}
             state["history"].append(action)
             state["tool_calls"] += int(runtime["budget"].get("tool_calls", 0))
             audit_traces.append({
                 "condition": current_condition, "episode": episode, "step": step,
-                "action": action,
+                "requested_blue_action": action, "action": action,
                 "decision_trace": runtime["decision_trace"],
                 "tool_calls": runtime["tool_calls"],
                 "role_events": runtime["role_events"],

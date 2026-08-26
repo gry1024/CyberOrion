@@ -48,7 +48,8 @@ SUPER-AGENT 的核心结论来自同模型、同样本、同总预算的 `agent 
   只读取管理员放在资产根 `representative/` 下的固定种子无损任务子集；没有代表集
   就返回 `benchmark_asset_missing`，不会先把超大 JSON 读进内存，也不会自动下载、裁剪或删除；
 - 每次运行保存上游 URL、版本、文件 SHA256、完整/子集状态、抽样算法和全部
-  样本 ID。代表集成绩不得标记为官方全量成绩；
+  样本 ID，以及 `git_head_sha`、提交树 `git_tree_sha`、`git_dirty`；脏树另存
+  `git_diff_sha256`。代表集成绩不得标记为官方全量成绩；
 - `daily` 使用代表集：SecAlertBench 600、ExCyTIn 64、CAGE-2 9 episodes；
   `publication` 在体积允许时运行目标协议，超限时只使用显式代表集并标记不可比。
 
@@ -70,6 +71,9 @@ Arena 从 `metrics_version=3` 起：
 - 蓝队仍严禁读取 attacks 表、场景 ground truth 或 `cyberorion.eval`。
 
 SecAlertBench 额外计算 PR-AUC、Brier、10-bin ECE 和 FN=5/FP=1 的显式成本；
+模型可见告警在 base prompt 和 `get_alert` 共用同一递归过滤出口，删除用于 gold
+的 `Label/label/ground_truth/verdict/class` 及其它 evaluation-only aliases。当前固定
+上游 schema 的 19 个字段中只有 `Label` 是评估字段，其余 18 个是遥测特征。
 ExCyTIn 记录证据数、SQL 查询数/成本和 adapter `native_reward`；CAGE-2 记录
 Restore/可用性惩罚与非法动作。ChallengeWrapper 不公开主机失陷事件数时该字段为
 `null` 并附状态，不从标量 reward 反推伪造。
@@ -127,8 +131,11 @@ LLM。先从 `logs/bench/*.json` 生成归一化事实层，再从该层绘图�
 等字段保持 `null` 并进入 `completeness.missing_fields`，不会用当前环境猜测回填。
 
 三臂 compare 只有同时满足以下条件才写 publication paired delta：dataset version
-与 hash 相同、sample IDs 完全同序、模型相同、seed 相同、single/agent 公平预算
-完全相等。否则 `publication_valid=false`，paired delta/CI/W-T-L 全部为 null。
+与 hash 相同、sample IDs 完全同序、模型名和完整 `model_settings` 相同、seed 相同、
+single/agent 公平预算完全相等，且每臂 Git provenance 完整并满足
+`git_dirty=false`。否则 `publication_valid=false`，paired delta/CI/W-T-L 全部为
+null。旧 run 即使存在 `git_commit_sha` 也归入 `historical_incomplete_provenance`，
+不会进入 publication 聚合。
 配对 bootstrap 固定 seed；SecAlertBench 每次重采样后重新计算 macro-F1，其余支持
 逐任务原生 reward 的套件计算逐任务差值。
 
@@ -139,21 +146,29 @@ LLM。先从 `logs/bench/*.json` 生成归一化事实层，再从该层绘图�
 ~/cai_env/bin/python scripts/run_bench.py --suite secalertbench --mode compare --n 30 --seed 42
 ~/cai_env/bin/python scripts/run_bench.py --suite secalertbench --mode compare --n 600 --seed 42
 
-# ExCyTIn adapter/native exact-match（非官方）；官方 Inspect 不可用时保持 external_track
-~/cai_env/bin/python scripts/run_bench.py --suite excytin --mode compare --n 8 --seed 42
-~/cai_env/bin/python scripts/run_bench.py --suite excytin --mode compare --n 64 --seed 42
+# ExCyTIn adapter/native exact-match（非官方）：先显式指定经验证的 SQLite 投影
+export CYBERORION_EXCYTIN_SQLITE_PATH=/absolute/path/to/telemetry.sqlite
+~/cai_env/bin/python scripts/run_bench.py --suite excytin --mode compare --n 3 --seed 42
+# n=3 telemetry/trace 全部有效后，至多再跑 n=8；本轮禁止 n=64
 
-# CAGE-2：LLM/工具预算按 episode 全局共享；不自动运行 270/900
+# CAGE-2：LLM/工具预算按 episode 全局共享；策略只选择当前 canonical action ID
 ~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 9 --seed 42
-~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 45 --seed 42
-~/cai_env/bin/python scripts/run_bench.py --suite cage2 --mode compare --n 90 --seed 42
 ```
 
 SecAlertBench 代表集使用 `label × alert_type × enterprise` 固定种子轮询分层，
 源数据或选中集缺任一 attack/benign 类即 fail closed；run 同时保存 class counts
 和精确 selected IDs。ExCyTIn run 保存 `official_harness_status` 和
 `score_methodology_label`；当前 CyberOrion SQLite adapter 的 `native_reward` 是
-非官方 exact-match，`official_reward` 保持 null。
+非官方 exact-match，`official_reward` 保持 null。官方 ACESEvals/ExCyTIn telemetry
+是 Inspect/SABER 管理的 MySQL Docker 服务，不是 SQLite；仓库中的
+`docker/db/Dockerfile.db` 是 ASCII Dockerfile，绝不能作为数据库。adapter 只接受
+显式路径或唯一候选，并验证 SQLite header、`SELECT sqlite_version()`、非空 table
+清单后才构造 LLM。没有经验证投影时在首次模型调用前 fail closed。
+
+CAGE-2 每步从实际 `ChallengeWrapper` / `EnumActionWrapper.possible_actions` 读取
+Sleep/Monitor/Analyse/Remove/Restore 的安全 action ID，模型选择 `action_id` 后原样
+执行该 index；非法 ID 显式降级到真实 Sleep，并在逐步记录同时保存
+`requested_blue_action` 与 `executed_blue_action`。
 
 Live paired 只允许显式本地 runner 和注入的审计 harness：
 

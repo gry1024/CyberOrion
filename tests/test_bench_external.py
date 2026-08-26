@@ -96,6 +96,60 @@ def test_secalertbench_official_label_schema_and_split_dedup(tmp_path: Path) -> 
     assert len(loaded) == 1
     assert loaded[0]["label"] == "attack"
     assert loaded[0]["alert_type"] == "代码执行"
+    assert "Label" not in loaded[0]["alert"]
+
+
+def test_secalert_model_visible_payload_recursively_removes_evaluation_fields() -> None:
+    row = {
+        "Label": "Attack", "attack_type": "代码执行", "uri": "/safe-feature",
+        "nested": {"ground_truth": "Attack", "verdict": "malicious",
+                   "class": 1, "rule_name": "observable"},
+    }
+    alert = secalertbench._normalise(row, 0)
+    visible = json.dumps(alert["alert"], ensure_ascii=False)
+    for key in ("Label", "ground_truth", "verdict", "class"):
+        assert key not in visible
+    assert "observable" in visible
+
+
+def test_secalert_base_prompt_and_get_alert_never_expose_gold(tmp_path: Path,
+                                                              monkeypatch) -> None:
+    data_dir = tmp_path / "alerts_no_leak"; data_dir.mkdir()
+    records = [
+        {"id": "a", "Label": "Attack", "alert": {"message": "suspicious",
+         "label": "Attack", "evaluation": {"ground_truth": "Attack"}}},
+        {"id": "b", "Label": "Non-Attack", "alert": {"message": "routine",
+         "verdict": "Non-Attack", "class": "benign"}},
+    ]
+    (data_dir / "secalertbench.json").write_text(json.dumps(records), encoding="utf-8")
+    monkeypatch.setenv("CYBERORION_SECALERTBENCH_DIR", str(data_dir))
+    seen: list[str] = []
+
+    async def base_llm(_system: str, user: str) -> str:
+        seen.append(user)
+        return '{"verdict":"attack","attack_probability":0.5}'
+
+    asyncio.run(secalertbench.run_bench(
+        n=2, mode="base", log_dir=tmp_path / "base", llm=base_llm))
+    assert all('"Label"' not in prompt and '"label"' not in prompt
+               and "ground_truth" not in prompt and '"class"' not in prompt
+               for prompt in seen)
+
+    calls = 0
+    async def agent_llm(_system: str, _user: str) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return '{"action":{"type":"tool","tool":"get_alert","arguments":{}}}'
+        return ('{"action":{"type":"tool","tool":"task_complete",'
+                '"arguments":{"verdict":"attack","attack_probability":0.5}}}')
+
+    _, trace = asyncio.run(secalertbench._run_agent(
+        secalertbench.load_alerts([data_dir / "secalertbench.json"])[0],
+        "single", agent_llm))
+    output = trace["tool_calls"][0]["output"]
+    assert '"Label"' not in output and '"label"' not in output
+    assert "ground_truth" not in output and '"class"' not in output
 
 
 def test_secalertbench_accepts_explicit_runtime_text_verdict() -> None:
@@ -152,6 +206,39 @@ def test_excytin_fixture_run_with_read_only_database(tmp_path: Path, monkeypatch
     assert run["methodology_status"] == "external_track"
     assert run["scores"]["official_reward"] is None
     assert run["scores"]["native_reward"] == 1.0
+    validation = run["telemetry_database_validation"]
+    assert validation["header_verified"] is True
+    assert validation["sqlite_version"]
+
+
+def test_excytin_rejects_dockerfile_dot_db_before_llm(tmp_path: Path,
+                                                       monkeypatch) -> None:
+    data_dir = tmp_path / "bad_excytin"; data_dir.mkdir()
+    (data_dir / "questions.json").write_text(json.dumps([
+        {"id": "q", "question": "q?", "answer": "a"}]), encoding="utf-8")
+    (data_dir / "Dockerfile.db").write_text("# Custom MySQL image\nFROM mysql:8\n",
+                                             encoding="utf-8")
+    monkeypatch.setenv("CYBERORION_EXCYTIN_DIR", str(data_dir))
+    calls = 0
+    async def llm(_system: str, _user: str) -> str:
+        nonlocal calls
+        calls += 1
+        return '{"answer":"a"}'
+    with pytest.raises(Exception, match="资产未配置|SQLite"):
+        asyncio.run(excytin.run_bench(
+            n=1, mode="base", log_dir=tmp_path / "logs", llm=llm))
+    assert calls == 0
+
+
+def test_excytin_sql_tools_have_explicit_required_schemas(tmp_path: Path) -> None:
+    db = tmp_path / "telemetry.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE events(id INTEGER)")
+    specs = excytin.sql_tool_specs(excytin.ReadOnlySQLTools(db))
+    assert specs["list_tables"].input_schema["properties"] == {}
+    assert specs["describe_table"].input_schema["required"] == ["table"]
+    assert specs["run_query"].input_schema["required"] == ["sql"]
+    assert specs["run_query"].input_schema["properties"]["sql"]["type"] == "string"
 
 
 def test_soc_contract_has_12_cases_and_real_runtime_trace(tmp_path: Path) -> None:
@@ -200,6 +287,48 @@ def test_cage2_uses_official_3x3_matrix_but_is_not_leaderboard_comparable(
     assert len(run["conditions"]) == 9
     assert run["methodology_status"] == "external_track"
     assert run["benchmark_provenance"]["comparable_to_upstream"] is False
+
+
+def test_cage_challenge_wrapper_executes_exact_non_sleep_action_id() -> None:
+    from cyberorion.eval.benchmarks.cyborg_adapter import run_cage2_async
+
+    async def choose_restore(_observation, *, available_actions, **_kwargs):
+        restore = next(row for row in available_actions
+                       if row["action_type"] == "Restore")
+        return {"action_id": restore["action_id"]}
+
+    async def choose_sleep(_observation, *, available_actions, **_kwargs):
+        sleep = next(row for row in available_actions
+                     if row["action_type"] == "Sleep")
+        return {"action_id": sleep["action_id"]}
+
+    restored = asyncio.run(run_cage2_async(
+        episodes=1, steps=1, policy=choose_restore,
+        red_agent="SleepAgent", seed=42, official_wrapper=True))
+    slept = asyncio.run(run_cage2_async(
+        episodes=1, steps=1, policy=choose_sleep,
+        red_agent="SleepAgent", seed=42, official_wrapper=True))
+    assert "error" not in restored and "error" not in slept
+    action = restored["episodes"][0]["actions"][0]
+    assert action["valid"] is True
+    assert action["executed_blue_action"]["action_type"] == "Restore"
+    assert action["executed_blue_action"]["action_id"] == action["requested_blue_action"]["action_id"]
+    assert restored["episodes"][0]["reward"] != slept["episodes"][0]["reward"]
+
+
+def test_cage_invalid_action_trace_shows_executed_sleep() -> None:
+    from cyberorion.eval.benchmarks.cyborg_adapter import run_cage2_async
+
+    async def invalid(_observation, **_kwargs):
+        return {"action_id": 999999}
+
+    run = asyncio.run(run_cage2_async(
+        episodes=1, steps=1, policy=invalid,
+        red_agent="SleepAgent", seed=42, official_wrapper=True))
+    action = run["episodes"][0]["actions"][0]
+    assert action["valid"] is False
+    assert action["executed_blue_action"]["action_type"] == "Sleep"
+    assert action["blue"] == "Sleep"
 
 
 def test_live_paired_requires_verified_same_plan_and_snapshot(tmp_path: Path) -> None:

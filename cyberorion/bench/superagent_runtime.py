@@ -272,6 +272,25 @@ def _parse_decision(raw: Any, config: RuntimeConfig) -> dict[str, Any]:
     if not kind:
         kind = "tool" if action.get("tool") else (
             "dispatch" if action.get("role") else "complete")
+    # Some OpenAI-compatible providers serialize native virtual-tool calls as
+    # JSON actions instead of returning ``message.tool_calls``.  Treat those
+    # representations identically; otherwise the runtime tries to invoke a
+    # non-existent injected tool named task_complete/dispatch_task (the exact
+    # failure recorded in the 20260825_234948 SecAlertBench smoke).
+    virtual_tool = str(action.get("tool") or "").lower()
+    if kind == "tool" and virtual_tool in {"task_complete", "dispatch_task"}:
+        args = action.get("arguments") or {}
+        args = dict(args) if isinstance(args, Mapping) else {}
+        if virtual_tool == "task_complete":
+            kind = "complete"
+            action = {"type": "complete", "summary": args.get("summary", args)}
+        else:
+            kind = "dispatch"
+            action = {
+                "type": "dispatch",
+                "role": args.get("role", action.get("role", "")),
+                "mission": args.get("mission", action.get("mission", "")),
+            }
     if kind not in _ACTIONS:
         raise ValueError(f"unknown action type: {kind}")
     if kind == "tool":

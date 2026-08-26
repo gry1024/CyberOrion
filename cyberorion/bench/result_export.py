@@ -166,21 +166,35 @@ def normalize_run(raw: dict, source: Path, export_sha: str | None) -> dict:
         "llm_errors": raw.get("llm_errors", (raw.get("scores") or {}).get("llm_errors")),
         "task_errors": sum(bool(row.get("error")) for row in rows if isinstance(row, dict)),
     }
+    git_head = raw.get("git_head_sha")
+    git_tree = raw.get("git_tree_sha")
+    git_dirty = raw.get("git_dirty")
     missing = [name for name, value in {
-        "run_git_commit_sha": raw.get("git_commit_sha"),
+        "git_head_sha": git_head,
+        "git_tree_sha": git_tree,
+        "git_dirty": git_dirty,
         "dataset_version": dataset["version"], "dataset_hash": dataset["hash"],
         "sample_manifest": sample_ids or None, "model_settings": raw.get("model_settings"),
         "fair_arm_budget": budget,
     }.items() if value is None]
+    if git_dirty is True and raw.get("git_diff_sha256") is None:
+        missing.append("git_diff_sha256_when_dirty")
     exclusion_reasons = []
     if raw.get("status") != "done":
         exclusion_reasons.append("run_status_not_done")
     if str(model).lower() in {"fake-model", "mock", "test-model"}:
         exclusion_reasons.append("fixture_or_fake_model")
+    if git_dirty is not False:
+        exclusion_reasons.append("git_worktree_not_clean")
+    if any(name in missing for name in ("git_head_sha", "git_tree_sha", "git_dirty")):
+        exclusion_reasons.append("incomplete_git_provenance")
+    provenance_complete = all(value is not None for value in (git_head, git_tree, git_dirty))
     return {
         "run_id": raw.get("run_id") or source.stem,
         "source_file": str(source), "schema_version": raw.get("schema_version"),
         "git_commit_sha": raw.get("git_commit_sha"),
+        "git_head_sha": git_head, "git_tree_sha": git_tree,
+        "git_dirty": git_dirty, "git_diff_sha256": raw.get("git_diff_sha256"),
         "export_git_commit_sha": export_sha,
         "suite": raw.get("suite") or "malware_analysis", "mode": raw.get("mode"),
         "arm": raw.get("arm") or raw.get("mode"), "status": raw.get("status"),
@@ -197,6 +211,9 @@ def normalize_run(raw: dict, source: Path, export_sha: str | None) -> dict:
         "conditions": raw.get("conditions") or [],
         "errors": errors, "started_at": raw.get("started_at"),
         "finished_at": raw.get("finished_at"), "elapsed_sec": raw.get("elapsed_sec"),
+        "provenance_complete": provenance_complete,
+        "artifact_class": ("publication_candidate" if provenance_complete and git_dirty is False
+                           else "historical_incomplete_provenance"),
         "completeness": {"missing_fields": missing, "complete": not missing},
         "publication_eligible": not exclusion_reasons,
         "publication_exclusion_reasons": exclusion_reasons,
@@ -226,8 +243,14 @@ def validate_compare_runs(runs: list[dict]) -> dict:
             for r in relevant),
         "model_identical": bool(relevant) and len({r.get("model") for r in relevant}) == 1
         and relevant[0].get("model") is not None,
+        "model_settings_identical": bool(relevant) and all(
+            _same(r.get("model_settings"), relevant[0].get("model_settings"))
+            for r in relevant),
         "seed_identical": bool(relevant) and len({r.get("seed") for r in relevant}) == 1
         and relevant[0].get("seed") is not None,
+        "clean_complete_provenance": bool(relevant) and all(
+            r.get("provenance_complete") and r.get("git_dirty") is False
+            for r in relevant),
         "single_agent_budgets_identical": bool(single and agent and
             _same(single.get("fair_arm_budgets"), agent.get("fair_arm_budgets"))),
     }
@@ -338,7 +361,8 @@ def _knowledge_pairs(runs: list[dict]) -> list[dict]:
     output = []
     for suite in ("malware_analysis", "threat_intel", "attack_kb"):
         candidates = [r for r in runs if r["suite"] == suite and r["mode"] in ("base", "rag")
-                      and r["status"] == "done"]
+                      and r["status"] == "done" and r["publication_eligible"]
+                      and r["completeness"]["complete"]]
         compatible = [(base, rag)
                       for base in candidates if base["mode"] == "base"
                       for rag in candidates if rag["mode"] == "rag"
@@ -402,6 +426,14 @@ def export_results(raw_dir: Path, output_dir: Path, repo: Path) -> dict:
         "schema_version": 1, "source_policy": "raw_json_only_no_markdown",
         "runs": normalized, "knowledge_layer_pairs": _knowledge_pairs(normalized),
         "agent_architecture_comparisons": comparisons,
+        "publication_run_ids": [
+            run["run_id"] for run in normalized
+            if run["artifact_class"] == "publication_candidate"
+            and run["publication_eligible"] and run["completeness"]["complete"]],
+        "historical_or_incomplete_run_ids": [
+            run["run_id"] for run in normalized
+            if run["artifact_class"] != "publication_candidate"
+            or not run["publication_eligible"] or not run["completeness"]["complete"]],
     }
     (output_dir / "benchmark_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -433,6 +465,8 @@ def export_results(raw_dir: Path, output_dir: Path, repo: Path) -> dict:
         "raw_source_directory": str(raw_dir), "raw_run_count": len(normalized),
         "ignored": ignored, "files": {},
         "safety": "read-only raw JSON processing; no download, asset creation, Docker, or LLM calls",
+        "publication_run_count": len(summary["publication_run_ids"]),
+        "historical_or_incomplete_run_count": len(summary["historical_or_incomplete_run_ids"]),
     }
     for path in sorted(output_dir.rglob("*")):
         if path.is_file() and path.name != "manifest.json":

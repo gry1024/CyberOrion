@@ -22,6 +22,8 @@ def _run(mode: str, ids=("a", "b"), budget=None, version="v1", digest="d1") -> d
         "schema_version": 4, "run_id": f"parent_{mode}", "suite": "secalertbench",
         "mode": mode, "arm": mode, "status": "done", "methodology_status": "external_track",
         "n": len(rows), "seed": 42, "model": "provider/model", "git_commit_sha": "abc",
+        "git_head_sha": "abc", "git_tree_sha": "tree", "git_dirty": False,
+        "git_diff_sha256": None,
         "model_settings": {"provider": "provider", "model": "model"},
         "scores": {"macro_f1": .5, "parse_fail": 0, "llm_errors": 0}, "results": rows,
         "methodology": {"arm_budget": budget or dict(FAIR_ARM_BUDGET)},
@@ -53,6 +55,32 @@ def test_budget_equality_is_value_based() -> None:
     ])
     assert audit["checks"]["single_agent_budgets_identical"] is False
     assert audit["publication_valid"] is False
+
+
+def test_model_settings_equality_is_required() -> None:
+    runs = [_run(mode) for mode in ("base", "single", "agent")]
+    runs[-1]["model_settings"] = {
+        **runs[-1]["model_settings"], "thinking": "enabled"}
+    audit = validate_compare_runs([_normal(run) for run in runs])
+    assert audit["checks"]["model_identical"] is True
+    assert audit["checks"]["model_settings_identical"] is False
+    assert audit["publication_valid"] is False
+
+
+def test_dirty_or_incomplete_provenance_is_not_publication_valid() -> None:
+    dirty = [_run(mode) for mode in ("base", "single", "agent")]
+    for run in dirty:
+        run["git_dirty"] = True
+        run["git_diff_sha256"] = "diff"
+    audit = validate_compare_runs([_normal(run) for run in dirty])
+    assert audit["checks"]["clean_complete_provenance"] is False
+    assert audit["publication_valid"] is False
+    legacy = _run("base")
+    for key in ("git_head_sha", "git_tree_sha", "git_dirty", "git_diff_sha256"):
+        legacy.pop(key, None)
+    normalized = _normal(legacy)
+    assert normalized["provenance_complete"] is False
+    assert normalized["artifact_class"] == "historical_incomplete_provenance"
 
 
 def test_paired_bootstrap_is_reproducible() -> None:
@@ -140,17 +168,19 @@ def test_cage_episode_budget_is_global_across_environment_steps(
 
     async def fake_run(episodes, steps, policy, scenario, red_agent, seed, wrapper):
         rows = []
+        actions = [{"action_id": 0, "action_type": "Sleep", "display": "Sleep"},
+                   {"action_id": 2, "action_type": "Analyse", "display": "Analyse Host"}]
         for episode in range(1, episodes + 1):
             for step in range(1, 21):
-                await policy({}, episode=episode, step=step)
+                await policy({}, episode=episode, step=step, available_actions=actions)
             rows.append({"episode": episode, "reward": 0.0, "illegal_actions": 0,
                          "restore_actions": 0, "availability_penalty": 0.0})
         return {"episodes": rows}
 
     async def fake_runtime(*, llm, tools, **kwargs):
         await llm("system", "user")
-        tools["sleep"]()
-        return {"decision_trace": [], "tool_calls": [{"tool": "sleep"}],
+        tools["select_blue_action"].handler(action_id=0)
+        return {"decision_trace": [], "tool_calls": [{"tool": "select_blue_action"}],
                 "role_events": [], "budget": {"llm_calls": 1, "tool_calls": 1}}
 
     async def llm(_system, _user): return '{"action":"sleep"}'

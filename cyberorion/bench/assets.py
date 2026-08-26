@@ -79,6 +79,14 @@ def _matches(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     return sorted({p.resolve() for p in found if p.exists()})
 
 
+def _has_sqlite_header(path: Path) -> bool:
+    try:
+        with path.open("rb") as stream:
+            return stream.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
 def asset_status(suite: str) -> dict:
     spec = ASSETS[suite]
     root = asset_root(suite)
@@ -92,9 +100,9 @@ def asset_status(suite: str) -> dict:
         has_tasks = any(p.suffix.lower() in {".yaml", ".yml", ".json", ".jsonl"}
                         for p in files)
         has_sqlite = any(p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
-                         for p in files)
+                         and p.is_file() and _has_sqlite_header(p) for p in files)
         ready = has_tasks and has_sqlite
-        validation = "task schema + read-only SQLite projection"
+        validation = "task schema + verified SQLite header (official backend is MySQL/Inspect Docker)"
     else:
         ready = False
         for path in files:
