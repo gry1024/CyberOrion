@@ -83,30 +83,86 @@ detect_venv() {
   return 1
 }
 
-VENV="$(detect_venv || true)"
-if [[ -z "${VENV}" ]]; then
-  err "找不到 CAI 虚拟环境（cai_env）。"
-  echo "  请通过以下任一方式指定：" >&2
-  echo "    export CAI_VENV=/path/to/cai_env" >&2
-  echo "  或把脚本放到有 cai_env 的父目录的 bin/ 下" >&2
-  exit 1
-fi
-
-PY="${VENV}/bin/python"
+VENV=""
 CAI_REPO_PARENT=""
+PY=""
+
 # 自动推导仓库根（cyberorion/server.py / cyberorion/bin/cyberorion 的共同父目录）
 _script_real="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")"
 _script_dir="$(dirname "${_script_real}")"
 # 取向上三级查找 cyberorion/server.py
 _check="${_script_dir}"
-for _ in 1 2 3 4 5; do
+for _ in 1 2 3 4 5 6 7 8 9 10; do
   if [[ -f "${_check}/cyberorion/server.py" ]] || [[ -f "${_check}/server.py" ]]; then
     CAI_REPO_PARENT="$(cd "${_check}" && pwd)"
+    break
+  fi
+  # 兼容：探测 <check>/cai/cyberorion/server.py（git repo 根是 cai/，cyberorion 是子目录）
+  if [[ -f "${_check}/cai/cyberorion/server.py" ]]; then
+    CAI_REPO_PARENT="$(cd "${_check}/cai" && pwd)"
     break
   fi
   _check="$(dirname "${_check}")"
 done
 export CAI_REPO_PARENT
+
+# ---------- 1. 定位 cai_env ----------
+detect_venv() {
+  # 优先级：
+  #   1) 环境变量 CAI_VENV / CAI_VENV_DIR 显式指定
+  #   2) CAI_REPO_PARENT 的同级目录 cai_env（推荐部署：<cai-repo>/cai_env）
+  #   3) 脚本所在目录的父目录下的 cai_env（脚本在 cyberorion/bin/ 时）
+  #   4) ~/cai_env
+  #   5) /opt/cyberorion/cai_env
+  #   6) 当前激活的 VIRTUAL_ENV
+  if [[ -n "${CAI_VENV:-}" ]] && [[ -x "${CAI_VENV}/bin/python" ]]; then
+    echo "${CAI_VENV}"
+    return 0
+  fi
+  if [[ -n "${CAI_VENV_DIR:-}" ]] && [[ -x "${CAI_VENV_DIR}/bin/python" ]]; then
+    echo "${CAI_VENV_DIR}"
+    return 0
+  fi
+  if [[ -n "${CAI_REPO_PARENT:-}" ]] && [[ -x "${CAI_REPO_PARENT}/cai_env/bin/python" ]]; then
+    echo "${CAI_REPO_PARENT}/cai_env"
+    return 0
+  fi
+  local script_dir="${_script_dir:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  # 情形 A：脚本在 cyberorion/bin/cyberorion，则 cai_env 在父目录
+  if [[ -x "${script_dir}/../cai_env/bin/python" ]]; then
+    echo "$(cd "${script_dir}/.." && pwd)/cai_env"
+    return 0
+  fi
+  # 情形 B：脚本直接放在 ~/cai_env/bin/cyberorion
+  if [[ -x "${script_dir}/python" ]] && [[ "$(basename "${script_dir}")" == "bin" ]]; then
+    echo "$(dirname "${script_dir}")"
+    return 0
+  fi
+  if [[ -x "${HOME}/cai_env/bin/python" ]]; then
+    echo "${HOME}/cai_env"
+    return 0
+  fi
+  if [[ -x "/opt/cyberorion/cai_env/bin/python" ]]; then
+    echo "/opt/cyberorion/cai_env"
+    return 0
+  fi
+  if [[ -n "${VIRTUAL_ENV:-}" ]] && [[ -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    echo "${VIRTUAL_ENV}"
+    return 0
+  fi
+  return 1
+}
+
+VENV="$(detect_venv || true)"
+if [[ -z "${VENV}" ]]; then
+  err "找不到 CAI 虚拟环境（cai_env）。"
+  echo "  请通过以下任一方式指定：" >&2
+  echo "    export CAI_VENV=/path/to/cai_env" >&2
+  echo "  或将脚本放到 cyberorion 仓库的 bin/ 下" >&2
+  exit 1
+fi
+
+PY="${VENV}/bin/python"
 
 # ---------- 2. 加载 .env（如果有）----------
 load_dotenv() {
@@ -126,6 +182,19 @@ load_dotenv() {
     source "${dotenv}"
     set +a
     info "已加载环境配置：${dotenv}"
+  fi
+  # 别名兼容：caibench CLI 模式会读 ALIAS_API_KEY（用作它内置 litellm proxy 的鉴权头，
+  # 不是模型 API key）。用户没设置时，自动复用 OPENAI_API_KEY 或填一个占位值，
+  # 这样 CLI 不会因为缺 key 而直接退出。
+  if [[ -z "${ALIAS_API_KEY:-}" ]]; then
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+      export ALIAS_API_KEY="${OPENAI_API_KEY}"
+    else
+      export ALIAS_API_KEY="cyberorion-local-placeholder-key"
+    fi
+  fi
+  if [[ -n "${OPENAI_API_BASE:-}" ]] && [[ -z "${ALIAS_API_BASE:-}" ]]; then
+    export ALIAS_API_BASE="${OPENAI_API_BASE}"
   fi
 }
 load_dotenv

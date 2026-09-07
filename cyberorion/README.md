@@ -49,6 +49,10 @@ nano ../.env
 #   OPENAI_API_BASE=<https://...>     OpenAI 官方则留空
 # 可选项：
 #   CAI_GUARDRAILS=false              关闭 CAI 护栏
+# CLI 模式额外需要：
+#   ALIAS_API_KEY=<sk-xxx>            caibench CLI 启动内部 litellm proxy 的鉴权头；
+#                                     脚本会自动复用 OPENAI_API_KEY，但如果你看到
+#                                     "ALIAS_API_KEY is invalid"，显式设一项即可。
 
 # (4) 安装 cyberorion 命令到 PATH
 cp bin/cyberorion ~/.local/bin/cyberorion
