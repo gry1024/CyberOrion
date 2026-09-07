@@ -910,10 +910,114 @@ _DEMO_RECORDING_TASK_TYPES = (
 )
 
 
+# Demo 任务的失败关键词。任一关键词出现 ≥1 次即视为失败录制，淘汰。
+_DEMO_FAILURE_KEYWORDS = (
+    "schema 校验错误",
+    "Agent 调度基础设施的持续故障",
+    "本会话仅暴露",
+    "dispatch 服务的应装",
+    "当前无法完成挑战",
+    "5/5 尝试同一",
+    "Agent 调度基础设施",
+    "Tool 沙箱异常",
+    "MiniMax 400",
+    "HTTPStatusError",
+    "HTTP 400",
+    "tool_call_error",
+    "insufficient balance",
+    "traceback (most recent call last)",
+    "runtimeerror",
+)
+
+# 任务专属成功关键词（至少匹配一个才视为成功）。
+_DEMO_SUCCESS_KEYWORDS = {
+    "ctf": (
+        "picoCTF{",
+        "flag{",
+        "academy{",
+        "flag format validated",
+        "Flag validated",
+        "flag 已验证",
+        "Solved",
+        "FLAG validated",
+    ),
+    "code_repair": (
+        "tests passed",
+        "pytest",
+        "all tests passed",
+        "tests/test_vulnerable_app.py",
+        "patch applied",
+        "OK",
+        "DONE",
+        "Regression",
+    ),
+    "vulnerability_repair": (
+        "tests passed",
+        "all tests passed",
+        "patch applied",
+        "tests/test_",
+        "Regression",
+        "verified",
+        "DONE",
+    ),
+    "attack_chain": (
+        "时间线",
+        "timeline",
+        "ATT&CK",
+        "T1",
+        "evidence",
+        "evidence_table",
+        "复原完成",
+        "攻击链",
+        "Reconstructed",
+    ),
+    "purple_team": (
+        "red_score",
+        "blue_score",
+        "演练完成",
+        "purple",
+        "ATT&CK",
+    ),
+    "traffic_analysis": (
+        "C2",
+        "ATT&CK",
+        "webshell",
+        "attack_chain",
+        "外联",
+        "completed",
+        "traffic_analysis 完成",
+    ),
+}
+
+
+def _scan_recording_text(recording_id: str, max_frames: int = 200) -> str:
+    """从 recording 文件读取 frames 拼成文本（限制大小，避免拖慢）。"""
+    path = _CAI_RECORDINGS_DIR / f"{recording_id}.json"
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    frames = data.get("frames") or []
+    if not isinstance(frames, list):
+        return ""
+    # 抽样：均匀取 max_frames 帧（覆盖首中尾）
+    step = max(1, len(frames) // max_frames)
+    sampled = frames[::step][:max_frames]
+    parts = []
+    for f in sampled:
+        if isinstance(f, dict):
+            parts.append(str(f.get("data") or ""))
+    return "".join(parts)
+
+
 def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
     """挑最适合 demo 回放的真实历史 recording。
 
     评分规则（高者优先）：
+      0. 质量门：报告就绪（report_status=ready）、报告无 agent_error、
+         frames 中不含失败关键词、含任务专属成功关键词。任一不通过即淘汰。
       1. status == success
       2. has_report (PDF 已生成)
       3. frame_count 越多越好（覆盖更完整链路）
@@ -923,23 +1027,50 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
     wanted = str(task_type or "").strip().lower()
     if wanted not in _DEMO_RECORDING_TASK_TYPES:
         return None
+    success_keywords = _DEMO_SUCCESS_KEYWORDS.get(wanted, ())
     candidates: list[dict[str, Any]] = []
     for summary in _list_cai_recordings():
         if str(summary.get("task_type") or "").strip().lower() != wanted:
             continue
         if summary.get("source") == "builtin":
             continue  # 排除内置 demo
+        rid = str(summary.get("id") or "")
+        if not rid:
+            continue
+        # 质量门 1: report_status 必须 ready
+        report_status_path = _CAI_RECORDINGS_DIR / rid / "report_status.json"
+        rs: dict[str, Any] = {}
+        if report_status_path.is_file():
+            try:
+                rs = json.loads(report_status_path.read_text(encoding="utf-8"))
+            except Exception:
+                rs = {}
+        if str(rs.get("status") or "").strip().lower() != "ready":
+            continue
+        if rs.get("agent_error") or rs.get("latex_error") or rs.get("error"):
+            continue
+        # 质量门 2: frames 内容无失败关键词、含成功关键词
+        text = _scan_recording_text(rid)
+        if not text:
+            continue
+        if any(kw in text for kw in _DEMO_FAILURE_KEYWORDS):
+            continue
+        if success_keywords and not any(kw in text for kw in success_keywords):
+            continue
         candidates.append(summary)
+
     if not candidates:
         return None
 
-    def _score(s: dict[str, Any]) -> tuple[int, int, int, float]:
+    def _score(s: dict[str, Any]) -> tuple[int, int, int, int, float]:
+        # 评分：质量门已通过的前提下，按"最新 → 帧数多 → duration 长"挑选。
+        # 用户每次重跑后看到的 demo 应该是当时最新的成功案例，而不是十天前的旧版。
         status_ok = 1 if str(s.get("status") or "").strip().lower() == "success" else 0
         has_report = 1 if s.get("has_report") else 0
         frames = int(s.get("frame_count") or 0)
-        duration = float(s.get("duration_sec") or 0.0)
+        duration_bucket = int(float(s.get("duration_sec") or 0.0) // 10)
         created = _parse_cai_recording_time(s.get("created_at"))
-        return status_ok, has_report, frames, created
+        return status_ok, has_report, created, frames, duration_bucket
 
     candidates.sort(key=_score, reverse=True)
     best = candidates[0]
@@ -1175,16 +1306,32 @@ def _cai_task_timeout_seconds(env: dict[str, str]) -> float | None:
 
 def _cai_preflight_command(task_type: str, task_workdir: Path | None) -> list[str] | None:
     if task_type == "ctf":
-        # CTF_INSIDE 场景下挑战文件在容器内部，宿主机 /challenge 不会存在，
-        # 直接查会误报"预检失败"。改为检查目标容器是否已就绪。
+        # CTF_INSIDE 场景下挑战文件在容器内部，宿主机 /challenge 不会存在。
+        # 预检同时承担"自动唤醒靶场容器"职责：发现 ctf_target 已停止则
+        # 自动重启，避免 agent 进入后因容器不可读而误报"基础设施故障"。
         return [
             "bash",
             "-lc",
             "set -o pipefail; "
-            "echo '[CyberOrion Preflight] pwd'; pwd; "
+            "echo '[CyberOrion Preflight] 唤醒 ctf_target 容器（若已停止）'; "
+            "if docker ps -a --format '{{.Names}}\\t{{.Status}}' | grep -E '^ctf_target\\s'; then "
+            "  if ! docker ps --format '{{.Names}}' | grep -q '^ctf_target$'; then "
+            "    docker rm -f ctf_target >/dev/null 2>&1; "
+            "    docker run -d --name ctf_target --restart unless-stopped "
+            "registry.gitlab.com/aliasrobotics/alias_research/caiextensions/pentestperf:picoctf_static_flag "
+            "tail -f /dev/null; "
+            "  fi; "
+            "else "
+            "  docker run -d --name ctf_target --restart unless-stopped "
+            "registry.gitlab.com/aliasrobotics/alias_research/caiextensions/pentestperf:picoctf_static_flag "
+            "tail -f /dev/null; "
+            "fi; "
+            "sleep 1; "
             "echo '[CyberOrion Preflight] docker ps (target containers)'; "
-            "docker ps --format '{{.Names}}\\t{{.Status}}' 2>&1 | grep -E 'cyberorion|ctf|picoctf|challenge' || "
-            "  echo '（未发现匹配靶场容器，任务将自行启动/连接靶场）'; "
+            "docker ps --format '{{.Names}}\\t{{.Image}}\\t{{.Status}}' 2>&1 | grep -E 'cyberorion|ctf|picoctf|challenge' || "
+            "  echo '（未发现匹配靶场容器）'; "
+            "echo '[CyberOrion Preflight] 容器内 flag 可读性自检（不展示 flag）'; "
+            "docker exec ctf_target test -r /app/flag.txt && echo 'flag 文件可读 OK' || echo 'flag 文件不可读！'; "
             "echo '[CyberOrion Preflight] 提示：挑战文件在容器内，预检不读取 flag'",
         ]
     if task_type == "attack_chain" and task_workdir:
