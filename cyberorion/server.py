@@ -1,4 +1,4 @@
-﻿"""FastAPI WebSocket backend for the CyberOrion red-vs-blue arena.
+"""FastAPI WebSocket backend for the CyberOrion red-vs-blue arena.
 
 Provides real-time event streaming and manual control of red/blue agents.
 
@@ -71,6 +71,7 @@ from typing import Any
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from cyberorion.verification_samples import materialize_verification_samples
 
 # Allow `python server.py` to be run from the cyberorion/ directory.
 _HERE = Path(__file__).resolve().parent
@@ -116,31 +117,42 @@ _CAI_MAX_RECORDING_FRAMES = 5000
 _CAI_MIN_PTY_COLS = 20
 _CAI_AGENT_EVENT_PREFIX = "[[CYBERORION_AGENT_EVENT]]"
 _CAI_TASK_ROOT = _HERE / "task_environments"
-_CAI_SYSTEMATIC_TASK_TYPES = {"ctf", "code_repair", "attack_chain", "purple_team", "traffic_analysis"}
+_CAI_SYSTEMATIC_TASK_TYPES = {
+    "ctf",
+    "code_repair",
+    "vulnerability_repair",
+    "attack_chain",
+    "purple_team",
+    "traffic_analysis",
+}
 _CAI_TASK_MAX_TURNS = {
-    "ctf": "6",
-    "code_repair": "8",
-    "attack_chain": "10",
-    "purple_team": "10",
-    "traffic_analysis": "8",
+    "ctf": "15",
+    "code_repair": "20",
+    "vulnerability_repair": "20",
+    "attack_chain": "20",
+    "purple_team": "20",
+    "traffic_analysis": "15",
 }
 _CAI_TASK_TIMEOUT_SEC = {
-    "ctf": "600",
-    "code_repair": "900",
-    "attack_chain": "900",
-    "purple_team": "1200",
-    "traffic_analysis": "900",
+    "ctf": "1500",
+    "code_repair": "1800",
+    "vulnerability_repair": "1800",
+    "attack_chain": "1800",
+    "purple_team": "1800",
+    "traffic_analysis": "1200",
 }
-_DEEPSEEK_COMPATIBLE_MODELS = {
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp",
+_MINIMAX_COMPATIBLE_MODELS = {
+    "minimax-m3",
+    "minimax-m2",
+    "minimax-m1",
+    "minimax-text-01",
 }
-_DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+_MINIMAX_DEFAULT_MODEL = "MiniMax-M3"
 _CAI_TASK_SKILLS = {
     "ctf": ("ctf", "授权靶场解题、验证和交付"),
     "attack_chain": ("attack-chain-reconstruction", "证据优先的攻击链时间线与 ATT&CK 映射"),
     "code_repair": ("code-vulnerability-repair", "漏洞复现、最小修复和回归验证"),
+    "vulnerability_repair": ("code-vulnerability-repair", "漏洞复现、最小修复和回归验证"),
     "traffic_analysis": ("traffic-analysis", "流量、会话和访问日志的分层分析"),
     "purple_team": ("threat-analysis", "威胁背景、现场证据和处置建议分层"),
 }
@@ -755,7 +767,7 @@ def _cai_code_repair_demo_recording() -> dict[str, Any]:
             {"t": 0.5, "data": "Reasoning summary: reproduce first, patch minimally, run regression tests.\r\n"},
             {"t": 1.0, "data": "Tool: dispatch_agent {preferred_agent: CodeAgent, task: inspect vulnerable_app.py and reproduce SQL injection}\r\n"},
             {"t": 1.8, "data": "Agent Result: CodeAgent found string-concatenated SQL in find_user and produced parameterized query patch.\r\n"},
-            {"t": 2.5, "data": "Tool: dispatch_agent {preferred_agent: Retester, task: run python -m pytest tests/vulnerability_regression.py}\r\n"},
+            {"t": 2.5, "data": "Tool: dispatch_agent {preferred_agent: Retester, task: run python -m pytest tests/test_vulnerable_app.py}\r\n"},
             {"t": 3.2, "data": "Agent Result: Retester verified normal lookup passes and injection input returns None.\r\n"},
             {"t": 3.9, "data": "Final Deliverable: vulnerability summary, diff, tests, residual risk and remediation advice.\r\n"},
         ],
@@ -775,11 +787,24 @@ def _builtin_cai_recordings() -> list[dict[str, Any]]:
 def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
     frames = recording.get("frames")
     recording_id = str(recording.get("id") or "")
-    report_pdf = _CAI_RECORDINGS_DIR / recording_id / "report.pdf"
+    recording_dir = _CAI_RECORDINGS_DIR / recording_id
+    report_pdf = recording_dir / "report.pdf"
+    artifact_names = (
+        "terminal_full.log",
+        "agent_events.jsonl",
+        "report_context.json",
+        "report_status.json",
+        "report.pdf",
+    )
+    artifacts = recording.get("artifacts")
+    if not isinstance(artifacts, dict):
+        artifacts = {name: (recording_dir / name).is_file() for name in artifact_names}
     return {
         "id": recording_id,
         "title": recording.get("title") or recording.get("id") or "",
         "kind": recording.get("kind") or "terminal",
+        "task_type": recording.get("task_type") or "general",
+        "sample_kind": recording.get("sample_kind") or "",
         "ctf_name": recording.get("ctf_name") or "",
         "challenge": recording.get("challenge") or "",
         "status": recording.get("status") or "unknown",
@@ -789,6 +814,9 @@ def _summarize_cai_recording(recording: dict[str, Any]) -> dict[str, Any]:
         "source": recording.get("source") or "live",
         "frame_count": len(frames) if isinstance(frames, list) else int(recording.get("frame_count") or 0),
         "has_report": report_pdf.is_file(),
+        "report_status": recording.get("report_status") or ("ready" if report_pdf.is_file() else ""),
+        "report_agent_called": bool(recording.get("report_agent_called")),
+        "artifacts": artifacts,
         "report_url": f"/api/cai/recordings/{recording_id}/report" if report_pdf.is_file() else "",
     }
 
@@ -872,6 +900,120 @@ async def cai_recordings() -> dict[str, Any]:
     return {"count": len(recordings), "recordings": recordings}
 
 
+_DEMO_RECORDING_TASK_TYPES = (
+    "ctf",
+    "code_repair",
+    "vulnerability_repair",
+    "attack_chain",
+    "purple_team",
+    "traffic_analysis",
+)
+
+
+def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
+    """挑最适合 demo 回放的真实历史 recording。
+
+    评分规则（高者优先）：
+      1. status == success
+      2. has_report (PDF 已生成)
+      3. frame_count 越多越好（覆盖更完整链路）
+      4. duration_sec 越长越好（更贴近真实运行时长）
+      5. created_at 越新越好
+    """
+    wanted = str(task_type or "").strip().lower()
+    if wanted not in _DEMO_RECORDING_TASK_TYPES:
+        return None
+    candidates: list[dict[str, Any]] = []
+    for summary in _list_cai_recordings():
+        if str(summary.get("task_type") or "").strip().lower() != wanted:
+            continue
+        if summary.get("source") == "builtin":
+            continue  # 排除内置 demo
+        candidates.append(summary)
+    if not candidates:
+        return None
+
+    def _score(s: dict[str, Any]) -> tuple[int, int, int, float]:
+        status_ok = 1 if str(s.get("status") or "").strip().lower() == "success" else 0
+        has_report = 1 if s.get("has_report") else 0
+        frames = int(s.get("frame_count") or 0)
+        duration = float(s.get("duration_sec") or 0.0)
+        created = _parse_cai_recording_time(s.get("created_at"))
+        return status_ok, has_report, frames, created
+
+    candidates.sort(key=_score, reverse=True)
+    best = candidates[0]
+    return {
+        "id": str(best.get("id") or ""),
+        "task_type": str(best.get("task_type") or wanted),
+        "title": str(best.get("title") or best.get("id") or ""),
+        "status": str(best.get("status") or ""),
+        "duration_sec": float(best.get("duration_sec") or 0.0),
+        "frame_count": int(best.get("frame_count") or 0),
+        "has_report": bool(best.get("has_report")),
+        "source": str(best.get("source") or "live"),
+        "created_at": str(best.get("created_at") or ""),
+    }
+
+
+@app.get("/api/cai/demo-pick")
+async def cai_demo_pick(task_type: str) -> dict[str, Any]:
+    """为指定任务类型挑一条最佳历史 recording 作为 demo 回放素材。
+
+    优先真实历史（status=success + 有 report + frames 多 + 时长长）；
+    找不到时回落到内置 demo。
+    """
+    pick = _pick_cai_demo_recording(task_type)
+    if pick:
+        return {"ok": True, "source": "history", "recording": pick}
+    wanted = str(task_type or "").strip().lower()
+    for item in _builtin_cai_recordings():
+        if str(item.get("task_type") or "").strip().lower() == wanted:
+            return {
+                "ok": True,
+                "source": "builtin",
+                "recording": {
+                    "id": str(item.get("id") or ""),
+                    "task_type": wanted,
+                    "title": str(item.get("title") or ""),
+                    "status": str(item.get("status") or "success"),
+                    "duration_sec": float(item.get("duration_sec") or 0.0),
+                    "frame_count": len(item.get("frames") or []),
+                    "has_report": False,
+                    "source": "builtin",
+                    "created_at": str(item.get("created_at") or ""),
+                },
+            }
+    return {
+        "ok": False,
+        "source": "none",
+        "recording": None,
+        "available": list(_DEMO_RECORDING_TASK_TYPES),
+    }
+
+
+@app.post("/api/cai/verification-samples")
+async def cai_verification_samples() -> dict[str, Any]:
+    """Generate the three deterministic, auditable CAI demonstration records."""
+    try:
+        samples = await materialize_verification_samples(_CAI_RECORDINGS_DIR)
+    except Exception as exc:
+        logger.exception("failed to materialize CAI verification samples")
+        raise HTTPException(
+            status_code=500,
+            detail=f"verification sample generation failed: {type(exc).__name__}: {exc}",
+        ) from exc
+    return {
+        "ok": all(
+            str(sample.get("status") or "").strip().lower() == "success"
+            and bool(sample.get("has_report"))
+            and str(sample.get("report_status") or "").strip().lower() == "ready"
+            for sample in samples
+        ),
+        "samples": samples,
+    }
+
+
 @app.get("/api/cai/recordings/{recording_id}")
 async def cai_recording_detail(recording_id: str) -> dict[str, Any]:
     recording = _get_cai_recording(recording_id)
@@ -929,7 +1071,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
     if task_type in _CAI_SYSTEMATIC_TASK_TYPES:
         env["CAI_SINGLE_SHOT_CLI"] = "1"
         env.setdefault("CAI_MAX_TURNS", _CAI_TASK_MAX_TURNS.get(task_type, "8"))
-        env.setdefault("CAI_DISPATCH_MAX_TURNS", "4")
+        env.setdefault("CAI_DISPATCH_MAX_TURNS", "8")
         env.setdefault("CAI_WEB_TASK_TIMEOUT_SEC", _CAI_TASK_TIMEOUT_SEC.get(task_type, "900"))
     else:
         if not has_override("CAI_SINGLE_SHOT_CLI"):
@@ -944,19 +1086,19 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         or env.get("OPENAI_API_BASE_URL")
         or ""
     ).lower()
-    if "deepseek" in model_base_url:
+    if "minimax" in model_base_url:
         current_model = str(env.get("CAI_MODEL") or "").split("/")[-1].strip()
         normalized_model = (
             current_model
-            if current_model in _DEEPSEEK_COMPATIBLE_MODELS
-            else _DEEPSEEK_DEFAULT_MODEL
+            if current_model.lower() in _MINIMAX_COMPATIBLE_MODELS
+            else _MINIMAX_DEFAULT_MODEL
         )
-        # DeepSeek's OpenAI-compatible endpoint expects the bare API model
-        # name. The provider is already selected by the DeepSeek base URL.
+        # MiniMax's OpenAI-compatible endpoint expects the bare API model
+        # name. The provider is already selected by the MiniMax base URL.
         env["CAI_MODEL"] = normalized_model
         env["CAI_FORCE_HTTPX"] = "1"
         if env.get("OPENAI_API_KEY"):
-            env.setdefault("DEEPSEEK_API_KEY", env["OPENAI_API_KEY"])
+            env.setdefault("MINIMAX_API_KEY", env["OPENAI_API_KEY"])
     if _CAI_SOURCE_DIR.is_dir():
         python_paths = [str(_CAI_SOURCE_DIR / "src"), str(_HERE)]
         if env.get("PYTHONPATH"):
@@ -971,6 +1113,7 @@ def _safe_cai_env(overrides: dict[str, Any]) -> dict[str, str]:
         "CAI_MODEL",
         "CAI_FORCE_HTTPX",
         "DEEPSEEK_API_KEY",
+        "MINIMAX_API_KEY",
         "CAI_AGENT_TYPE",
         "CAI_TASK_CONTEXT",
         "CAI_MAX_TURNS",
@@ -1030,6 +1173,78 @@ def _cai_task_timeout_seconds(env: dict[str, str]) -> float | None:
     return value if value > 0 else None
 
 
+def _cai_preflight_command(task_type: str, task_workdir: Path | None) -> list[str] | None:
+    if task_type == "ctf":
+        # CTF_INSIDE 场景下挑战文件在容器内部，宿主机 /challenge 不会存在，
+        # 直接查会误报"预检失败"。改为检查目标容器是否已就绪。
+        return [
+            "bash",
+            "-lc",
+            "set -o pipefail; "
+            "echo '[CyberOrion Preflight] pwd'; pwd; "
+            "echo '[CyberOrion Preflight] docker ps (target containers)'; "
+            "docker ps --format '{{.Names}}\\t{{.Status}}' 2>&1 | grep -E 'cyberorion|ctf|picoctf|challenge' || "
+            "  echo '（未发现匹配靶场容器，任务将自行启动/连接靶场）'; "
+            "echo '[CyberOrion Preflight] 提示：挑战文件在容器内，预检不读取 flag'",
+        ]
+    if task_type == "attack_chain" and task_workdir:
+        return [
+            "bash",
+            "-lc",
+            "set -o pipefail; "
+            "echo '[CyberOrion Preflight] pwd'; pwd; "
+            "echo '[CyberOrion Preflight] find . -maxdepth 3 -type f'; find . -maxdepth 3 -type f | sort; "
+            "echo '[CyberOrion Preflight] evidence/timeline.jsonl'; sed -n '1,120p' evidence/timeline.jsonl; "
+            "echo '[CyberOrion Preflight] evidence/web_access.log'; sed -n '1,120p' evidence/web_access.log; "
+            "echo '[CyberOrion Preflight] evidence/auth.log'; sed -n '1,120p' evidence/auth.log; "
+            "echo '[CyberOrion Preflight] repro/run_login_repro.sh'; sed -n '1,160p' repro/run_login_repro.sh 2>&1",
+        ]
+    if task_type == "code_repair" and task_workdir:
+        return [
+            "bash",
+            "-lc",
+            "set -o pipefail; "
+            "echo '[CyberOrion Preflight] pwd'; pwd; "
+            "echo '[CyberOrion Preflight] src/vulnerable_app.py'; sed -n '1,220p' src/vulnerable_app.py; "
+            "echo '[CyberOrion Preflight] tests/test_vulnerable_app.py'; sed -n '1,240p' tests/test_vulnerable_app.py; "
+            "echo '[CyberOrion Preflight] baseline pytest (expected to fail before repair)'; "
+            f"PYTHONPATH=. {sys.executable} -m pytest tests/test_vulnerable_app.py -q",
+        ]
+    return None
+
+
+async def _run_cai_preflight(task_type: str, task_workdir: Path | None) -> str:
+    command = _cai_preflight_command(task_type, task_workdir)
+    if not command:
+        return ""
+
+    def run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
+            cwd=str(task_workdir) if task_workdir else None,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=45,
+            check=False,
+        )
+
+    try:
+        result = await asyncio.to_thread(run)
+        body = result.stdout or ""
+        return (
+            "\r\n[CyberOrion] 授权任务预检开始："
+            f"{task_type}\r\n"
+            + body.replace("\n", "\r\n")
+            + f"\r\n[CyberOrion] 授权任务预检结束，退出码：{result.returncode}\r\n\r\n"
+        )
+    except Exception as exc:
+        return (
+            "\r\n[CyberOrion] 授权任务预检异常："
+            f"{type(exc).__name__}: {exc}\r\n\r\n"
+        )
+
+
 async def _ws_send_text(ws: WebSocket, text: str) -> bool:
     try:
         await ws.send_text(text)
@@ -1046,6 +1261,25 @@ async def _ws_send_event(ws: WebSocket, payload: dict[str, Any]) -> bool:
         return False
 
 
+def _decode_cai_initial_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Decode the first WebSocket frame into CAI launch overrides."""
+    if message.get("type") != "websocket.receive":
+        return {}
+    raw: str | bytes | None
+    raw = message.get("text")
+    if raw is None:
+        raw = message.get("bytes")
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 @app.websocket("/ws/cai")
 async def cai_terminal_ws(ws: WebSocket) -> None:
     """Raw PTY bridge to CAI CLI so browser output matches the terminal."""
@@ -1057,9 +1291,8 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
 
     first: dict[str, Any] = {}
     try:
-        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
-        if isinstance(msg, dict):
-            first = msg
+        msg = await asyncio.wait_for(ws.receive(), timeout=5.0)
+        first = _decode_cai_initial_message(msg)
     except Exception:
         first = {}
 
@@ -1082,8 +1315,9 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
     record_bytes = 0
     ctf_name = str(first.get("CTF_NAME") or first.get("ctf_name") or "").strip()
     termination_reason = ""
+    client_connected = True
 
-    def record_output(text: str) -> None:
+    def record_output(text: str, *, force_frame: bool = False) -> None:
         nonlocal record_bytes
         if text:
             with suppress(Exception):
@@ -1092,13 +1326,18 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     handle.write(text)
         chunk_bytes = len(text.encode("utf-8", errors="replace"))
         if (
-            len(record_frames) < _CAI_MAX_RECORDING_FRAMES
-            and record_bytes + chunk_bytes <= _CAI_MAX_RECORDING_BYTES
+            force_frame
+            or (
+                len(record_frames) < _CAI_MAX_RECORDING_FRAMES
+                and record_bytes + chunk_bytes <= _CAI_MAX_RECORDING_BYTES
+            )
         ):
             record_frames.append({"t": round(time.monotonic() - started_mono, 3), "data": text})
-            record_bytes += chunk_bytes
+            if not force_frame:
+                record_bytes += chunk_bytes
 
     async def send_agent_event(payload: dict[str, Any]) -> bool:
+        nonlocal client_connected
         event_payload = dict(payload)
         event_payload.setdefault("t", round(time.monotonic() - started_mono, 3))
         event_type = str(event_payload.get("type") or "")
@@ -1109,13 +1348,18 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
         if event_id and not event_payload.get("agent"):
             event_payload["agent"] = active_agent_names.get(event_id, "子 Agent")
         agent_events.append(event_payload)
-        ok = await _ws_send_event(ws, event_payload)
+        ok = True
+        if client_connected:
+            ok = await _ws_send_event(ws, event_payload)
+            if not ok:
+                client_connected = False
         if event_type in {"agent_done", "agent_error"} and event_id:
             active_agent_ids.discard(event_id)
             active_agent_names.pop(event_id, None)
-        return ok
+        return True
 
     async def send_terminal_or_agent_output(text: str) -> bool:
+        nonlocal client_connected
         if not text:
             return True
         if len(active_agent_ids) == 1:
@@ -1129,7 +1373,9 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     "text": text,
                 }
             )
-        return await _ws_send_text(ws, text)
+        if client_connected and not await _ws_send_text(ws, text):
+            client_connected = False
+        return True
 
     skill_notice = _CAI_TASK_SKILLS.get(task_type)
     if skill_notice:
@@ -1142,6 +1388,10 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
         )
         record_output(notice)
         await _ws_send_text(ws, notice)
+    preflight_output = await _run_cai_preflight(task_type, task_workdir)
+    if preflight_output:
+        record_output(preflight_output)
+        await _ws_send_text(ws, preflight_output)
     start_notice = "\r\n[CyberOrion] CAI 原生终端已连接，开始执行任务。\r\n"
     record_output(start_notice)
     await _ws_send_text(ws, start_notice)
@@ -1276,13 +1526,14 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
                     signal_process(signal.SIGTERM)
                     break
 
-        tasks = [asyncio.create_task(pump_output()), asyncio.create_task(pump_input())]
+        output_task = asyncio.create_task(pump_output())
+        input_task = asyncio.create_task(pump_input())
         done, pending = await asyncio.wait(
-            tasks,
+            [output_task],
             timeout=task_timeout,
-            return_when=asyncio.FIRST_COMPLETED,
+            return_when=asyncio.ALL_COMPLETED,
         )
-        if not done and task_timeout:
+        if output_task not in done and task_timeout:
             termination_reason = "timeout"
             timeout_text = (
                 "\r\n[CyberOrion] Task timeout reached "
@@ -1291,10 +1542,14 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
             record_output(timeout_text)
             await _ws_send_text(ws, timeout_text)
             signal_process(signal.SIGTERM)
-            done, pending = await asyncio.wait(tasks, timeout=5.0, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
+            await asyncio.wait([output_task], timeout=5.0, return_when=asyncio.ALL_COMPLETED)
+        for task in (output_task, input_task):
+            if task.done():
+                continue
             task.cancel()
-        for task in done:
+        for task in (output_task, input_task):
+            if not task.done() or task.cancelled():
+                continue
             exc = task.exception()
             if exc and not isinstance(exc, WebSocketDisconnect):
                 logger.exception("CAI terminal bridge task failed", exc_info=exc)
@@ -1316,82 +1571,108 @@ async def cai_terminal_ws(ws: WebSocket) -> None:
         if master_fd is not None:
             with suppress(Exception):
                 os.close(master_fd)
-        if record_frames:
-            challenge = str(first.get("CTF_CHALLENGE") or first.get("challenge") or "").strip()
-            kind = "ctf" if ctf_name else "terminal"
-            if termination_reason == "timeout":
-                status = "timeout"
-            elif termination_reason == "stopped":
-                status = "stopped"
-            elif proc and proc.returncode == 0:
-                status = "success"
-            elif proc and proc.returncode is not None and proc.returncode < 0:
-                status = "stopped"
-            elif proc and proc.returncode is not None:
-                status = "failed"
-            else:
-                status = "unknown"
-            recording = {
-                "id": recording_id,
-                "title": f"CyberOrion {'CTF' if ctf_name else task_type} 运行 {recording_id}",
-                "kind": kind,
-                "task_type": task_type,
-                "ctf_name": ctf_name,
-                "challenge": challenge,
-                "status": status,
-                "duration_sec": round(time.monotonic() - started_mono, 3),
-                "created_at": started_at,
-                "ended_at": ended_at,
-                "summary": (
-                    f"真实 CyberOrion {'CTF' if ctf_name else task_type} 测试记录。"
-                    + (f" CTF={ctf_name} Challenge={challenge}." if ctf_name else "")
-                ),
-                "source": "live",
-                "exit_code": proc.returncode if proc else None,
-                "termination_reason": termination_reason,
-                "task_workdir": str(task_workdir) if task_workdir else "",
-                "task_context": env.get("CAI_TASK_CONTEXT", ""),
-                "skill": skill_notice[0] if skill_notice else "",
-                "frames": record_frames,
-                "agent_events": agent_events,
-                "full_log_path": str(full_log_path),
-            }
-            try:
-                from cyberorion.reporting import finalize_task_report
+        challenge = str(first.get("CTF_CHALLENGE") or first.get("challenge") or "").strip()
+        kind = "ctf" if ctf_name else "terminal"
+        if termination_reason == "timeout":
+            status = "timeout"
+        elif termination_reason == "stopped":
+            status = "stopped"
+        elif proc and proc.returncode == 0:
+            status = "success"
+        elif proc and proc.returncode is not None and proc.returncode < 0:
+            status = "stopped"
+        elif proc and proc.returncode is not None:
+            status = "failed"
+        else:
+            status = "unknown"
+        recording = {
+            "id": recording_id,
+            "title": f"CyberOrion {'CTF' if ctf_name else task_type} 运行 {recording_id}",
+            "kind": kind,
+            "task_type": task_type,
+            "ctf_name": ctf_name,
+            "challenge": challenge,
+            "status": status,
+            "duration_sec": round(time.monotonic() - started_mono, 3),
+            "created_at": started_at,
+            "ended_at": ended_at,
+            "summary": (
+                f"真实 CyberOrion {'CTF' if ctf_name else task_type} 测试记录。"
+                + (f" CTF={ctf_name} Challenge={challenge}." if ctf_name else "")
+            ),
+            "source": "live",
+            "exit_code": proc.returncode if proc else None,
+            "termination_reason": termination_reason,
+            "task_workdir": str(task_workdir) if task_workdir else "",
+            "task_context": env.get("CAI_TASK_CONTEXT", ""),
+            "skill": skill_notice[0] if skill_notice else "",
+            "frames": record_frames,
+            "agent_events": agent_events,
+            "full_log_path": str(full_log_path),
+        }
+        recording_dir.mkdir(parents=True, exist_ok=True)
+        agent_events_path = recording_dir / "agent_events.jsonl"
+        agent_events_path.write_text(
+            "".join(
+                json.dumps(event, ensure_ascii=False, default=str) + "\n"
+                for event in agent_events
+            ),
+            encoding="utf-8",
+        )
+        recording["agent_events_path"] = str(agent_events_path)
+        _write_cai_recording(recording)
 
-                report_result = await finalize_task_report(
-                    recording,
-                    _CAI_RECORDINGS_DIR / recording_id,
-                )
-                if report_result["status"] != "skipped":
-                    recording["report_status"] = report_result["status"]
-                    recording["report_error"] = report_result.get("error", "")
-                    report_url = f"/api/cai/recordings/{recording_id}/report"
-                    recording["report_url"] = report_url if report_result["status"] == "ready" else ""
-                    report_text = (
-                        "\r\n[CyberOrion] 最终 PDF 报告已生成："
-                        f"{report_url}\r\n"
-                        "[CyberOrion] 报告文件位置："
-                        f"{report_result.get('pdf', '')}\r\n"
-                        if report_result["status"] == "ready"
-                        else (
-                            "\r\n[CyberOrion] 报告 Agent 已调用，但 PDF 生成失败；"
-                            f"源文件：{report_result.get('tex', '')}\r\n"
-                        )
-                    )
-                    record_output(report_text)
-                    await _ws_send_text(ws, report_text)
-            except Exception as exc:
-                logger.exception("failed to generate final CAI report")
-                recording["report_status"] = "failed"
-                recording["report_error"] = f"{type(exc).__name__}: {exc}"
+        report_required = task_type in _CAI_SYSTEMATIC_TASK_TYPES
+        if report_required:
+            report_start = (
+                "\r\n[CyberOrion] 任务执行结束，进入强制 Report Agent 复盘阶段。\r\n"
+                "[CyberOrion] Report Agent 将读取 terminal_full.log、agent_events.jsonl "
+                "和任务上下文后生成最终报告。\r\n"
+            )
+            record_output(report_start, force_frame=True)
+            await _ws_send_text(ws, report_start)
+        try:
+            from cyberorion.reporting import finalize_task_report
+
+            report_result = await finalize_task_report(
+                recording,
+                recording_dir,
+            )
+            recording["report_status"] = report_result["status"]
+            recording["report_agent_called"] = bool(report_result.get("agent_called"))
+            recording["report_error"] = report_result.get("error") or report_result.get("agent_error", "")
+            if report_result["status"] == "ready":
+                report_url = f"/api/cai/recordings/{recording_id}/report"
+                recording["report_url"] = report_url
                 report_text = (
-                    "\r\n[CyberOrion] 报告 Agent 调用或 PDF 生成异常："
-                    f"{recording['report_error']}\r\n"
+                    "\r\n[CyberOrion] 最终 PDF 报告已生成："
+                    f"{report_url}\r\n"
+                    "[CyberOrion] 报告文件位置："
+                    f"{report_result.get('pdf', '')}\r\n"
                 )
-                record_output(report_text)
+            elif report_required:
+                report_text = (
+                    "\r\n[CyberOrion] Report Agent 已自动调用，但报告产物生成失败；"
+                    f"源文件：{report_result.get('tex', '')}\r\n"
+                    f"错误：{recording['report_error'] or '未提供'}\r\n"
+                )
+            else:
+                report_text = ""
+            if report_text:
+                record_output(report_text, force_frame=True)
                 await _ws_send_text(ws, report_text)
-            _write_cai_recording(recording)
+        except Exception as exc:
+            logger.exception("failed to generate final CAI report")
+            recording["report_status"] = "failed"
+            recording["report_agent_called"] = report_required
+            recording["report_error"] = f"{type(exc).__name__}: {exc}"
+            report_text = (
+                "\r\n[CyberOrion] 报告 Agent 自动收尾异常："
+                f"{recording['report_error']}\r\n"
+            )
+            record_output(report_text, force_frame=True)
+            await _ws_send_text(ws, report_text)
+        _write_cai_recording(recording)
         with suppress(Exception):
             await ws.close()
 
@@ -3473,8 +3754,6 @@ def _select_demo_session(task_type: str) -> str | None:
         if task_type in {"red_adversary", "blue_response"}:
             if summary_type == "battle":
                 score += 1500
-            if summary_scenario in {"nightfall", "shieldwall"}:
-                score += 1000
             if task_type == "red_adversary" and summary_winner == "red":
                 score += 2500
             if task_type == "blue_response" and summary_winner == "blue":

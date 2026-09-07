@@ -135,6 +135,8 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const wsRef = useRef<WebSocket | null>(null)
   const replayTimersRef = useRef<number[]>([])
   const frameCloseTimersRef = useRef<Map<string, number>>(new Map())
+  const agentFrameBodyRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const agentFramesRef = useRef<HTMLDivElement | null>(null)
   const replayingRef = useRef(false)
   const [ctfs, setCtfs] = useState<CaiCtfItem[]>([])
   const [taskEnvironments, setTaskEnvironments] = useState<CaiTaskEnvironment[]>([])
@@ -167,7 +169,16 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   const clearAgentFrames = useCallback(() => {
     frameCloseTimersRef.current.forEach((timer) => window.clearTimeout(timer))
     frameCloseTimersRef.current.clear()
+    agentFrameBodyRefs.current.clear()
     setAgentFrames([])
+  }, [])
+
+  const scrollAgentFrameToBottom = useCallback((id: string) => {
+    const body = agentFrameBodyRefs.current.get(id)
+    if (!body) return
+    body.scrollTop = body.scrollHeight
+    const frames = agentFramesRef.current
+    if (frames) frames.scrollTop = frames.scrollHeight
   }, [])
 
   const stop = useCallback(() => {
@@ -228,18 +239,29 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     setAgentFrames((frames) => frames.map((frame) => {
       if (frame.id !== id) return frame
       const nextStatus: AgentFrameStatus = type === 'agent_error' ? 'failed' : type === 'agent_done' ? 'done' : frame.status
+      const lastLine = frame.lines[frame.lines.length - 1]
+      const mergeOutputDelta = type === 'agent_output' && lastLine?.kind === line?.kind
+      const nextLines = line && line.text
+        ? mergeOutputDelta && lastLine
+          ? [
+              ...frame.lines.slice(0, -1),
+              { ...lastLine, text: lastLine.text + line.text },
+            ]
+          : [
+              ...frame.lines,
+              { id: `${id}-${frame.lines.length}-${Date.now()}`, kind: line.kind, text: line.text },
+            ]
+        : frame.lines
       return {
         ...frame,
         status: nextStatus,
-        lines: line && line.text ? [
-          ...frame.lines,
-          { id: `${id}-${frame.lines.length}-${Date.now()}`, kind: line.kind, text: line.text },
-        ].slice(-120) : frame.lines,
+        lines: nextLines.slice(-120),
       }
     }))
+    scrollAgentFrameToBottom(id)
     if (type === 'agent_done' || type === 'agent_error') closeAgentFrameLater(id)
     return true
-  }, [closeAgentFrameLater])
+  }, [closeAgentFrameLater, scrollAgentFrameToBottom])
 
   const writeTerminalPayload = useCallback((text: string) => {
     if (text.includes(AGENT_EVENT_PREFIX)) {
@@ -254,7 +276,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
     termRef.current?.write(text)
   }, [handleAgentEvent])
 
-  const playRecording = useCallback((id: string) => {
+  const playRecording = useCallback((id: string, replaySpeed: number = 1) => {
     const term = termRef.current
     if (!term || !id) return
     stop()
@@ -264,16 +286,31 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         clearAgentFrames()
         setReplayTitle(recording.title)
         setReplaying(true)
-        const speed = 0.45
-        replayTimersRef.current = recording.frames.map((frame, index) => {
-          const delay = Math.min(Math.max(frame.t * 1000 * speed, index * 35), 12000)
+        // 贴近真实运行时长：每帧延时基于相邻帧时间差 * speed。
+        // 相邻间隔上限 1500ms（避免连续长时间无输出时空等过久）；
+        // 下限 12ms（保持可读节奏）。首帧 100ms 让用户感知开始。
+        const speed = Math.max(0.25, Math.min(replaySpeed, 4))
+        const maxStepMs = 1500
+        const minStepMs = 12
+        const firstDelayMs = 100
+        const frames = recording.frames
+        let prevT = 0
+        let cumDelay = firstDelayMs
+        replayTimersRef.current = frames.map((frame, index) => {
+          const curT = Number(frame.t) || prevT
+          const step = Math.max(0, curT - prevT) * 1000 * speed
+          prevT = curT
+          const delay = index === 0
+            ? firstDelayMs
+            : Math.min(Math.max(step, minStepMs), maxStepMs)
+          cumDelay += delay
           return window.setTimeout(() => {
             writeTerminalPayload(frame.data)
-            if (index === recording.frames.length - 1) {
+            if (index === frames.length - 1) {
               setReplaying(false)
               replayTimersRef.current = []
             }
-          }, delay)
+          }, cumDelay)
         })
       })
       .catch((e) => {
@@ -360,7 +397,22 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   }, [challenge, prompt, selected, start, taskType, topTask])
 
   const demoReplay = useCallback(() => {
-    playRecording(DEMO_REPLAY_IDS[topTask])
+    // 优先从历史里挑最新的高质量真实 recording（status=success、有 report、frames 多），
+    // 回落到内置的极简 demo。素材始终来自历史或内置 demo，禁止凭空生成。
+    const taskType = taskTypeFor(topTask)
+    api.pickCaiDemo(taskType)
+      .then((pick) => {
+        if (pick?.recording?.id) {
+          playRecording(pick.recording.id)
+          return
+        }
+        const fallback = DEMO_REPLAY_IDS[topTask]
+        if (fallback) playRecording(fallback)
+      })
+      .catch(() => {
+        const fallback = DEMO_REPLAY_IDS[topTask]
+        if (fallback) playRecording(fallback)
+      })
   }, [playRecording, topTask])
 
   useEffect(() => {
@@ -453,6 +505,10 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
   }, [active])
 
   useEffect(() => {
+    agentFrames.forEach((frame) => scrollAgentFrameToBottom(frame.id))
+  }, [agentFrames, scrollAgentFrameToBottom])
+
+  useEffect(() => {
     if (selected) setChallenge(selected.challenges[0] ?? '')
   }, [selectedName, selected])
 
@@ -539,7 +595,7 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
         </aside>
         <div className={`cai-terminal-wrap ${agentFrames.length ? 'has-agent-frames' : ''}`}>
           {agentFrames.length > 0 && (
-            <div className="cai-agent-frames">
+            <div className="cai-agent-frames" ref={agentFramesRef}>
               {agentFrames.map((frame) => (
                 <section key={frame.id} className={`cai-agent-frame is-${frame.status}`}>
                   <div className="cai-agent-frame__header">
@@ -547,7 +603,13 @@ export function CaiTerminalView({ active = true }: { active?: boolean }) {
                     <small>{frame.status === 'running' ? 'RUNNING' : frame.status === 'done' ? 'RETURNING' : 'FAILED'}</small>
                   </div>
                   <div className="cai-agent-frame__title">{frame.title}</div>
-                  <div className="cai-agent-frame__body scroll-thin">
+                  <div
+                    className="cai-agent-frame__body scroll-thin"
+                    ref={(element) => {
+                      if (element) agentFrameBodyRefs.current.set(frame.id, element)
+                      else agentFrameBodyRefs.current.delete(frame.id)
+                    }}
+                  >
                     {frame.lines.map((line) => (
                       <pre key={line.id} className={`cai-agent-line is-${line.kind}`}>{line.text}</pre>
                     ))}

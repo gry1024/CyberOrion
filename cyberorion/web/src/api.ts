@@ -150,6 +150,24 @@ export const api = {
       }>
       note?: string
     }>,
+  /** 选一条最佳的 CAI demo recording（优先真实历史，回落内置 demo）。 */
+  pickCaiDemo: (taskType: string) =>
+    get(`/api/cai/demo-pick?task_type=${encodeURIComponent(taskType)}`) as Promise<{
+      ok: boolean
+      source: 'history' | 'builtin' | 'none'
+      recording: {
+        id: string
+        task_type: string
+        title: string
+        status: string
+        duration_sec: number
+        frame_count: number
+        has_report: boolean
+        source: string
+        created_at: string
+      } | null
+      available?: string[]
+    }>,
 
   getKbStats: () => get('/api/kb/stats') as Promise<KbStats>,
   getKbTactics: () => get('/api/kb/tactics') as Promise<KbTactic[]>,
