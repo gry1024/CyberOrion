@@ -1026,6 +1026,40 @@ def _scan_recording_text(recording_id: str, max_frames: int = 200) -> str:
             parts.append(str(f.get("data") or ""))
     return "".join(parts)
 
+def _scan_agent_event_stats(recording_id: str) -> dict[str, int]:
+    """Scan agent_events.jsonl and count agent_start / agent_done / agent_error events.
+
+    Returns {"starts": int, "dones": int, "errors": int, "total": int}.
+    Used by quality gates to reject recordings where sub-agents never ran
+    (workspace missing / framework bug) or crashed en masse.
+    """
+    events_path = _CAI_RECORDINGS_DIR / recording_id / "agent_events.jsonl"
+    stats = {"starts": 0, "dones": 0, "errors": 0, "total": 0}
+    if not events_path.is_file():
+        return stats
+    try:
+        with events_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                et = str(e.get("type") or "")
+                if et == "agent_start":
+                    stats["starts"] += 1
+                elif et == "agent_done":
+                    stats["dones"] += 1
+                elif et == "agent_error":
+                    stats["errors"] += 1
+                stats["total"] += 1
+    except OSError:
+        pass
+    return stats
+
+
 
 def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
     """挑最适合 demo 回放的真实历史 recording。
@@ -1063,7 +1097,12 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
         if wanted != "general":
             if str(rs.get("status") or "").strip().lower() != "ready":
                 continue
-            if rs.get("agent_error") or rs.get("latex_error") or rs.get("error"):
+            # Only reject on latex_error (PDF compilation broke). The
+            # "agent_error" field on report_status.json is often set when
+            # the *report-generation* LLM call hits a 400, but the actual
+            # attack-chain analysis can still have completed successfully.
+            # We rely on Gate 3 (agent_events) to detect real failures.
+            if rs.get("latex_error") or rs.get("error"):
                 continue
         # chat 类任务若意外生成了 report_status 但 agent_error 非空，仍淘汰
         elif rs.get("agent_error"):
@@ -1076,6 +1115,24 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
             continue
         if success_keywords and not any(kw in text for kw in success_keywords):
             continue
+        # Quality gate 3: sub-agents must have actually run.
+        # If agent_events.jsonl is missing or empty, the sub-framework never
+        # dispatched (workspace/path errors, framework crash, etc.) - the
+        # recording is a failed run, not a usable demo.
+        if wanted != "general":
+            stats = _scan_agent_event_stats(rid)
+            starts = stats["starts"]
+            errors = stats["errors"]
+            dones = stats["dones"]
+            # 3a: at least one sub-agent must have started.
+            if starts < 1:
+                continue
+            # 3b: agent error rate must stay <= 50% (when there are >=4 starts).
+            if starts >= 4 and errors > starts // 2:
+                continue
+            # 3c: at least 3 sub-agents must have completed (successfully).
+            if dones < 3:
+                continue
         candidates.append(summary)
 
     if not candidates:
