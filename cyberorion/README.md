@@ -15,12 +15,87 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue">
   <img src="https://img.shields.io/badge/docker-optional-blue">
-  <img src="https://img.shields.io/badge/cai__framework-0.5.10-blue">
+  <img src="https://img.shields.io/badge/cai__framework-1.1.5-blue">
   <img src="https://img.shields.io/badge/tests-459-green">
   <img src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
 **一句话定位**：CyberOrion 是一个红蓝 LLM 真实对抗平台——红方 agent 自主渗透 docker 靶场，蓝方 SOC 团队对红方行动**一无所知**、只能靠遥测证据自主检测处置，每场对抗由服务端裁判与指标引擎客观评分（TP/FP/FN/检测率/MTTD，双方 0-100 分）。不是脚本演示，是可复现、可审计的 LLM 攻防。
+
+---
+
+## 🚀 快速开始（推荐：本地 CLI）
+
+> **TL;DR**: 安装好后，命令行回车 `cyberorion` 即可启动与 CAI 的对话终端，跟 cai 一样用。
+
+### 1. 安装（约 3 分钟）
+
+```bash
+# (1) 克隆仓库
+git clone https://github.com/gry1024/CyberOrion.git
+cd CyberOrion
+
+# (2) 创建 Python 虚拟环境并安装 cai-framework
+python3.10 -m venv ../cai_env          # 放在 cyberorion/ 同级的 cai_env/
+source ../cai_env/bin/activate
+pip install -e ./cai-latest           # cai-framework 1.1.5 已在 cai-latest/ 里
+
+# (3) 配置环境变量（API key + 模型）
+cp .env.example ../.env               # .env 放在 cyberorion/ 的同级目录
+nano ../.env
+# 必填项：
+#   CAI_MODEL=openai/<你的模型>       例如 openai/MiniMax-M3
+#   OPENAI_API_KEY=<sk-xxx>           （兼容 OpenAI / MiniMax / DashScope 均可）
+#   OPENAI_API_BASE=<https://...>     OpenAI 官方则留空
+# 可选项：
+#   CAI_GUARDRAILS=false              关闭 CAI 护栏
+
+# (4) 安装 cyberorion 命令到 PATH
+cp bin/cyberorion ~/.local/bin/cyberorion
+chmod +x ~/.local/bin/cyberorion
+```
+
+### 2. 运行
+
+```bash
+cyberorion                       # 默认进入 Chat with CyberOrion 普通对话
+cyberorion --help                # 查看所有子命令
+```
+
+### 3. 常见交互模式
+
+| 想做的事 | 命令 |
+| --- | --- |
+| 普通聊天（默认） | `cyberorion` 或 `cyberorion chat` |
+| 跑一个 CTF（需 docker 靶场） | `cyberorion ctf picoctf_static_flag` |
+| 修复代码漏洞 | `cyberorion code_repair` |
+| 复现并修复漏洞（最小 patch） | `cyberorion vulnerability_repair` |
+| 复原攻击链条 | `cyberorion attack_chain` |
+| 流量 / 访问日志分析 | `cyberorion traffic_analysis` |
+| 红蓝攻防演练 | `cyberorion purple_team` |
+| 查看最近 N 条历史 | `cyberorion history 10` |
+| 调试环境配置 | `cyberorion env` |
+| 浏览器界面（可选） | `python cyberorion/server.py` 然后访问 http://localhost:8000 |
+
+每条任务执行后会自动生成结构化中文 PDF 报告存到 `logs/cai_recordings/<run_id>/report.pdf`，可在 web UI 历史视图里看完整回放。
+
+### 4. 故障排查（90% 问题在这）
+
+```bash
+cyberorion env                   # 检查 venv / 模型 / API key 是否配齐
+#   venv : /home/<you>/cai/cai_env
+#   python: Python 3.10.x
+#   模型: openai/<你的模型>
+#   API key: <已配置> / <未配置>
+
+# 如果找不到 cai_env，显式指定：
+export CAI_VENV=/path/to/cai_env
+
+# 如果运行 ctf 报"容器不可读"，确认 docker 已启动：
+docker ps | grep ctf_target      # 容器未启动就 docker compose up -d
+```
+
+---
 
 ## 30 秒精华
 
@@ -32,8 +107,6 @@
 | **知识库 RAG** | 7030 条文档（ATT&CK v18 + Malpedia + CVE + 法规 + 沙箱解读），embedding 检索 + BM25 离线回退，蓝队工具与 benchmark 同源复用 |
 | **三大基准套件** | malware_analysis（609 题）+ attack_kb 知识访问（+36pt）+ threat_intel 威胁情报（588 题），Jaccard 平均得分主指标，同 seed 同模型双臂对比 |
 | **SOC 大屏前端** | 作战台（双栏流式 + 靶机卡片高亮）/ 流量分析（事件流 + 4 阶段 agent 链）/ 主机卫士（4 阶段 SSH 扫描 + chat）/ 基准测试（K3 报告 + 内嵌题目）/ 历史复盘（红蓝对垒时间线 + AI 故事线全屏）/ 知识库 八视图 |
-
-**完整复现教程见 [docs/REPRODUCE.md](docs/REPRODUCE.md)**（环境 / 靶机 / 对局 / Benchmark / 故障排查逐条验证）。
 
 ---
 

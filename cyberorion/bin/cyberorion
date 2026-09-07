@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# CyberOrion CLI —— 回车启动与 CAI 对话/任务终端。
+#
+# 用法:
+#   cyberorion                       # 默认进入 Chat with CyberOrion 普通对话
+#   cyberorion chat                  # 同上
+#   cyberorion ctf <name>            # 进入 CAI 启动 CTF 任务（需 docker 靶场）
+#   cyberorion code_repair           # 修复代码漏洞（默认 task_environments/code_repair）
+#   cyberorion vulnerability_repair  # 漏洞复现 + 修复
+#   cyberorion attack_chain          # 复原攻击链条
+#   cyberorion traffic_analysis      # 流量与访问证据分析
+#   cyberorion purple_team           # 攻防演练
+#   cyberorion history [N]           # 列出最近 N 条历史（默认 10）
+#   cyberorion env                   # 打印当前环境/路径
+#   cyberorion --help                # 帮助
+#
+# 可选参数:
+#   -p / --prompt TEXT       预填任务 prompt（仅非 chat 子命令）
+#   -c / --challenge NAME    选择 CTF 子题
+#   -w / --workdir DIR       指定任务工作区
+#
+# 安装: cp bin/cyberorion ~/.local/bin/cyberorion && chmod +x ~/.local/bin/cyberorion
+set -euo pipefail
+
+# 颜色
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[1;33m'; BLU=$'\033[0;34m'; RST=$'\033[0m'
+
+err() { echo "${RED}✗${RST} $*" >&2; }
+info() { echo "${YLW}ⓘ${RST} $*"; }
+ok() { echo "${GRN}✓${RST} $*"; }
+
+# ---------- 1. 定位 cai_env ----------
+detect_venv() {
+  # 优先级：
+  #   1) 环境变量 CAI_VENV / CAI_VENV_DIR 显式指定
+  #   2) 脚本所在目录的父目录下的 cai_env（推荐部署）
+  #   3) ~/cai_env
+  #   4) /opt/cyberorion/cai_env
+  #   5) 当前激活的 VIRTUAL_ENV
+  if [[ -n "${CAI_VENV:-}" ]] && [[ -x "${CAI_VENV}/bin/python" ]]; then
+    echo "${CAI_VENV}"
+    return 0
+  fi
+  if [[ -n "${CAI_VENV_DIR:-}" ]] && [[ -x "${CAI_VENV_DIR}/bin/python" ]]; then
+    echo "${CAI_VENV_DIR}"
+    return 0
+  fi
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # 情形 A：脚本在 cyberorion/bin/cyberorion，则 cai_env 在父目录
+  if [[ -x "${script_dir}/../cai_env/bin/python" ]]; then
+    echo "$(cd "${script_dir}/.." && pwd)/cai_env"
+    return 0
+  fi
+  # 情形 B：脚本直接放在 ~/cai_env/bin/cyberorion
+  if [[ -x "${script_dir}/python" ]] && [[ "$(basename "${script_dir}")" == "bin" ]]; then
+    echo "$(dirname "${script_dir}")"
+    return 0
+  fi
+  if [[ -x "${HOME}/cai_env/bin/python" ]]; then
+    echo "${HOME}/cai_env"
+    return 0
+  fi
+  # 情形 C：脚本放在 cyberorion 仓库的 bin/ 下，cai_env 在仓库的同级目录
+  #   e.g. <cai-repo>/cyberorion/bin/cyberorion  ←  <cai-repo>/cai_env
+  # 探测：向上查找"与 cyberorion 同级的 cai_env"
+  _probe="${script_dir}/../.."
+  for _ in 1 2 3; do
+    if [[ -x "${_probe}/cai_env/bin/python" ]]; then
+      echo "$(cd "${_probe}" && pwd)/cai_env"
+      return 0
+    fi
+    _probe="$(dirname "${_probe}")"
+  done
+  if [[ -x "/opt/cyberorion/cai_env/bin/python" ]]; then
+    echo "/opt/cyberorion/cai_env"
+    return 0
+  fi
+  if [[ -n "${VIRTUAL_ENV:-}" ]] && [[ -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    echo "${VIRTUAL_ENV}"
+    return 0
+  fi
+  return 1
+}
+
+VENV="$(detect_venv || true)"
+if [[ -z "${VENV}" ]]; then
+  err "找不到 CAI 虚拟环境（cai_env）。"
+  echo "  请通过以下任一方式指定：" >&2
+  echo "    export CAI_VENV=/path/to/cai_env" >&2
+  echo "  或把脚本放到有 cai_env 的父目录的 bin/ 下" >&2
+  exit 1
+fi
+
+PY="${VENV}/bin/python"
+CAI_REPO_PARENT=""
+# 自动推导仓库根（cyberorion/server.py / cyberorion/bin/cyberorion 的共同父目录）
+_script_real="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")"
+_script_dir="$(dirname "${_script_real}")"
+# 取向上三级查找 cyberorion/server.py
+_check="${_script_dir}"
+for _ in 1 2 3 4 5; do
+  if [[ -f "${_check}/cyberorion/server.py" ]] || [[ -f "${_check}/server.py" ]]; then
+    CAI_REPO_PARENT="$(cd "${_check}" && pwd)"
+    break
+  fi
+  _check="$(dirname "${_check}")"
+done
+export CAI_REPO_PARENT
+
+# ---------- 2. 加载 .env（如果有）----------
+load_dotenv() {
+  local dotenv=""
+  for candidate in \
+    "${CAI_REPO_PARENT}/.env" \
+    "$(pwd)/.env" \
+    "${HOME}/.cyberorion.env"; do
+    if [[ -f "${candidate}" ]]; then
+      dotenv="${candidate}"
+      break
+    fi
+  done
+  if [[ -n "${dotenv}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${dotenv}"
+    set +a
+    info "已加载环境配置：${dotenv}"
+  fi
+}
+load_dotenv
+
+# ---------- 3. 子命令分发 ----------
+print_help() {
+  cat <<EOF
+${BLU}CyberOrion CLI${RST} —— 回车启动与 CAI 对话/任务终端
+
+${YLW}用法${RST}:
+  cyberorion [SUBCOMMAND] [OPTIONS]
+
+${YLW}子命令${RST}:
+  (无) / chat            默认：Chat with CyberOrion 普通对话
+  ctf <name>             启动 CTF 任务（picoctf_static_flag / cve-2024-36401 ...）
+  code_repair            修复代码漏洞工作区
+  vulnerability_repair   漏洞复现 + 最小修复 + 回归
+  attack_chain           复原攻击链条
+  traffic_analysis       流量与访问证据分析
+  purple_team            红蓝攻防演练
+  history [N]            列出最近 N 条 CAI 历史（默认 10）
+  env                    打印环境/路径信息
+
+${YLW}选项${RST}:
+  -p, --prompt TEXT      预填任务 prompt
+  -c, --challenge NAME   CTF 子题名称
+  -w, --workdir DIR      任务工作区路径
+  -h, --help             显示此帮助
+
+${YLW}环境变量${RST}:
+  CAI_VENV=/path/to/cai_env    显式指定虚拟环境（默认自动探测）
+  CAI_MODEL=openai/...         模型名（覆盖 .env）
+  OPENAI_API_KEY=sk-...        API 密钥（覆盖 .env）
+
+${YLW}示例${RST}:
+  cyberorion                                          # 进入对话
+  cyberorion ctf picoctf_static_flag                 # 跑 CTF
+  cyberorion code_repair -p "修复 SQL 注入"            # 指定 prompt 跑 code_repair
+  cyberorion history 5                               # 列出最近 5 条历史
+  cyberorion env                                     # 查看环境
+
+${YLW}部署 Web UI${RST}（可选，浏览器界面）:
+  python <cai-repo>/cyberorion/server.py            # → http://localhost:8000
+
+EOF
+}
+
+print_env() {
+  echo "${BLU}=== CyberOrion 环境 ===${RST}"
+  echo "  venv : ${VENV}"
+  echo "  python: ${PY} ($(${PY} --version 2>&1))"
+  echo "  cai_framework: $(${PY} -c "import importlib.metadata as m;print(m.version('cai-framework'))" 2>/dev/null || echo '?')"
+  echo "  模型: ${CAI_MODEL:-<未设置>}"
+  echo "  API base: ${OPENAI_API_BASE:-${OPENAI_BASE_URL:-<未设置>}}"
+  echo "  API key: $([[ -n "${OPENAI_API_KEY:-}" ]] && echo '<已配置>' || echo '<未配置>')"
+  echo "  仓库根(推断): ${CAI_REPO_PARENT:-<未找到>}"
+  if [[ -n "${CAI_REPO_PARENT:-}" ]]; then
+    if [[ -f "${CAI_REPO_PARENT}/cyberorion/server.py" ]]; then
+      echo "  cyberorion 服务脚本: ${CAI_REPO_PARENT}/cyberorion/server.py ✓"
+    fi
+    if [[ -f "${CAI_REPO_PARENT}/.env" ]]; then
+      echo "  .env: ${CAI_REPO_PARENT}/.env ✓"
+    fi
+  fi
+}
+
+list_history() {
+  local n="${1:-10}"
+  local rec_dir=""
+  for candidate in \
+    "${CAI_REPO_PARENT}/logs/cai_recordings" \
+    "${CAI_REPO_PARENT}/cyberorion/logs/cai_recordings" \
+    "/opt/cyberorion/logs/cai_recordings" \
+    "${HOME}/cyberorion/logs/cai_recordings"; do
+    if [[ -d "${candidate}" ]]; then
+      rec_dir="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${rec_dir}" ]]; then
+    err "未找到 CAI 录制目录。"
+    return 1
+  fi
+  echo "${BLU}=== 最近 ${n} 条 CAI 历史 ===${RST}  (${rec_dir})"
+  # 用 python 一次性提取每条 recording 的关键字段（避免 bash 引号嵌套地狱）
+  "${PY}" - "$rec_dir" "$n" <<'PY' || true
+import json, os, sys
+rec_dir, n = sys.argv[1], int(sys.argv[2])
+files = sorted(
+    [os.path.join(rec_dir, f) for f in os.listdir(rec_dir) if f.startswith("run_") and f.endswith(".json")],
+    key=lambda p: os.path.getmtime(p),
+    reverse=True,
+)[:n]
+for f in files:
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    rid = os.path.basename(f).removesuffix(".json")
+    tt = str(d.get("task_type") or "?")
+    st = str(d.get("status") or "?")
+    dur = float(d.get("duration_sec") or 0.0)
+    title = str(d.get("title") or "")[:60]
+    rs = str(d.get("report_status") or "")
+    rs_mark = "  📄" if rs == "ready" else ("  ⚠" if rs else "")
+    print(f"  {rid}  {tt:18s} {st:8s} {dur:6.1f}s  {title}{rs_mark}")
+PY
+}
+
+# 解析参数
+SUBCOMMAND=""
+PROMPT=""
+CHALLENGE=""
+WORKDIR=""
+EXTRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) print_help; exit 0 ;;
+    -p|--prompt) PROMPT="${2:-}"; shift 2 ;;
+    -c|--challenge) CHALLENGE="${2:-}"; shift 2 ;;
+    -w|--workdir) WORKDIR="${2:-}"; shift 2 ;;
+    env) print_env; exit 0 ;;
+    history) SUBCOMMAND="history"; shift; EXTRA_ARGS=("$@"); break ;;
+    chat|ctf|code_repair|vulnerability_repair|attack_chain|traffic_analysis|purple_team)
+      SUBCOMMAND="$1"; shift; EXTRA_ARGS=("$@"); break ;;
+    "")
+      SUBCOMMAND="chat"; break ;;
+    *)
+      err "未知参数: $1"
+      echo "  运行 'cyberorion --help' 查看用法。" >&2
+      exit 2 ;;
+  esac
+done
+
+# history 子命令
+if [[ "${SUBCOMMAND}" == "history" ]]; then
+  n="${EXTRA_ARGS[0]:-10}"
+  list_history "${n}"
+  exit 0
+fi
+
+# 默认 chat
+if [[ -z "${SUBCOMMAND}" ]]; then
+  SUBCOMMAND="chat"
+fi
+
+# ---------- 4. 启动 cai.cli ----------
+info "CyberOrion v$(cat "${CAI_REPO_PARENT}/cyberorion/.version" 2>/dev/null || echo 'dev') · 子命令: ${SUBCOMMAND}"
+info "Python : ${PY}"
+info "模型    : ${CAI_MODEL:-<默认>}"
+
+# 把子命令映射成 CAI Agent 入口
+CAI_ARGS=()
+case "${SUBCOMMAND}" in
+  chat)
+    CAI_ARGS+=("--prompt" "你是 CyberOrion，面向安全人员的安全 SuperAgent。请先说明你的任务计划、可调用的 Agent、需要的证据，然后按用户输入继续。")
+    ;;
+  ctf)
+    if [[ ${#EXTRA_ARGS[@]} -lt 1 ]]; then
+      err "ctf 子命令需要指定 CTF 名称。例: cyberorion ctf picoctf_static_flag"
+      exit 2
+    fi
+    CTF_NAME="${EXTRA_ARGS[0]}"
+    CAI_ARGS+=("--prompt" "Solve this CAI CTF challenge (${CTF_NAME}). Work step by step, validate the flag, and stop when the flag is confirmed.")
+    CAI_ARGS+=("--ctf-name" "${CTF_NAME}")
+    [[ -n "${CHALLENGE}" ]] && CAI_ARGS+=("--ctf-challenge" "${CHALLENGE}")
+    ;;
+  code_repair|vulnerability_repair|attack_chain|traffic_analysis|purple_team)
+    default_prompt() {
+      case "$1" in
+        code_repair) echo "修复代码漏洞。工作区包含 src/vulnerable_app.py 和 tests/test_vulnerable_app.py。先复现 SQL 注入，再调度 CodeAgent 修复，最后运行 pytest 并输出 diff、测试结果和风险说明。" ;;
+        vulnerability_repair) echo "复现并修复当前工作区里的安全漏洞。先最小化复现，再调度 CodeAgent 改最小 patch，最后让 Retester 验证。" ;;
+        attack_chain) echo "复原攻击链条：基于工作区的 timeline.jsonl / web_access.log / auth.log 等证据，先调度 Knowledge Agent 获取背景，再调度 Network/DFIR/Replay Agent 做证据聚合，最后输出时间线、ATT&CK 映射、事实/推断/未验证项。" ;;
+        traffic_analysis) echo "对授权工作区 traffic_analysis 中的流量与访问证据开展分层分析：连接/会话/时间窗/资产维度聚合，识别并串联目录探测→SQLi→弱口令爆破→上传 webshell→外联 C2 攻击链；区分事实与推断，输出 IP 画像、时间线、证据表、ATT&CK 映射、检测盲区。" ;;
+        purple_team) echo "组织授权范围的红蓝攻防演练：调度红方 Agent 模拟真实攻击，蓝方 Agent 做检测/响应/狩猎；记录调度、证据、检测、处置和复查结果。" ;;
+      esac
+    }
+    if [[ -n "${PROMPT}" ]]; then
+      CAI_ARGS+=("--prompt" "${PROMPT}")
+    else
+      CAI_ARGS+=("--prompt" "$(default_prompt "${SUBCOMMAND}")")
+    fi
+    [[ -n "${WORKDIR}" ]] && CAI_ARGS+=("--workdir" "${WORKDIR}")
+    ;;
+esac
+
+echo
+echo "${BLU}─────────────────────────────────────────────────────────${RST}"
+echo "${GRN}  CyberOrion 已就绪，正在进入 CAI 终端...${RST}"
+echo "${BLU}  退出: 输入 'exit' 或按 Ctrl+D${RST}"
+echo "${BLU}─────────────────────────────────────────────────────────${RST}"
+echo
+
+exec "${PY}" -m cai.cli "${CAI_ARGS[@]}"
