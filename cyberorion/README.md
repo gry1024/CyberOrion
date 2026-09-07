@@ -26,37 +26,23 @@
 
 ## 🚀 快速开始（推荐：本地 CLI）
 
-> **TL;DR**: 安装好后，命令行回车 `cyberorion` 即可启动与 CAI 的对话终端，跟 cai 一样用。
+> **TL;DR**: 一行命令装好，回车 `cyberorion` 就能用，跟 kimi / pi 一样简单。
 
-### 1. 安装（约 3 分钟）
+### 一键安装
 
 ```bash
-# (1) 克隆仓库
-git clone https://github.com/gry1024/CyberOrion.git
-cd CyberOrion
+curl -sSL https://raw.githubusercontent.com/gry1024/CyberOrion/main/cyberorion/install.sh | bash
+```
 
-# (2) 创建 Python 虚拟环境并安装 cai-framework
-python3.10 -m venv ../cai_env          # 放在 cyberorion/ 同级的 cai_env/
-source ../cai_env/bin/activate
-pip install -e ./cai-latest           # cai-framework 1.1.5 已在 cai-latest/ 里
+安装脚本自动完成：克隆仓库 → 创建 venv `~/.cyberorion/venv` → 装 cai-framework → 装 `cyberorion` 启动器到 `~/.local/bin/` → 必要时把 `~/.local/bin` 加入 PATH。
 
-# (3) 配置环境变量（API key + 模型）
-cp .env.example ../.env               # .env 放在 cyberorion/ 的同级目录
-nano ../.env
-# 必填项：
-#   CAI_MODEL=openai/<你的模型>       例如 openai/MiniMax-M3
-#   OPENAI_API_KEY=<sk-xxx>           （兼容 OpenAI / MiniMax / DashScope 均可）
-#   OPENAI_API_BASE=<https://...>     OpenAI 官方则留空
-# 可选项：
-#   CAI_GUARDRAILS=false              关闭 CAI 护栏
-# CLI 模式额外需要：
-#   ALIAS_API_KEY=<sk-xxx>            caibench CLI 启动内部 litellm proxy 的鉴权头；
-#                                     脚本会自动复用 OPENAI_API_KEY，但如果你看到
-#                                     "ALIAS_API_KEY is invalid"，显式设一项即可。
+装好后**首次运行 `cyberorion` 会交互式询问**：模型名 / API key / API base，写入 `~/.cyberorion/.env`（之后不会再问）。支持任何 OpenAI 兼容端点——DeepSeek、MiniMax、DashScope、OpenAI、自建均可，**不再需要任何 ALIAS key**。
 
-# (4) 安装 cyberorion 命令到 PATH
-cp bin/cyberorion ~/.local/bin/cyberorion
-chmod +x ~/.local/bin/cyberorion
+### 已经 clone 仓库？手动跑安装脚本也可以
+
+```bash
+cd <cai-repo>/cyberorion
+bash install.sh
 ```
 
 ### 2. 运行

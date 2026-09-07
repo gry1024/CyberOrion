@@ -164,12 +164,94 @@ fi
 
 PY="${VENV}/bin/python"
 
-# ---------- 2. 加载 .env（如果有）----------
+# ---------- 2. 加载 .env（如果有） + 首次运行交互式配置 ----------
+USER_ENV_DIR="${HOME}/.cyberorion"
+USER_ENV="${USER_ENV_DIR}/.env"
+
+ask() {
+  local prompt="$1" default="${2:-}" secret="${3:-no}"
+  local val=""
+  if [[ -n "${default}" ]]; then
+    if [[ "${secret}" == "secret" ]]; then
+      read -rs -p "$(echo -e "${YLW}?${RST} ${prompt} [回车用默认 ${default}]: ")" val; echo
+    else
+      read -r -p "$(echo -e "${YLW}?${RST} ${prompt} [${default}]: ")" val
+    fi
+    [[ -z "${val}" ]] && val="${default}"
+  else
+    if [[ "${secret}" == "secret" ]]; then
+      read -rs -p "$(echo -e "${YLW}?${RST} ${prompt}: ")" val; echo
+    else
+      read -r -p "$(echo -e "${YLW}?${RST} ${prompt}: ")" val
+    fi
+  fi
+  printf '%s' "${val}"
+}
+
+ensure_user_config() {
+  # 1) 已设置则直接返回
+  if [[ -n "${CAI_MODEL:-}" ]] && [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    return 0
+  fi
+  # 2) 已存在全局配置则加载后返回
+  if [[ -f "${USER_ENV}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${USER_ENV}"
+    set +a
+    if [[ -n "${CAI_MODEL:-}" ]] && [[ -n "${OPENAI_API_KEY:-}" ]]; then
+      return 0
+    fi
+  fi
+  # 3) 非交互场景（CI / pipe / 非 TTY）跳过询问
+  if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+    return 0
+  fi
+
+  echo
+  echo "${BLU}─────────────────────────────────────────────────────────${RST}"
+  echo "${GRN}  CyberOrion 首次配置（按提示输入，回车用默认值）${RST}"
+  echo "${BLU}─────────────────────────────────────────────────────────${RST}"
+  echo
+  echo "  支持任何 OpenAI 兼容端点：DeepSeek / MiniMax / DashScope / OpenAI / 自建。"
+  echo "  配置写入：${USER_ENV}"
+  echo
+
+  local model key base
+  model="$(ask "模型名（如 openai/MiniMax-M3、deepseek/deepseek-chat）" "openai/MiniMax-M3")"
+  key="$(ask "API key" "" "secret")"
+  base="$(ask "API base（OpenAI 官方留空）" "")"
+
+  mkdir -p "${USER_ENV_DIR}"
+  {
+    echo "# CyberOrion 配置（首次启动自动生成，可随时编辑）"
+    echo "CAI_MODEL=\"${model}\""
+    echo "OPENAI_API_KEY=\"${key}\""
+    if [[ -n "${base}" ]]; then
+      echo "OPENAI_API_BASE=\"${base}\""
+      echo "OPENAI_BASE_URL=\"${base}\""
+    fi
+    echo "CAI_GUARDRAILS=false"
+    echo "CAI_TELEMETRY=false"
+    echo "CAI_LICENSE_OFF=1"
+  } > "${USER_ENV}"
+  chmod 0600 "${USER_ENV}"
+  ok "配置已写入：${USER_ENV}"
+
+  export CAI_MODEL="${model}"
+  export OPENAI_API_KEY="${key}"
+  [[ -n "${base}" ]] && export OPENAI_API_BASE="${base}" && export OPENAI_BASE_URL="${base}"
+  export CAI_GUARDRAILS="false"
+  export CAI_TELEMETRY="false"
+  export CAI_LICENSE_OFF="1"
+}
+
 load_dotenv() {
   local dotenv=""
   for candidate in \
     "${CAI_REPO_PARENT}/.env" \
     "$(pwd)/.env" \
+    "${USER_ENV}" \
     "${HOME}/.cyberorion.env"; do
     if [[ -f "${candidate}" ]]; then
       dotenv="${candidate}"
@@ -183,21 +265,18 @@ load_dotenv() {
     set +a
     info "已加载环境配置：${dotenv}"
   fi
-  # 别名兼容：caibench CLI 模式会读 ALIAS_API_KEY（用作它内置 litellm proxy 的鉴权头，
-  # 不是模型 API key）。用户没设置时，自动复用 OPENAI_API_KEY 或填一个占位值，
-  # 这样 CLI 不会因为缺 key 而直接退出。
+  # ALIAS_API_KEY 是 CAI framework 内部的 license gate，与用户实际模型无关。
+  # 用户没设置时：直接走 CAI_LICENSE_OFF=1 彻底跳过 license 校验，避免框架报错退出。
+  # 如果用户用了 alias*/cai*/csi* 模型，再走 alias 通道（少见）。
   if [[ -z "${ALIAS_API_KEY:-}" ]]; then
-    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-      export ALIAS_API_KEY="${OPENAI_API_KEY}"
-    else
-      export ALIAS_API_KEY="cyberorion-local-placeholder-key"
-    fi
+    export CAI_LICENSE_OFF="${CAI_LICENSE_OFF:-1}"
   fi
   if [[ -n "${OPENAI_API_BASE:-}" ]] && [[ -z "${ALIAS_API_BASE:-}" ]]; then
     export ALIAS_API_BASE="${OPENAI_API_BASE}"
   fi
 }
 load_dotenv
+ensure_user_config
 
 # ---------- 3. 子命令分发 ----------
 print_help() {
