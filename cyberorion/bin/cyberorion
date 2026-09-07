@@ -266,11 +266,21 @@ load_dotenv() {
     info "已加载环境配置：${dotenv}"
   fi
   # ALIAS_API_KEY 是 CAI framework 内部的 license gate，与用户实际模型无关。
-  # 用户没设置时：直接走 CAI_LICENSE_OFF=1 彻底跳过 license 校验，避免框架报错退出。
-  # 如果用户用了 alias*/cai*/csi* 模型，再走 alias 通道（少见）。
-  if [[ -z "${ALIAS_API_KEY:-}" ]]; then
-    export CAI_LICENSE_OFF="${CAI_LICENSE_OFF:-1}"
-  fi
+  # 用户用 DeepSeek/MiniMax/OpenAI/任何 openai/* 模型时都不需要它。
+  # 只有模型名以 alias*/cai*/csi* 开头才走 Alias 通道，其他一律强制关 license gate。
+  local _model="${CAI_MODEL:-}"
+  case "${_model}" in
+    alias*|cai*|csi*)
+      # Alias 模型通道：保留用户设的 ALIAS_API_KEY，否则复用 OPENAI_API_KEY
+      if [[ -z "${ALIAS_API_KEY:-}" ]]; then
+        export ALIAS_API_KEY="${OPENAI_API_KEY:-cyberorion-local-placeholder-key}"
+      fi
+      ;;
+    *)
+      # 非 Alias 模型：彻底关掉 license gate，避免 cai.cli 报错退出
+      export CAI_LICENSE_OFF="1"
+      ;;
+  esac
   if [[ -n "${OPENAI_API_BASE:-}" ]] && [[ -z "${ALIAS_API_BASE:-}" ]]; then
     export ALIAS_API_BASE="${OPENAI_API_BASE}"
   fi

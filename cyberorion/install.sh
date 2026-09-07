@@ -79,7 +79,11 @@ fi
 info "安装 CAI framework（首次约 1-2 分钟）..."
 "${VENV_DIR}/bin/pip" install --upgrade pip >/dev/null
 "${VENV_DIR}/bin/pip" install -e "${CAI_LATEST_DIR}" 2>&1 | tail -n 5
-ok "CAI framework 已安装"
+# 锁定 litellm 到已知兼容版本：1.80+ 引入了 ChatCompletionReasoningSummaryTextBlock
+# 但 CAI SDK 当前引用顺序下会触发 Pydantic UserError（"Message is not fully defined"）。
+# 锁到 <1.80 是当前最快、最稳的修法，等 CAI 升级后再放开。
+"${VENV_DIR}/bin/pip" install 'litellm<1.80' 2>&1 | tail -n 3
+ok "CAI framework 已安装（litellm 锁到 <1.80）"
 
 # ---------- 3. 安装 cyberorion 启动器到 PATH ----------
 BIN_DIR="${HOME}/.local/bin"
