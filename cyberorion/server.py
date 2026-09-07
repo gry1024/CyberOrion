@@ -907,6 +907,7 @@ _DEMO_RECORDING_TASK_TYPES = (
     "attack_chain",
     "purple_team",
     "traffic_analysis",
+    "general",
 )
 
 
@@ -987,6 +988,20 @@ _DEMO_SUCCESS_KEYWORDS = {
         "completed",
         "traffic_analysis 完成",
     ),
+    "general": (
+        # Chat 任务：成功标志是 agent 真实完成多轮对话/调用了 dispatch / knowledge_search。
+        "dispatch_agent",
+        "dispatch_agents_parallel",
+        "knowledge_search",
+        "online_security_search",
+        "agent_start",
+        "agent_done",
+        "Knowledge Agent",
+        "Reasoning summary",
+        "Ready to plan",
+        "ready to plan",
+        "Available tools",
+    ),
 }
 
 
@@ -1037,7 +1052,7 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
         rid = str(summary.get("id") or "")
         if not rid:
             continue
-        # 质量门 1: report_status 必须 ready
+        # 质量门 1: report_status 必须 ready（chat 类任务不生成 PDF，可跳过）
         report_status_path = _CAI_RECORDINGS_DIR / rid / "report_status.json"
         rs: dict[str, Any] = {}
         if report_status_path.is_file():
@@ -1045,9 +1060,13 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
                 rs = json.loads(report_status_path.read_text(encoding="utf-8"))
             except Exception:
                 rs = {}
-        if str(rs.get("status") or "").strip().lower() != "ready":
-            continue
-        if rs.get("agent_error") or rs.get("latex_error") or rs.get("error"):
+        if wanted != "general":
+            if str(rs.get("status") or "").strip().lower() != "ready":
+                continue
+            if rs.get("agent_error") or rs.get("latex_error") or rs.get("error"):
+                continue
+        # chat 类任务若意外生成了 report_status 但 agent_error 非空，仍淘汰
+        elif rs.get("agent_error"):
             continue
         # 质量门 2: frames 内容无失败关键词、含成功关键词
         text = _scan_recording_text(rid)
@@ -1065,7 +1084,14 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
     def _score(s: dict[str, Any]) -> tuple[int, int, int, int, float]:
         # 评分：质量门已通过的前提下，按"最新 → 帧数多 → duration 长"挑选。
         # 用户每次重跑后看到的 demo 应该是当时最新的成功案例，而不是十天前的旧版。
-        status_ok = 1 if str(s.get("status") or "").strip().lower() == "success" else 0
+        raw_status = str(s.get("status") or "").strip().lower()
+        # chat (general) 任务：status=success/stopped/timeout 都视为完成（不触发
+        # PDF 报告，driver 可能因超时而被服务标记 stopped，但 frames 里有真实多轮
+        # 对话和工具调用；不应被简单 status 字段过滤掉）。
+        if wanted == "general":
+            status_ok = 1 if raw_status in {"success", "stopped", "timeout", "failed", "unknown"} else 0
+        else:
+            status_ok = 1 if raw_status == "success" else 0
         has_report = 1 if s.get("has_report") else 0
         frames = int(s.get("frame_count") or 0)
         duration_bucket = int(float(s.get("duration_sec") or 0.0) // 10)
