@@ -97,7 +97,24 @@ export CAI_VENV=/path/to/cai_env
 
 # 如果运行 ctf 报"容器不可读"，确认 docker 已启动：
 docker ps | grep ctf_target      # 容器未启动就 docker compose up -d
+
+# 如果出现 AttributeError: module 'inspect' has no attribute 'signature'
+# 说明你的当前目录里有 inspect.py / attr.py 等同名的 Python 文件，
+# 可能是 VC++ / VS 安装日志残留。脚本会自动检测并切换到安全目录，
+# 也可以手动换目录： cd ~  && cyberorion
 ```
+
+### 5. ⚠️ CWD 不要放在有同名 Python 文件的目录
+
+`cyberorion` 启动 `python -m cai.cli`，Python 默认把当前目录加到 `sys.path[0]`。
+如果你 CWD 下有 `inspect.py` / `attr.py` / `aiohttp.py` 等文件（Windows 上常见，
+比如 Visual C++ 安装日志残留为 `inspect.py`），Python 会优先加载它，导致
+`inspect.signature` 等标准 API 缺失。
+
+**解决方法**（任选）：
+1. 从 `~` 或项目根目录启动 `cyberorion`
+2. 重命名/删除冲突文件：`mv ~/Downloads/inspect.py ~/Downloads/inspect.log`
+3. cyberorion 启动时已自动检测并切换到安全目录（v2025+）
 
 ---
 

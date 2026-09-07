@@ -388,4 +388,28 @@ echo "${BLU}  退出: 输入 'exit' 或按 Ctrl+D${RST}"
 echo "${BLU}─────────────────────────────────────────────────────────${RST}"
 echo
 
+# ---------- 5. 防御：CWD 不能遮蔽标准库 / aiohttp / attr ----------
+# 某些用户 CWD 下有同名的 inspect.py / aiohttp.py / attr.py（如 VC++ 安装日志），
+# 会被 Python 当作模块优先加载，导致 cai.cli 启动失败。
+# 进入 cai 前若发现这些文件，提示用户并切换到安全 cwd。
+_shadow_names=("inspect" "attr" "aiohttp" "typing" "re" "os" "sys")
+_shadow_found=()
+for _n in "${_shadow_names[@]}"; do
+  for _ext in .py .pyc; do
+    if [[ -f "${PWD}/${_n}${_ext}" ]]; then
+      _shadow_found+=("${PWD}/${_n}${_ext}")
+    fi
+  done
+done
+if [[ ${#_shadow_found[@]} -gt 0 ]]; then
+  err "当前目录存在会污染 Python 模块搜索路径的文件："
+  for _f in "${_shadow_found[@]}"; do
+    echo "    $_f" >&2
+  done
+  err "Python 会优先加载这些同名文件，导致 cai.cli 启动失败。"
+  err "已自动切换到 ${CAI_REPO_PARENT:-/tmp} 启动（原始 CWD: ${PWD}）"
+  cd "${CAI_REPO_PARENT:-/tmp}" || cd /tmp || true
+fi
+
+# ---------- 6. 启动 cai.cli ----------
 exec "${PY}" -m cai.cli "${CAI_ARGS[@]}"
