@@ -931,6 +931,113 @@ _DEMO_FAILURE_KEYWORDS = (
 )
 
 # 任务专属成功关键词（至少匹配一个才视为成功）。
+# Terminal-log fallback success signals. Used by Gate 3 when
+# agent_events.jsonl is empty (known cai recorder bug) to verify that the
+# task actually completed by scanning terminal_full.log for these patterns.
+# Each task type lists concrete strings that only appear on real success.
+_DEMO_TERMINAL_FALLBACK_SIGNALS = {
+    "code_repair": (
+        "tests passed",
+        "passed in",
+        "diff_fix",
+        "vulnerable_app.before.py",
+        "baseline_pytest",
+        "after_pytest",
+        "Decision Log",
+        "WHERE username = ?",
+        "CWE-89",
+        "parameteriz",
+    ),
+    "vulnerability_repair": (
+        "tests passed",
+        "passed in",
+        "patch applied",
+        "Decision Log",
+        "parameteriz",
+    ),
+    "attack_chain": (
+        "Evidence paths",
+        "TRACE Step",
+        "Replay Validation Report",
+        "timeline.jsonl",
+        "Decision & Next Steps",
+    ),
+    "ctf": (
+        "picoCTF{",
+        "flag{",
+        "Solved",
+        "FLAG validated",
+    ),
+}
+
+
+# Terminal-log fallback success signals. Used by Gate 3 when
+# agent_events.jsonl is empty (known cai recorder bug) to verify that the
+# task actually completed by scanning terminal_full.log for these patterns.
+_DEMO_TERMINAL_FALLBACK_SIGNALS = {
+    "code_repair": (
+        "tests passed",
+        "passed in",
+        "diff_fix",
+        "vulnerable_app.before.py",
+        "baseline_pytest",
+        "after_pytest",
+        "Decision Log",
+        "WHERE username = ?",
+        "CWE-89",
+        "parameteriz",
+    ),
+    "vulnerability_repair": (
+        "tests passed",
+        "passed in",
+        "patch applied",
+        "Decision Log",
+        "parameteriz",
+    ),
+    "attack_chain": (
+        "Evidence paths",
+        "TRACE Step",
+        "Replay Validation Report",
+        "timeline.jsonl",
+        "Decision & Next Steps",
+    ),
+    "ctf": (
+        "picoCTF{",
+        "flag{",
+        "Solved",
+        "FLAG validated",
+    ),
+}
+
+
+# Terminal-log failure markers. If any of these strings appear in
+# terminal_full.log, the main conversation self-reported that the task
+# failed (e.g. "未取得源码" / "未产出 diff"). Such recordings are
+# rejected even when agent_events.jsonl shows successful sub-agent runs.
+_DEMO_TERMINAL_FAILURE_MARKERS = {
+    "code_repair": (
+        "未取得源码",
+        "未复现漏洞",
+        "未修复",
+        "未产出 diff",
+        "未跑 pytest",
+    ),
+    "vulnerability_repair": (
+        "未取得源码",
+        "未产出 diff",
+        "未修复",
+    ),
+    "attack_chain": (
+        "workspace doesn't contain",
+        "没.*找到",
+        "NotFoundError",
+    ),
+    "ctf": (
+        "flag.*未.*找到",
+    ),
+}
+
+
 _DEMO_SUCCESS_KEYWORDS = {
     "ctf": (
         "picoCTF{",
@@ -1026,6 +1133,38 @@ def _scan_recording_text(recording_id: str, max_frames: int = 200) -> str:
             parts.append(str(f.get("data") or ""))
     return "".join(parts)
 
+
+def _scan_recording_text_full(recording_id: str, max_chars: int = 2_000_000) -> str:
+    """Read all frames (no sampling) for gate scanning.
+
+    Used by Gate 3 fallback and Gate 4 (failure marker detection) where
+    sampling can miss important strings (e.g. "未取得源码" at the end
+    of the recording). Capped at max_chars to avoid runaway memory.
+    """
+    path = _CAI_RECORDINGS_DIR / f"{recording_id}.json"
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    frames = data.get("frames") or []
+    if not isinstance(frames, list):
+        return ""
+    out = []
+    total = 0
+    for f in frames:
+        if not isinstance(f, dict):
+            continue
+        chunk = str(f.get("data") or "")
+        if total + len(chunk) > max_chars:
+            out.append(chunk[: max_chars - total])
+            break
+        out.append(chunk)
+        total += len(chunk)
+    return "".join(out)
+
+
 def _scan_agent_event_stats(recording_id: str) -> dict[str, int]:
     """Scan agent_events.jsonl and count agent_start / agent_done / agent_error events.
 
@@ -1108,30 +1247,55 @@ def _pick_cai_demo_recording(task_type: str) -> dict[str, Any] | None:
         elif rs.get("agent_error"):
             continue
         # 质量门 2: frames 内容无失败关键词、含成功关键词
-        text = _scan_recording_text(rid)
+        # Use full scan (not sampled) so Gate 4 failure markers at the
+        # tail of long recordings are still detected.
+        text = _scan_recording_text_full(rid)
         if not text:
             continue
         if any(kw in text for kw in _DEMO_FAILURE_KEYWORDS):
             continue
         if success_keywords and not any(kw in text for kw in success_keywords):
             continue
-        # Quality gate 3: sub-agents must have actually run.
-        # If agent_events.jsonl is missing or empty, the sub-framework never
-        # dispatched (workspace/path errors, framework crash, etc.) - the
-        # recording is a failed run, not a usable demo.
+        # Quality gate 3: verify the task actually completed.
+        #
+        # Two scenarios are accepted:
+        #   (a) agent_events.jsonl has >=3 successful agent_done events
+        #       and (when >=4 starts) error rate <= 50%. Normal case where
+        #       the cai sub-framework recorded its dispatches.
+        #   (b) agent_events.jsonl is empty/missing (known cai recorder bug
+        #       fixed in 1.1.5+). In this case we fall back to terminal-log
+        #       content: the recording is accepted only if it contains
+        #       >=3 task-specific success signals (tests passed, diff
+        #       generated, regression added, etc.).
         if wanted != "general":
             stats = _scan_agent_event_stats(rid)
             starts = stats["starts"]
             errors = stats["errors"]
             dones = stats["dones"]
-            # 3a: at least one sub-agent must have started.
-            if starts < 1:
-                continue
-            # 3b: agent error rate must stay <= 50% (when there are >=4 starts).
-            if starts >= 4 and errors > starts // 2:
-                continue
-            # 3c: at least 3 sub-agents must have completed (successfully).
-            if dones < 3:
+            if starts >= 1:
+                if starts >= 4 and errors > starts // 2:
+                    # majority of sub-agents crashed -> framework bug
+                    continue
+                if dones < 3:
+                    # not enough successful sub-agents
+                    continue
+            else:
+                # Fallback: agent_events.jsonl is empty/missing.
+                # Require terminal-log success signals to confirm task ran.
+                fallback_signals = _DEMO_TERMINAL_FALLBACK_SIGNALS.get(wanted, ())
+                if not fallback_signals:
+                    continue
+                hits = sum(1 for kw in fallback_signals if kw in text)
+                if hits < 3:
+                    # Not enough evidence the task actually ran.
+                    continue
+            # Gate 4: explicit self-reported failure markers in terminal log.
+            # Even when agent_events gate passes (e.g. 3 Knowledge agents
+            # ran), the main conversation can still report a self-declared
+            # failure like "未取得源码、未复现漏洞、未修复、未跑 pytest、未产出
+            # diff". Such recordings must NOT be picked as demos.
+            failure_markers = _DEMO_TERMINAL_FAILURE_MARKERS.get(wanted, ())
+            if failure_markers and any(m in text for m in failure_markers):
                 continue
         candidates.append(summary)
 
